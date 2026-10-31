@@ -30,6 +30,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'send_audio',
   'send_video',
   'send_file',
+  'send_card',
   'clear_memory',
   'start_task',
   'schedule_task',
@@ -117,6 +118,27 @@ const LOCAL_TOOLS = [
           fileName: { type: 'string', description: '显示给对方看的文件名（可选）' },
         },
         required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_card',
+      description:
+        '发一张图文卡片（大图 + 标题 + 描述 + 可点击链接），比纯文本更适合推荐分享。' +
+        '四个字段都要填：title（1-50 字）、description（5-200 字）、url（点击跳转的 https 网址）、' +
+        'pic_url（封面图的 https 外链，不能是本地文件）。' +
+        '要分享本地图片请改用 send_image；卡片失败时退回普通文本即可。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '卡片标题，不超过 50 字' },
+          description: { type: 'string', description: '卡片描述，5-200 字' },
+          url: { type: 'string', description: '点击卡片跳转的完整网址，https 开头' },
+          pic_url: { type: 'string', description: '封面图外链，https 开头，1024 字符以内' },
+        },
+        required: ['title', 'description', 'url', 'pic_url'],
       },
     },
   },
@@ -311,6 +333,7 @@ async function runTool(
     audioSender,
     videoSender,
     fileSender,
+    cardSender,
     startTask,
     scheduler,
     notifyUser,
@@ -395,6 +418,21 @@ async function runTool(
       return `文件已发送：${sent}`
     } catch (error) {
       return `发文件失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'send_card') {
+    if (!isToolAllowed('send_card', scope)) {
+      return `工具 send_card 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (typeof cardSender !== 'function') {
+      return '当前场景不支持发送图文卡片。'
+    }
+    try {
+      const sent = await cardSender(args)
+      return `图文卡片已发送：${sent}`
+    } catch (error) {
+      return `发卡片失败：${error?.message ?? error}`
     }
   }
 
@@ -566,6 +604,7 @@ export async function chat(sessionKey, userText, options = {}) {
     audioSender = null,
     videoSender = null,
     fileSender = null,
+    cardSender = null,
     startTask = null,
     scheduler = null,
     onStep = null,
@@ -736,6 +775,7 @@ export async function chat(sessionKey, userText, options = {}) {
         audioSender,
         videoSender,
         fileSender,
+        cardSender,
         startTask,
         scheduler,
       })
@@ -789,6 +829,8 @@ export async function runTaskAgent({
   sendImage,
   audioSender,
   videoSender,
+  fileSender,
+  cardSender,
   onStep,
   notifyUser,
   signal,
@@ -845,6 +887,8 @@ export async function runTaskAgent({
         sendImage,
         audioSender,
         videoSender,
+        fileSender,
+        cardSender,
         startTask: null,
         notifyUser,
       })

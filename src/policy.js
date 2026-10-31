@@ -26,6 +26,7 @@ export const TOOL_POLICY = {
   send_audio: OPEN,
   send_video: OPEN,
   send_file: OPEN,
+  send_card: OPEN,
   clear_memory: OPEN,
   download: OPEN,
 

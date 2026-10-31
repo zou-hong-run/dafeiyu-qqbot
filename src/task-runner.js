@@ -108,6 +108,8 @@ export function startTask({
   sendImage,
   audioSender,
   videoSender,
+  fileSender,
+  cardSender,
 }) {
   if (busyTasks(sessionKey).length > 0) {
     throw new Error('这个会话已经有一个任务在跑了，等它结束再开新的')
@@ -205,6 +207,8 @@ export function startTask({
           sendImage,
           audioSender,
           videoSender,
+          fileSender,
+          cardSender,
           onStep,
           notifyUser: sendUserMessage,
           signal: controller.signal,
