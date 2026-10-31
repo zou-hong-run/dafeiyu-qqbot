@@ -476,9 +476,10 @@ async function handleMessage(event, trigger = 'at') {
   if (text === '/memory' || text === '记忆状态') {
     const current = stats(key)
     await sendReply(event, 
-      `短期记忆：${current.shortTerm} 轮对话\n` +
+      `短期记忆：${current.shortTerm} 轮对话（约 ${current.historyTokens} tokens）\n` +
         `中期记忆：${current.midTermChars} 字摘要\n` +
-        `长期记忆：${current.longTerm} 条事实`,
+        `长期记忆：${current.longTerm} 条事实\n` +
+        `上下文预算：${Math.floor((env.contextWindowTokens * env.contextBudgetRatio) / 1000)}K tokens（窗口 ${Math.floor(env.contextWindowTokens / 1000)}K）`,
     )
     return
   }

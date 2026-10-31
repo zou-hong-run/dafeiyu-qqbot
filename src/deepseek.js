@@ -558,6 +558,7 @@ export async function chat(sessionKey, userText, options = {}) {
   let autoPushes = 0
   let forceToolChoice = false
   const callHistory = []
+  const budget = Math.floor(env.contextWindowTokens * env.contextBudgetRatio)
 
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
     messages[0] = { role: 'system', content: buildSystemPrompt(sessionKey, userText) }
@@ -576,7 +577,36 @@ export async function chat(sessionKey, userText, options = {}) {
       )
     }
 
-    const completion = await client.chat.completions.create(payload)
+    let completion
+    try {
+      completion = await client.chat.completions.create(payload)
+    } catch (error) {
+      const reason = String(error?.message ?? error)
+      const contextIssue = /context length|too many tokens|maximum context|token limit|exceed/i.test(
+        reason,
+      )
+
+      if (contextIssue && round === 0) {
+        console.warn(`[上下文] 超限，压缩历史后重试：${reason.slice(0, 120)}`)
+
+        const dropped = takeOverflow(sessionKey, Math.floor(budget / 3))
+        if (!dropped || dropped.length === 0) throw error
+
+        summarize(sessionKey, dropped)
+
+        messages.length = 0
+        messages.push(
+          { role: 'system', content: buildSystemPrompt(sessionKey, userText) },
+          ...history(sessionKey),
+          { role: 'user', content: userText },
+        )
+
+        completion = await client.chat.completions.create(payload)
+      } else {
+        throw error
+      }
+    }
+
     const message = completion.choices?.[0]?.message
     if (!message) throw new Error('DeepSeek 返回了空响应')
 
@@ -691,7 +721,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
   appendTurn(sessionKey, userText, answer)
 
-  const overflow = takeOverflow(sessionKey)
+  const overflow = takeOverflow(sessionKey, budget)
   if (overflow) summarize(sessionKey, overflow)
 
   return answer

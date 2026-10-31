@@ -1,12 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { env } from './env.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
 const memoryFile = path.join(dataDir, 'memory.json')
 
-const SHORT_TERM_LIMIT = 16
+const SHORT_TERM_LIMIT = Math.max(env.historyTurns, 1) * 2
 const LONG_TERM_LIMIT = 60
 const MID_TERM_LIMIT = 2000
 const TOOL_MARKUP = /[｜|]{2}\s*DSML/i
@@ -76,10 +77,36 @@ export function appendTurn(key, userText, assistantText) {
   scheduleSave()
 }
 
-export function takeOverflow(key) {
+export function estimateTokens(text) {
+  const value = String(text ?? '')
+  if (!value) return 0
+
+  const cjk = (value.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) ?? []).length
+  return Math.ceil(cjk / 1.5 + (value.length - cjk) / 4)
+}
+
+export function historyTokens(key) {
+  return getSession(key).shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+}
+
+export function takeOverflow(key, budgetTokens = Number.POSITIVE_INFINITY) {
   const session = getSession(key)
-  if (session.shortTerm.length <= SHORT_TERM_LIMIT * 2) return null
-  const overflow = session.shortTerm.splice(0, session.shortTerm.length - SHORT_TERM_LIMIT * 2)
+  if (session.shortTerm.length <= SHORT_TERM_LIMIT) return null
+
+  let total = session.shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  if (total <= budgetTokens) return null
+
+  const target = Math.floor(budgetTokens * 0.7)
+  const overflow = []
+
+  while (total > target && session.shortTerm.length > SHORT_TERM_LIMIT) {
+    const message = session.shortTerm.shift()
+    total -= estimateTokens(message.content)
+    overflow.push(message)
+  }
+
+  if (overflow.length === 0) return null
+
   scheduleSave()
   return overflow
 }
@@ -179,6 +206,7 @@ export function stats(key) {
     shortTerm: session.shortTerm.length / 2,
     midTermChars: session.midTerm.length,
     longTerm: session.longTerm.length,
+    historyTokens: session.shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0),
   }
 }
 

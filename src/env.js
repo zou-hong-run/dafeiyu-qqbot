@@ -78,6 +78,8 @@ export const env = {
   toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 30) * 1000,
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),
+  contextWindowTokens: Math.floor(positiveNumber('CONTEXT_WINDOW_TOKENS', 1000000)),
+  contextBudgetRatio: positiveNumber('CONTEXT_BUDGET_RATIO', 0.6),
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
   sessionTtlMs: positiveNumber('SESSION_TTL_MINUTES', 30) * 60 * 1000,
