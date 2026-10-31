@@ -78,7 +78,7 @@ SELF.md            机器人的自我能力说明（会注入提示词，可被�
 
 ```bash
 git clone https://github.com/zou-hong-run/dafeiyu-qqbot.git
-cd robot
+cd dafeiyu-qqbot
 pnpm install
 cp .env.example .env
 ```
