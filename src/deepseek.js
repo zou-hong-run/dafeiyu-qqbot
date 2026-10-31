@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import { env } from './env.js'
 import { isToolAllowed, SCOPE_LABEL } from './policy.js'
 import { skillsPrompt } from './skills.js'
+import { selfDoc } from './self-doc.js'
 import {
   appendTurn,
   addLongTerm,
@@ -25,6 +26,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'send_image',
   'send_audio',
+  'send_video',
   'clear_memory',
   'start_task',
   'schedule_task',
@@ -77,6 +79,22 @@ const LOCAL_TOOLS = [
         type: 'object',
         properties: {
           path: { type: 'string', description: 'downloads 目录下的音频文件名，或 http(s) 链接' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_video',
+      description:
+        '把视频发送到当前聊天窗口。QQ 视频消息只支持 mp4 容器，单文件软上限 20MB（超过会降级成文件类型，群聊里发不出）。' +
+        '只能发 downloads/ 目录下的文件，或 http(s) 视频链接。没有现成 mp4 时可以先用 shell 调 ffmpeg 转换。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'downloads 目录下的 mp4 文件名，或 http(s) 链接' },
         },
         required: ['path'],
       },
@@ -165,6 +183,9 @@ const TASK_SYSTEM_PROMPT = `你是后台执行任务的子助手，用户把一�
 function buildSystemPrompt(sessionKey, userText) {
   const parts = [env.systemPrompt]
 
+  const self = selfDoc()
+  if (self) parts.push(`【自身能力说明】\n${self}`)
+
   const skills = skillsPrompt()
   if (skills) parts.push(skills)
 
@@ -203,7 +224,10 @@ function stripToolMarkup(text) {
   return raw.slice(0, cut).replace(/\n{3,}/g, '\n\n').trim()
 }
 
-async function runTool(call, { scope, callTool, sessionKey, sendImage, audioSender, startTask, scheduler }) {
+async function runTool(
+  call,
+  { scope, callTool, sessionKey, sendImage, audioSender, videoSender, startTask, scheduler },
+) {
   const name = call.function?.name ?? ''
 
   let args = {}
@@ -248,6 +272,21 @@ async function runTool(call, { scope, callTool, sessionKey, sendImage, audioSend
       return `音频已发送：${sent}`
     } catch (error) {
       return `发音频失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'send_video') {
+    if (!isToolAllowed('send_video', scope)) {
+      return `工具 send_video 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (typeof videoSender !== 'function') {
+      return '当前场景不支持发送视频。'
+    }
+    try {
+      const sent = await videoSender(args.path)
+      return `视频已发送：${sent}`
+    } catch (error) {
+      return `发视频失败：${error?.message ?? error}`
     }
   }
 
@@ -375,6 +414,7 @@ export async function chat(sessionKey, userText, options = {}) {
     callTool = null,
     sendImage = null,
     audioSender = null,
+    videoSender = null,
     startTask = null,
     scheduler = null,
     onStep = null,
@@ -478,6 +518,7 @@ export async function chat(sessionKey, userText, options = {}) {
         sessionKey,
         sendImage,
         audioSender,
+        videoSender,
         startTask,
         scheduler,
       })

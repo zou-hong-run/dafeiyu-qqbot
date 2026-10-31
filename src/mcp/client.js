@@ -16,6 +16,8 @@ const SAFE_ENV_KEYS = [
 const CONNECTION_ERROR = /connection closed|not connected|EPIPE|ECONNRESET|socket hang up/i
 
 const connections = new Map()
+const failedAt = new Map()
+const FAIL_RETRY_INTERVAL = 5 * 60_000
 const toolOwners = new Map()
 let baseEnv = {}
 let builtinSpec = null
@@ -40,7 +42,21 @@ async function connect(name, spec) {
   })
 
   const client = new Client({ name: `qq-bot-${name}`, version: '1.0.0' }, { capabilities: {} })
-  await client.connect(transport)
+
+  let timer
+  try {
+    await Promise.race([
+      client.connect(transport),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`连接 ${name} 超时（15 秒）`)), 15_000)
+      }),
+    ])
+  } catch (error) {
+    await client.close().catch(() => {})
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
 
   const { tools } = await client.listTools()
   const connection = { name, client, tools: tools ?? [], dead: false, spec }
@@ -118,13 +134,24 @@ export async function syncRegistry(force = false) {
 
   if (!Array.isArray(list)) return
 
+  const now = Date.now()
+
   for (const item of list) {
     if (!item?.name || !item?.command) continue
     if (connections.has(item.name)) continue
+
+    const lastFail = failedAt.get(item.name) ?? 0
+    if (now - lastFail < FAIL_RETRY_INTERVAL) continue
+
     try {
       await connect(item.name, item)
+      failedAt.delete(item.name)
     } catch (error) {
-      console.error(`[mcp] 连接 ${item.name} 失败：`, error?.message ?? error)
+      failedAt.set(item.name, Date.now())
+      console.error(
+        `[mcp] 连接 ${item.name} 失败，${FAIL_RETRY_INTERVAL / 60000} 分钟内不再重试：`,
+        error?.message ?? error,
+      )
     }
   }
 }

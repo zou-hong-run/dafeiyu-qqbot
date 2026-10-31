@@ -23,6 +23,7 @@ export const TOOL_POLICY = {
   remember: OPEN,
   send_image: OPEN,
   send_audio: OPEN,
+  send_video: OPEN,
   clear_memory: OPEN,
   download: OPEN,
 

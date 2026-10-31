@@ -280,6 +280,41 @@ function audioSenderFor(event) {
   }
 }
 
+function videoSenderFor(event) {
+  const downloadDir = path.join(projectRoot, 'downloads')
+
+  return async (input) => {
+    const target = String(input ?? '').trim()
+    if (!target) throw new Error('缺少视频路径')
+
+    if (/^https?:\/\//i.test(target)) {
+      await event.reply(segment.video(target))
+      return target
+    }
+
+    const resolved = path.resolve(downloadDir, target)
+    if (!resolved.startsWith(downloadDir + path.sep)) {
+      throw new Error('只能发送 downloads 目录下的文件')
+    }
+    if (!/\.mp4$/i.test(resolved)) {
+      throw new Error('只接受 mp4 格式，QQ 视频消息不支持其他容器')
+    }
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`文件不存在：${path.basename(resolved)}`)
+    }
+
+    const size = fs.statSync(resolved).size
+    if (size > 20 * 1024 * 1024) {
+      throw new Error(
+        `视频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 会被降级成文件类型，群聊里发不出去`,
+      )
+    }
+
+    await event.reply(segment.video(resolved))
+    return path.basename(resolved)
+  }
+}
+
 async function runScheduledTask(task) {
   const scope = task.target.type === 'group' ? 'group' : 'private'
 
@@ -393,7 +428,7 @@ async function handleMessage(event, trigger = 'at') {
   }
 
   try {
-    await syncRegistry()
+    await withTimeout(syncRegistry(), 5000)
   } catch (error) {
     console.error('[mcp] 同步注册表失败：', error?.message ?? error)
   }
@@ -405,6 +440,7 @@ async function handleMessage(event, trigger = 'at') {
       tools: toolsForScope(scope),
       sendImage: imageSenderFor(event),
       audioSender: audioSenderFor(event),
+      videoSender: videoSenderFor(event),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>
