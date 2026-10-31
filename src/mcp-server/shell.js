@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const MAX_OUTPUT = 3000
-const MAX_COMMAND = 2000
+const MAX_COMMAND = 4000
 
 const BLOCKED_PATTERNS = [
   { pattern: /rm\s+(-[a-zA-Z]+\s+)*\/(\s|$|\*)/, reason: '禁止删除根目录' },

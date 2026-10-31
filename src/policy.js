@@ -22,9 +22,20 @@ export const TOOL_POLICY = {
 
   remember: OPEN,
   send_image: OPEN,
+  send_audio: OPEN,
+  clear_memory: OPEN,
   download: OPEN,
 
   shell: SHELL,
+
+  start_task: OPEN,
+  schedule_task: OPEN,
+  list_schedules: READ_ONLY,
+  remove_schedule: OPEN,
+
+  write_file: OPEN,
+  read_file: READ_ONLY,
+  list_dir: READ_ONLY,
 
   write_skill: OPEN,
   list_skills: READ_ONLY,

@@ -10,6 +10,7 @@ import {
   setMidTerm,
   midTerm,
   history,
+  reset as resetMemory,
 } from './memory.js'
 
 const client = new OpenAI({
@@ -20,7 +21,16 @@ const client = new OpenAI({
 })
 
 const summarizing = new Set()
-const LOCAL_TOOL_NAMES = new Set(['remember', 'send_image'])
+const LOCAL_TOOL_NAMES = new Set([
+  'remember',
+  'send_image',
+  'send_audio',
+  'clear_memory',
+  'start_task',
+  'schedule_task',
+  'list_schedules',
+  'remove_schedule',
+])
 
 const LOCAL_TOOLS = [
   {
@@ -56,7 +66,101 @@ const LOCAL_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'send_audio',
+      description:
+        '把音频发送到当前聊天窗口。注意 QQ 语音消息要求 silk 编码，mp3/wav 等其他格式很可能被平台拒绝，发之前先跟对方说清楚。' +
+        '只能发 downloads/ 目录下的文件，或 http(s) 音频链接。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'downloads 目录下的音频文件名，或 http(s) 链接' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clear_memory',
+      description:
+        '清空当前会话的全部记忆：短期对话、中期摘要、长期事实。' +
+        '对方说「忘掉之前的事」「清空记忆」「重新开始」时调用。调用后你自己也会忘记之前聊过什么。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_task',
+      description:
+        '把需要多步操作、预计超过 30 秒的复杂任务交给后台子助手执行，期间会自动汇报进度，你不用干等。' +
+        '适用于：写调研报告、批量处理文件、抓取并整理多个网页、写一整套代码、生成多个文件。' +
+        '简单问答、查一次天气/汇率这种不要用。调用后立刻回复用户「已开始处理」，不要自己继续做。',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal: {
+            type: 'string',
+            description: '任务目标和完成标准，写清楚要产出什么、用什么工具、什么算做完',
+          },
+        },
+        required: ['goal'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'schedule_task',
+      description:
+        '创建定时任务，到点自动执行并把结果发到当前聊天。用户说「每天早上八点半爬新闻发群里」「每周一提醒我开会」这类需求时使用。' +
+        'cron 是 5 段：分 时 日 月 周。每天 8:30 写 "30 8 * * *"；每周一 9:00 写 "0 9 * * 1"；每小时整点写 "0 * * * *"。',
+      parameters: {
+        type: 'object',
+        properties: {
+          cron: { type: 'string', description: '5 段 cron 表达式，如 30 8 * * *' },
+          prompt: { type: 'string', description: '到点要执行的完整任务描述，要能独立看懂' },
+        },
+        required: ['cron', 'prompt'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_schedules',
+      description: '列出当前会话已创建的定时任务，包括执行时间、内容和上次执行结果。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_schedule',
+      description: '删除一个定时任务。用户说「别推了」「取消那个定时」时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '任务 id，可先用 list_schedules 查' },
+        },
+        required: ['id'],
+      },
+    },
+  },
 ]
+
+const TASK_SYSTEM_PROMPT = `你是后台执行任务的子助手，用户把一个复杂任务交给你独立完成。
+
+工作要求：
+- 用工具推进，不要空谈。需要资料就 search/fetch，需要写文件就 write_file，需要跑命令就 shell
+- 每一步只做必要的事，不要重复劳动
+- 全部做完后，用简洁的中文总结：做了什么、结论是什么、有没有遗留问题
+- 输出纯文本，不要用 Markdown 语法
+- 如果发现做不到，直接说明卡在哪一步、缺什么，不要硬凑答案`
 
 function buildSystemPrompt(sessionKey, userText) {
   const parts = [env.systemPrompt]
@@ -95,7 +199,7 @@ function stripToolMarkup(text) {
   return head.replace(/\n{3,}/g, '\n\n').trim()
 }
 
-async function runTool(call, { scope, callTool, sessionKey, sendImage }) {
+async function runTool(call, { scope, callTool, sessionKey, sendImage, audioSender, startTask, scheduler }) {
   const name = call.function?.name ?? ''
 
   let args = {}
@@ -125,6 +229,91 @@ async function runTool(call, { scope, callTool, sessionKey, sendImage }) {
       return `图片已发送：${sent}`
     } catch (error) {
       return `发图失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'send_audio') {
+    if (!isToolAllowed('send_audio', scope)) {
+      return `工具 send_audio 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (typeof audioSender !== 'function') {
+      return '当前场景不支持发送音频。'
+    }
+    try {
+      const sent = await audioSender(args.path)
+      return `音频已发送：${sent}`
+    } catch (error) {
+      return `发音频失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'clear_memory') {
+    if (!isToolAllowed('clear_memory', scope)) {
+      return `工具 clear_memory 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    resetMemory(sessionKey)
+    return '当前会话的记忆已清空，从现在开始是全新的对话。'
+  }
+
+  if (name === 'start_task') {
+    if (!isToolAllowed('start_task', scope)) {
+      return `工具 start_task 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (typeof startTask !== 'function') {
+      return '当前场景不支持后台任务。'
+    }
+    const goal = String(args.goal ?? '').trim()
+    if (!goal) return '缺少任务目标，请把要做什么写清楚。'
+
+    try {
+      const { id } = startTask(goal)
+      return `后台任务已启动（${id}），它会自己一步步做并汇报进度。现在告诉用户你已经开始处理，让他等通知。`
+    } catch (error) {
+      return `启动任务失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'schedule_task') {
+    if (!isToolAllowed('schedule_task', scope)) {
+      return `工具 schedule_task 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (!scheduler) return '当前场景不支持定时任务。'
+
+    try {
+      const info = scheduler.add({ cron: args.cron, prompt: args.prompt })
+      return `定时任务已创建（${info.id}）：${info.when} 执行「${info.prompt}」。到点会自动跑并把结果发到这里。`
+    } catch (error) {
+      return `创建定时任务失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'list_schedules') {
+    if (!scheduler) return '当前场景不支持定时任务。'
+
+    const list = scheduler.list()
+    if (list.length === 0) return '当前会话还没有定时任务。'
+
+    return list
+      .map((item) => {
+        const last = item.lastRunAt
+          ? `｜上次 ${new Date(item.lastRunAt).toLocaleString('zh-CN', { hour12: false })} ${item.lastStatus ?? ''}`
+          : '｜还没执行过'
+        return `- ${item.id}｜${item.when}｜${item.prompt}${last}`
+      })
+      .join('\n')
+  }
+
+  if (name === 'remove_schedule') {
+    if (!isToolAllowed('remove_schedule', scope)) {
+      return `工具 remove_schedule 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (!scheduler) return '当前场景不支持定时任务。'
+
+    try {
+      const removed = scheduler.remove(String(args.id ?? '').trim())
+      return `已删除定时任务 ${removed.id}（${removed.prompt}）`
+    } catch (error) {
+      return `删除失败：${error?.message ?? error}`
     }
   }
 
@@ -176,7 +365,15 @@ async function summarize(sessionKey, overflow) {
 }
 
 export async function chat(sessionKey, userText, options = {}) {
-  const { scope = 'private', tools = [], callTool = null, sendImage = null } = options
+  const {
+    scope = 'private',
+    tools = [],
+    callTool = null,
+    sendImage = null,
+    audioSender = null,
+    startTask = null,
+    scheduler = null,
+  } = options
 
   const messages = [
     { role: 'system', content: buildSystemPrompt(sessionKey, userText) },
@@ -247,7 +444,30 @@ export async function chat(sessionKey, userText, options = {}) {
     })
 
     for (const call of message.tool_calls) {
-      const result = await runTool(call, { scope, callTool, sessionKey, sendImage })
+      const toolName = call.function?.name ?? '未知工具'
+
+      if (env.toolDebug) {
+        console.log(
+          `[执行] ${sessionKey} ${toolName}(${String(call.function?.arguments ?? '').slice(0, 150)})`,
+        )
+      }
+
+      const result = await runTool(call, {
+        scope,
+        callTool,
+        sessionKey,
+        sendImage,
+        audioSender,
+        startTask,
+        scheduler,
+      })
+
+      if (env.toolDebug) {
+        console.log(
+          `[结果] ${sessionKey} ${toolName} → ${String(result).replace(/\s+/g, ' ').slice(0, 180)}`,
+        )
+      }
+
       messages.push({ role: 'tool', tool_call_id: call.id, content: result })
     }
   }
@@ -259,6 +479,101 @@ export async function chat(sessionKey, userText, options = {}) {
   const overflow = takeOverflow(sessionKey)
   if (overflow) summarize(sessionKey, overflow)
 
+  return answer
+}
+
+export async function runTaskAgent({
+  taskPrompt,
+  scope,
+  tools,
+  callTool,
+  sendImage,
+  audioSender,
+  onStep,
+}) {
+  const messages = [
+    { role: 'system', content: TASK_SYSTEM_PROMPT },
+    { role: 'user', content: taskPrompt },
+  ]
+
+  const subTools = tools.filter((tool) => !LOCAL_TOOL_NAMES.has(tool.function?.name))
+  const usableTools = callTool
+    ? [
+        ...LOCAL_TOOLS.filter(
+          (tool) => tool.function?.name !== 'start_task' && tool.function?.name !== 'clear_memory',
+        ),
+        ...subTools,
+      ]
+    : LOCAL_TOOLS.filter((tool) => tool.function?.name !== 'start_task')
+
+  let answer = ''
+  const total = env.taskMaxRounds
+
+  for (let round = 0; round < total; round += 1) {
+    const payload = { model: env.model, messages, max_tokens: 2048 }
+
+    if (usableTools.length > 0) {
+      payload.tools = usableTools
+      payload.tool_choice = round < total - 2 ? 'auto' : 'none'
+    }
+
+    const completion = await client.chat.completions.create(payload)
+    const message = completion.choices?.[0]?.message
+    if (!message) throw new Error('DeepSeek 返回了空响应')
+
+    if (!message.tool_calls?.length) {
+      answer = stripToolMarkup(message.content?.trim() ?? '')
+      break
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: message.content ?? '',
+      tool_calls: message.tool_calls,
+    })
+
+    for (const call of message.tool_calls) {
+      const toolName = call.function?.name ?? '未知工具'
+      console.log(`[子任务] 第${round + 1}步 ${toolName}`)
+
+      const result = await runTool(call, {
+        scope,
+        callTool,
+        sessionKey: 'task',
+        sendImage,
+        audioSender,
+        startTask: null,
+      })
+
+      messages.push({ role: 'tool', tool_call_id: call.id, content: result })
+
+      if (typeof onStep === 'function') {
+        await onStep({ round, tool: toolName, result })
+      }
+    }
+  }
+
+  if (!answer) {
+    try {
+      const wrapUp = await client.chat.completions.create({
+        model: env.model,
+        messages: [
+          ...messages,
+          {
+            role: 'user',
+            content:
+              '步骤已经用完，不要再调用工具。现在用中文简洁总结：你做了哪些事、结论是什么、还有什么没完成。',
+          },
+        ],
+        max_tokens: 800,
+      })
+      answer = stripToolMarkup(wrapUp.choices?.[0]?.message?.content?.trim() ?? '')
+    } catch (error) {
+      console.error('[子任务] 收尾总结失败：', error?.message ?? error)
+    }
+  }
+
+  if (!answer) answer = '任务跑完了，但没整理出结论，可能需要把目标拆得更细一些。'
   return answer
 }
 

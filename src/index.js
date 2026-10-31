@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
 import { Bot, ReceiverMode, segment } from 'qq-official-bot'
-import { chat, summarizeGroup, judgeRelevance } from './deepseek.js'
+import { chat, summarizeGroup, judgeRelevance, runTaskAgent } from './deepseek.js'
+import { startTask as launchTask, busyTasks, taskStatus } from './task-runner.js'
+import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, describePolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
@@ -245,6 +247,107 @@ function imageSenderFor(event) {
   }
 }
 
+function audioSenderFor(event) {
+  const downloadDir = path.join(projectRoot, 'downloads')
+
+  return async (input) => {
+    const target = String(input ?? '').trim()
+    if (!target) throw new Error('缺少音频路径')
+
+    if (/^https?:\/\//i.test(target)) {
+      await event.reply(segment.audio(target))
+      return target
+    }
+
+    const resolved = path.resolve(downloadDir, target)
+    if (!resolved.startsWith(downloadDir + path.sep)) {
+      throw new Error('只能发送 downloads 目录下的文件')
+    }
+    if (!/\.(silk|amr|mp3|wav|m4a|ogg|flac)$/i.test(resolved)) {
+      throw new Error('只接受音频文件（silk/amr/mp3/wav/m4a/ogg/flac）')
+    }
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`文件不存在：${path.basename(resolved)}`)
+    }
+
+    const size = fs.statSync(resolved).size
+    if (size > 20 * 1024 * 1024) {
+      throw new Error(`音频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 传不上去`)
+    }
+
+    await event.reply(segment.audio(resolved))
+    return path.basename(resolved)
+  }
+}
+
+async function runScheduledTask(task) {
+  const scope = task.target.type === 'group' ? 'group' : 'private'
+
+  try {
+    await syncRegistry()
+  } catch (error) {
+    console.error('[定时] 同步工具注册表失败：', error?.message ?? error)
+  }
+
+  return runTaskAgent({
+    taskPrompt: task.prompt,
+    scope,
+    tools: toolsForScope(scope),
+    callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
+    sendImage: async () => {
+      throw new Error('定时任务里不能发图片，请把结果写成文字')
+    },
+    audioSender: async () => {
+      throw new Error('定时任务里不能发音频')
+    },
+  })
+}
+
+function schedulerFor(event) {
+  const sessionKey = sessionKeyOf(event)
+  const isGroup = event.message_type === 'group'
+  const target = {
+    type: isGroup ? 'group' : 'user',
+    id: isGroup ? event.group_id : event.user_id,
+  }
+
+  return {
+    add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt }),
+    list: () => listSchedules(sessionKey),
+    remove: (id) => removeSchedule(id, sessionKey),
+  }
+}
+
+function notifierFor(event) {
+  const startedAt = Date.now()
+  const isGroup = event.message_type === 'group'
+  const groupId = event.group_id
+  const userId = event.user_id
+  let passiveUsed = 0
+
+  return async (text) => {
+    const body = clip(text)
+    const canPassive = Date.now() - startedAt < 4 * 60_000 && passiveUsed < 3
+
+    if (canPassive) {
+      passiveUsed += 1
+      try {
+        await event.reply(body)
+        return
+      } catch (error) {
+        console.warn('[任务通知] 被动回复失败，改用主动消息：', error?.message ?? error)
+      }
+    }
+
+    try {
+      if (isGroup) await bot.group(groupId).send(body)
+      else await bot.user(userId).send(body)
+    } catch (error) {
+      console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
+    }
+  }
+}
+
 async function handleMessage(event, trigger = 'at') {
   const text = (event.content ?? '').trim()
   if (!text) return
@@ -285,6 +388,23 @@ async function handleMessage(event, trigger = 'at') {
       trigger,
       tools: toolsForScope(scope),
       sendImage: imageSenderFor(event),
+      audioSender: audioSenderFor(event),
+      scheduler: schedulerFor(event),
+      startTask: (goal) =>
+        launchTask({
+          sessionKey: key,
+          scope,
+          goal,
+          notify: notifierFor(event),
+          tools: toolsForScope(scope),
+          sendImage: imageSenderFor(event),
+          audioSender: audioSenderFor(event),
+          callTool: async (name, args) => {
+            const result = await callTool(name, args, env.toolTimeoutMs)
+            if (AUDITED_TOOLS.has(name)) audit(key, name, args, result)
+            return result
+          },
+        }),
       callTool: async (name, args) => {
         const result = await callTool(name, args, env.toolTimeoutMs)
         if (AUDITED_TOOLS.has(name)) audit(key, name, args, result)
@@ -456,6 +576,15 @@ try {
       `${env.groupJudge ? `自动判断是否插话（每小时上限 ${env.judgeHourlyLimit} 次，回复后冷却 ${env.judgeCooldown / 1000}s）` : '自动判断已关'}；` +
       `「/总结」复盘最近 ${env.summaryLimit} 条`,
   )
+
+  initScheduler({
+    sendMessage: async (target, text) => {
+      const body = clip(text)
+      if (target.type === 'group') await bot.group(target.id).send(body)
+      else await bot.user(target.id).send(body)
+    },
+    runTask: runScheduledTask,
+  })
 
   if (process.send) process.send('ready')
 } catch (error) {

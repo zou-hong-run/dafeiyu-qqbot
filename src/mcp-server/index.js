@@ -398,6 +398,10 @@ const { SHELL_TOOLS, SHELL_HANDLERS } = await import('./shell.js')
 TOOLS.push(...SHELL_TOOLS)
 Object.assign(HANDLERS, SHELL_HANDLERS)
 
+const { FS_TOOLS, FS_HANDLERS } = await import('./fs-tools.js')
+TOOLS.push(...FS_TOOLS)
+Object.assign(HANDLERS, FS_HANDLERS)
+
 const server = new Server(
   { name: 'qq-bot-tools', version: '1.0.0' },
   { capabilities: { tools: {} } },
