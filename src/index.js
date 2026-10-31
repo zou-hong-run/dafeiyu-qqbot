@@ -422,6 +422,20 @@ async function handleMessage(event, trigger = 'at') {
     return
   }
 
+  if (text === '/tasks' || text === '任务状态') {
+    const running = taskStatus()
+    if (running.length === 0) {
+      await event.reply('当前没有正在跑的后台任务。')
+      return
+    }
+
+    const lines = running.map(
+      (task) => `${task.id}｜第 ${task.step} 步｜已跑 ${task.elapsed} 秒`,
+    )
+    await event.reply(`正在跑 ${running.length} 个任务：\n${lines.join('\n')}`)
+    return
+  }
+
   if (text.length > env.maxInputChars) {
     await event.reply(`消息太长了，请压缩到 ${env.maxInputChars} 字以内再发给我。`)
     return
@@ -452,6 +466,7 @@ async function handleMessage(event, trigger = 'at') {
           tools: toolsForScope(scope),
           sendImage: imageSenderFor(event),
           audioSender: audioSenderFor(event),
+          videoSender: videoSenderFor(event),
           callTool: async (name, args) => {
             const result = await callTool(name, args, env.toolTimeoutMs)
             if (AUDITED_TOOLS.has(name)) audit(key, name, args, result)

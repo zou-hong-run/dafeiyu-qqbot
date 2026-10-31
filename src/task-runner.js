@@ -42,7 +42,7 @@ export function taskStatus() {
   }))
 }
 
-export function startTask({ sessionKey, scope, goal, notify, tools, callTool, sendImage, audioSender }) {
+export function startTask({ sessionKey, scope, goal, notify, tools, callTool, sendImage, audioSender, videoSender }) {
   if (busyTasks(sessionKey).length > 0) {
     throw new Error('这个会话已经有一个任务在跑了，等它结束再开新的')
   }
@@ -59,6 +59,7 @@ export function startTask({ sessionKey, scope, goal, notify, tools, callTool, se
   const onStep = async ({ round, tool }) => {
     record.step = round + 1
 
+    if (tool === 'notify_user') return
     if (record.reports >= env.taskMaxReports) return
     if (record.step <= 1) return
     if (Date.now() - lastReportAt < env.taskReportInterval) return
@@ -67,6 +68,14 @@ export function startTask({ sessionKey, scope, goal, notify, tools, callTool, se
     record.reports += 1
 
     await notify(`进行中｜第 ${record.step} 步：${describeTool(tool)}`).catch(() => {})
+  }
+
+  let userMessages = 0
+  const sendUserMessage = async (text) => {
+    if (userMessages >= 10) return '这个任务已经主动发了不少条了，剩下的留到最终汇报。'
+    userMessages += 1
+    await notify(text)
+    return '已发送给对方。'
   }
 
   const finished = (async () => {
@@ -78,7 +87,9 @@ export function startTask({ sessionKey, scope, goal, notify, tools, callTool, se
         callTool,
         sendImage,
         audioSender,
+        videoSender,
         onStep,
+        notifyUser: sendUserMessage,
       })
 
       const seconds = Math.round((Date.now() - record.startedAt) / 1000)
