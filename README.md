@@ -223,7 +223,7 @@ node scripts/diagnose.js     # 逐层体检：配置 → MCP 工具 → 裸 API 
 
 ## License
 
-MIT。创建仓库时在 License 里选 MIT 即可，或补一个 `LICENSE` 文件。
+[MIT](LICENSE) © 2026 zou-hong-run
 
 ## 免责声明
 
