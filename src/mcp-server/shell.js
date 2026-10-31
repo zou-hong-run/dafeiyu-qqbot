@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -22,7 +23,64 @@ const BLOCKED_PATTERNS = [
   { pattern: /^\s*(env|printenv)\s*$/i, reason: '禁止导出全部环境变量（会泄露密钥）' },
   { pattern: /\b(env|printenv)\s*\|\s*/i, reason: '禁止管道导出环境变量（会泄露密钥）' },
   { pattern: /(echo|printf|cat)[^|;]*\$\{?(DEEP_SEEK|DEEPSEEK|QQ_APP)/i, reason: '禁止打印密钥变量' },
+  { pattern: /\bpm2\s+(start|restart|stop|delete|reload|kill|save|startup|resurrect)\b/i, reason: '禁止用 shell 管理自身进程：重启会中断当前对话，而且清不掉记忆' },
 ]
+
+const isLinux = process.platform === 'linux'
+
+const HEAVY_COMMAND =
+  /\b(apt|apt-get|dpkg)\s+(install|upgrade|dist-upgrade|--configure)|\b(pnpm|npm|yarn)\s+(add|install|i)\b|\bpip3?\s+install\b|\bdocker\s+(build|pull)\b|\bcargo\s+build\b|\bgo\s+build\b|\bmake\s+-j/i
+
+const MEMORY_RESCUE =
+  /\b(swapon|swapoff|mkswap|fallocate|fstab|sysctl|free|df|du|ps|top|htop|kill|pkill|reboot)\b/i
+
+function readLinuxMemory() {
+  try {
+    const raw = fs.readFileSync('/proc/meminfo', 'utf8')
+    const pick = (key) => {
+      const match = raw.match(new RegExp(`^${key}:\\s+(\\d+)`, 'm'))
+      return match ? Number(match[1]) / 1024 : null
+    }
+
+    const totalMB = pick('MemTotal')
+    const availableMB = pick('MemAvailable') ?? pick('MemFree')
+    if (!totalMB || !availableMB) return null
+
+    return { totalMB, availableMB }
+  } catch {
+    return null
+  }
+}
+
+function assertMemory(command) {
+  const mem = readLinuxMemory()
+  if (!mem) return
+
+  if (MEMORY_RESCUE.test(command)) return
+
+  const heavy = HEAVY_COMMAND.test(command)
+  const needMB = heavy ? 600 : 150
+
+  if (mem.availableMB >= needMB) return
+
+  const hint = heavy
+    ? '这是安装类命令，很容易把机器打爆。先加 swap 再来：\n' +
+      '  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile'
+    : '先用 free -m 看看谁在吃内存，清理后再试。'
+
+  throw new Error(
+    `内存不足：可用 ${mem.availableMB.toFixed(0)}MB / 总计 ${mem.totalMB.toFixed(0)}MB。` +
+      `执行${heavy ? '安装类' : '该'}命令需要至少 ${needMB}MB 可用。\n${hint}`,
+  )
+}
+
+function wrapRiskyCommand(command) {
+  if (!isLinux) return command
+  if (!/\bffmpeg\b/i.test(command)) return command
+  if (/\bulimit\b/i.test(command)) return command
+
+  return `ulimit -v 600000 2>/dev/null; ${command}`
+}
 
 function assertSafeCommand(command) {
   if (command.length > MAX_COMMAND) throw new Error(`命令太长（${command.length} 字符），上限 ${MAX_COMMAND}`)
@@ -77,14 +135,16 @@ async function shell({ command, cwd, timeout_ms: timeoutMs, retries }) {
   if (!cmd) throw new Error('命令不能为空')
 
   assertSafeCommand(cmd)
+  assertMemory(cmd)
   const workDir = resolveCwd(cwd)
+  const execCmd = wrapRiskyCommand(cmd)
 
   const waitMs = Math.min(Math.max(Number(timeoutMs) || 60_000, 1000), 300_000)
   const maxRetries = Math.min(Math.max(Number(retries ?? 3), 0), 5)
 
   const attempts = []
   for (let round = 0; round <= maxRetries; round += 1) {
-    const outcome = await runOnce(cmd, workDir, waitMs)
+    const outcome = await runOnce(execCmd, workDir, waitMs)
     attempts.push(outcome)
     if (outcome.ok) break
     if (outcome.timedOut) break
