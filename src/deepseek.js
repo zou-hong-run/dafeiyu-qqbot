@@ -71,7 +71,7 @@ const LOCAL_TOOLS = [
     function: {
       name: 'send_audio',
       description:
-        '把音频发送到当前聊天窗口。注意 QQ 语音消息要求 silk 编码，mp3/wav 等其他格式很可能被平台拒绝，发之前先跟对方说清楚。' +
+        '把音频发送到当前聊天窗口。QQ 语音消息支持 silk/mp3/wav/ogg/flac 格式，单文件软上限 20MB（超过会降级成文件类型，群聊里发不出）。' +
         '只能发 downloads/ 目录下的文件，或 http(s) 音频链接。',
       parameters: {
         type: 'object',
@@ -190,13 +190,17 @@ function wrapToolOutput(name, text) {
   ].join('\n')
 }
 
-function stripToolMarkup(text) {
-  const raw = String(text ?? '')
-  if (!/DSML/.test(raw)) return raw.trim()
+const TOOL_MARKUP_PATTERN = /[｜|]{2}\s*DSML/i
 
-  const cut = raw.search(/[<]?[｜|]{2}DSML/)
-  const head = cut > 0 ? raw.slice(0, cut) : ''
-  return head.replace(/\n{3,}/g, '\n\n').trim()
+function stripToolMarkup(text) {
+  const raw = String(text ?? '').trim()
+  if (!TOOL_MARKUP_PATTERN.test(raw)) return raw
+
+  const cut = raw.search(TOOL_MARKUP_PATTERN)
+  if (cut < 0) return raw
+  if (cut === 0) return ''
+
+  return raw.slice(0, cut).replace(/\n{3,}/g, '\n\n').trim()
 }
 
 async function runTool(call, { scope, callTool, sessionKey, sendImage, audioSender, startTask, scheduler }) {
@@ -425,7 +429,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
       if (raw && !answer) {
         console.warn(
-          `[警告] ${sessionKey} 模型输出全是工具标记，说明 tools 没有被正确传入：${raw.slice(0, 300)}`,
+          `[警告] ${sessionKey} 模型把工具调用写成了纯文本（没走标准 tool_calls），已丢弃。原始开头：${raw.slice(0, 200)}`,
         )
         answer = '我这边调用工具的通道好像断了，麻烦把日志发给管理员看看。'
       } else if (raw !== answer) {

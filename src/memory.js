@@ -9,7 +9,7 @@ const memoryFile = path.join(dataDir, 'memory.json')
 const SHORT_TERM_LIMIT = 16
 const LONG_TERM_LIMIT = 60
 const MID_TERM_LIMIT = 2000
-const TOOL_MARKUP = /DSML/i
+const TOOL_MARKUP = /[｜|]{2}\s*DSML/i
 
 let state = { sessions: {} }
 let saveTimer = null
@@ -24,11 +24,13 @@ try {
 }
 
 function cleanContent(text) {
-  const raw = String(text ?? '')
-  if (!TOOL_MARKUP.test(raw)) return raw.trim()
+  const raw = String(text ?? '').trim()
+  if (!TOOL_MARKUP.test(raw)) return raw
 
-  const cut = raw.search(/[<]?[｜|]{2}DSML/)
-  return (cut > 0 ? raw.slice(0, cut) : '').trim()
+  const cut = raw.search(TOOL_MARKUP)
+  if (cut < 0) return raw
+  if (cut === 0) return ''
+  return raw.slice(0, cut).trim()
 }
 
 function persist() {

@@ -263,8 +263,8 @@ function audioSenderFor(event) {
     if (!resolved.startsWith(downloadDir + path.sep)) {
       throw new Error('只能发送 downloads 目录下的文件')
     }
-    if (!/\.(silk|amr|mp3|wav|m4a|ogg|flac)$/i.test(resolved)) {
-      throw new Error('只接受音频文件（silk/amr/mp3/wav/m4a/ogg/flac）')
+    if (!/\.(silk|mp3|wav|ogg|flac)$/i.test(resolved)) {
+      throw new Error('只接受 QQ 支持的语音格式（silk/mp3/wav/ogg/flac）')
     }
     if (!fs.existsSync(resolved)) {
       throw new Error(`文件不存在：${path.basename(resolved)}`)
