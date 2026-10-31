@@ -53,7 +53,10 @@ src/mcp-server/       内置工具服务：index(基础) / shell / download / fs
 tools/                自建 MCP 工具（模板在 mcp-server-template.js）
 skills/               技能文件
 data/                 记忆、群记录、定时任务、审计日志
-downloads/            媒体文件
+downloads/            交付给用户的媒体文件
+tmp/                  临时脚本和中间产物（可随时清理）
+scripts/              工具脚本（diagnose.js 别删）
+logs/                 pm2 日志
 ```
 
 ## 平台硬限制（不是我的 bug）

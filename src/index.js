@@ -6,6 +6,7 @@ import { Bot, ReceiverMode, segment } from 'qq-official-bot'
 import { chat, summarizeGroup, judgeRelevance, runTaskAgent } from './deepseek.js'
 import { startTask as launchTask, busyTasks, taskStatus, describeTool, killTask, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
+import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, describePolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
@@ -21,6 +22,7 @@ const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 fs.mkdirSync(dataDir, { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'downloads'), { recursive: true })
+fs.mkdirSync(path.join(projectRoot, 'tmp'), { recursive: true })
 
 const bot = new Bot({
   appid: env.appId,
@@ -58,6 +60,33 @@ function sessionKeyOf(event) {
 function clip(text) {
   if (text.length <= env.replyMaxChars) return text
   return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
+}
+
+function isStaleMessage(event, ttlMs = 4 * 60_000) {
+  const ts = Number(event?.timestamp) * 1000
+  if (!Number.isFinite(ts) || ts <= 0) return false
+  return Date.now() - ts > ttlMs
+}
+
+async function sendReply(event, text) {
+  const body = clip(String(text ?? '').trim())
+  if (!body) return
+
+  if (!isStaleMessage(event)) {
+    try {
+      await event.reply.call(event, body)
+      return
+    } catch (error) {
+      const message = String(error?.message ?? error)
+      if (!/40034005|msg_id.*过期|已过期/.test(message)) throw error
+      console.warn('[回复] msg_id 已过期，改用主动消息')
+    }
+  } else {
+    console.warn('[回复] 消息超过 4 分钟，直接走主动消息')
+  }
+
+  if (event.message_type === 'group') await bot.group(event.group_id).send(body)
+  else await bot.user(event.user_id).send(body)
 }
 
 const chains = new Map()
@@ -254,7 +283,7 @@ function imageSenderFor(event) {
     if (!target) throw new Error('缺少图片路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await event.reply(segment.image(target))
+      await sendReply(event, segment.image(target))
       return target
     }
 
@@ -274,7 +303,7 @@ function imageSenderFor(event) {
       throw new Error(`图片 ${(size / 1048576).toFixed(1)}MB，超过 10MB 平台传不上去`)
     }
 
-    await event.reply(segment.image(resolved))
+    await sendReply(event, segment.image(resolved))
     return path.basename(resolved)
   }
 }
@@ -287,7 +316,7 @@ function audioSenderFor(event) {
     if (!target) throw new Error('缺少音频路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await event.reply(segment.audio(target))
+      await sendReply(event, segment.audio(target))
       return target
     }
 
@@ -307,7 +336,7 @@ function audioSenderFor(event) {
       throw new Error(`音频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 传不上去`)
     }
 
-    await event.reply(segment.audio(resolved))
+    await sendReply(event, segment.audio(resolved))
     return path.basename(resolved)
   }
 }
@@ -320,7 +349,7 @@ function videoSenderFor(event) {
     if (!target) throw new Error('缺少视频路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await event.reply(segment.video(target))
+      await sendReply(event, segment.video(target))
       return target
     }
 
@@ -342,7 +371,7 @@ function videoSenderFor(event) {
       )
     }
 
-    await event.reply(segment.video(resolved))
+    await sendReply(event, segment.video(resolved))
     return path.basename(resolved)
   }
 }
@@ -415,7 +444,7 @@ function notifierFor(event) {
     if (canPassive) {
       passiveUsed += 1
       try {
-        await event.reply(body)
+        await sendReply(event, body)
         return
       } catch (error) {
         console.warn('[任务通知] 被动回复失败，改用主动消息：', error?.message ?? error)
@@ -440,13 +469,13 @@ async function handleMessage(event, trigger = 'at') {
 
   if (text === '/reset' || text === '重置对话') {
     reset(key)
-    await event.reply('记忆已清空，我们重新开始吧。')
+    await sendReply(event, '记忆已清空，我们重新开始吧。')
     return
   }
 
   if (text === '/memory' || text === '记忆状态') {
     const current = stats(key)
-    await event.reply(
+    await sendReply(event, 
       `短期记忆：${current.shortTerm} 轮对话\n` +
         `中期记忆：${current.midTermChars} 字摘要\n` +
         `长期记忆：${current.longTerm} 条事实`,
@@ -458,7 +487,7 @@ async function handleMessage(event, trigger = 'at') {
     const goal = text.replace(/^(\/task\s+|后台任务\s+)/, '').trim()
 
     if (goal.length < 5) {
-      await event.reply('用法：/task 目标描述，写清楚要产出什么、什么算完成')
+      await sendReply(event, '用法：/task 目标描述，写清楚要产出什么、什么算完成')
       return
     }
 
@@ -474,9 +503,9 @@ async function handleMessage(event, trigger = 'at') {
         videoSender: videoSenderFor(event),
         callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
       })
-      await event.reply(`已启动后台任务 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
+      await sendReply(event, `已启动后台任务 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
     } catch (error) {
-      await event.reply(`启动失败：${error?.message ?? error}`)
+      await sendReply(event, `启动失败：${error?.message ?? error}`)
     }
     return
   }
@@ -484,7 +513,7 @@ async function handleMessage(event, trigger = 'at') {
   if (text === '/tasks' || text === '任务状态') {
     const running = taskStatus()
     if (running.length === 0) {
-      await event.reply('当前没有正在跑的后台任务。')
+      await sendReply(event, '当前没有正在跑的后台任务。')
       return
     }
 
@@ -492,7 +521,35 @@ async function handleMessage(event, trigger = 'at') {
       (task) =>
         `${task.id}｜第 ${task.step} 步｜已跑 ${task.elapsed} 秒｜${task.idle} 秒无新动作`,
     )
-    await event.reply(`正在跑 ${running.length} 个任务：\n${lines.join('\n')}\n\n发 /kill <任务id> 可以终止。`)
+    await sendReply(event, `正在跑 ${running.length} 个任务：\n${lines.join('\n')}\n\n发 /kill <任务id> 可以终止。`)
+    return
+  }
+
+  if (text === '/clean' || text === '/clean all') {
+    const includeDownloads = text === '/clean all'
+
+    try {
+      const result = cleanWorkspace({ includeDownloads })
+
+      if (result.removed.length === 0) {
+        const stats = workspaceStats()
+          .map((item) => `${item.name}/：${item.count} 项，${(item.size / 1024).toFixed(1)} KB`)
+          .join('\n')
+        await sendReply(event, `没有需要清理的临时文件。\n\n当前占用：\n${stats}`)
+        return
+      }
+
+      const kb = (result.freed / 1024).toFixed(1)
+      const preview = result.removed.slice(0, 12).map((item) => `  ${item}`).join('\n')
+      const more = result.removed.length > 12 ? `\n  …还有 ${result.removed.length - 12} 项` : ''
+
+      await sendReply(event, 
+        `清理完成：删掉 ${result.removed.length} 项，释放 ${kb} KB\n${preview}${more}` +
+          (includeDownloads ? '' : '\n\n（downloads 里的交付物保留了，要一起清就发 /clean all）'),
+      )
+    } catch (error) {
+      await sendReply(event, `清理失败：${error?.message ?? error}`)
+    }
     return
   }
 
@@ -501,15 +558,15 @@ async function handleMessage(event, trigger = 'at') {
 
     try {
       killTask(id)
-      await event.reply(`已请求终止 ${id}，它会在下一个步骤检查时停下。`)
+      await sendReply(event, `已请求终止 ${id}，它会在下一个步骤检查时停下。`)
     } catch (error) {
-      await event.reply(`终止失败：${error?.message ?? error}`)
+      await sendReply(event, `终止失败：${error?.message ?? error}`)
     }
     return
   }
 
   if (text.length > env.maxInputChars) {
-    await event.reply(`消息太长了，请压缩到 ${env.maxInputChars} 字以内再发给我。`)
+    await sendReply(event, `消息太长了，请压缩到 ${env.maxInputChars} 字以内再发给我。`)
     return
   }
 
@@ -551,10 +608,10 @@ async function handleMessage(event, trigger = 'at') {
         return result
       },
     })
-    await event.reply(clip(answer))
+    await sendReply(event, clip(answer))
   } catch (error) {
     console.error(`[模型调用失败] ${key}:`, error?.message ?? error)
-    await event.reply('抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
+    await sendReply(event, '抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
   }
 }
 
@@ -563,13 +620,13 @@ async function handleSummary(event) {
   const cooldownKey = `summary:${groupId}`
 
   if (coolingDown(cooldownKey, env.summaryCooldown)) {
-    await event.reply('刚总结过，过一会儿再说吧。')
+    await sendReply(event, '刚总结过，过一会儿再说吧。')
     return
   }
 
   const entries = groupLog.recent(groupId, env.summaryLimit)
   if (entries.length < 5) {
-    await event.reply(
+    await sendReply(event, 
       `这个群我只攒到 ${entries.length} 条记录，还不够总结。\n` +
         '如果群里没把「机器人可获取的群聊消息范围」设成「获取群内全部消息」，我只能看到 @ 我的消息。',
     )
@@ -579,13 +636,13 @@ async function handleSummary(event) {
   touch(cooldownKey)
 
   try {
-    await event.reply(`翻记录中，一共 ${entries.length} 条，稍等…`)
+    await sendReply(event, `翻记录中，一共 ${entries.length} 条，稍等…`)
     const transcript = groupLog.formatForSummary(entries)
     const summary = await summarizeGroup(transcript, '')
-    await event.reply(clip(summary))
+    await sendReply(event, clip(summary))
   } catch (error) {
     console.error('[总结失败]', error?.message ?? error)
-    await event.reply('总结没成功，可能记录太多，等会儿再试。').catch(() => {})
+    await sendReply(event, '总结没成功，可能记录太多，等会儿再试。').catch(() => {})
   }
 }
 
