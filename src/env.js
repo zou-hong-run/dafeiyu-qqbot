@@ -82,6 +82,7 @@ export const env = {
   contextBudgetRatio: positiveNumber('CONTEXT_BUDGET_RATIO', 0.6),
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
+  markdownReply: process.env.MARKDOWN_REPLY === 'true',
   sessionTtlMs: positiveNumber('SESSION_TTL_MINUTES', 30) * 60 * 1000,
   botAliases: (process.env.BOT_ALIASES?.trim() || '大肥鱼,鱼鱼,万能大肥鱼')
     .split(',')

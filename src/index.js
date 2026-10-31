@@ -57,6 +57,8 @@ function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
 
+let markdownState = null
+
 function clip(text) {
   if (text.length <= env.replyMaxChars) return text
   return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
@@ -72,21 +74,42 @@ async function sendReply(event, text) {
   const body = clip(String(text ?? '').trim())
   if (!body) return
 
+  const useMarkdown = () => env.markdownReply && markdownState !== false
+  const payload = useMarkdown() ? segment.markdown(body) : body
+
   if (!isStaleMessage(event)) {
     try {
-      await event.reply.call(event, body)
+      await event.reply.call(event, payload)
+      if (payload !== body) markdownState = true
       return
     } catch (error) {
       const message = String(error?.message ?? error)
-      if (!/40034005|msg_id.*过期|已过期/.test(message)) throw error
-      console.warn('[回复] msg_id 已过期，改用主动消息')
+
+      if (/304036|40034127|markdown 模板权限|no markdown/i.test(message)) {
+        markdownState = false
+        console.warn('[回复] 没有 Markdown 权限，永久降级为纯文本')
+        try {
+          await event.reply.call(event, body)
+          return
+        } catch (retryError) {
+          if (!/40034005|msg_id.*过期|已过期/.test(String(retryError?.message ?? retryError))) {
+            throw retryError
+          }
+        }
+      } else if (/40034005|msg_id.*过期|已过期/.test(message)) {
+        console.warn('[回复] msg_id 已过期，改用主动消息')
+      } else {
+        throw error
+      }
     }
   } else {
     console.warn('[回复] 消息超过 4 分钟，直接走主动消息')
   }
 
-  if (event.message_type === 'group') await bot.group(event.group_id).send(body)
-  else await bot.user(event.user_id).send(body)
+  const activePayload = env.markdownReply && markdownState !== false ? segment.markdown(body) : body
+
+  if (event.message_type === 'group') await bot.group(event.group_id).send(activePayload)
+  else await bot.user(event.user_id).send(activePayload)
 }
 
 const chains = new Map()
@@ -365,9 +388,9 @@ function videoSenderFor(event) {
     }
 
     const size = fs.statSync(resolved).size
-    if (size > 20 * 1024 * 1024) {
+    if (size > 30 * 1024 * 1024) {
       throw new Error(
-        `视频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 会被降级成文件类型，群聊里发不出去`,
+        `视频 ${(size / 1048576).toFixed(1)}MB，超过 30MB 会降级成文件类型；要保留视频预览请压到 30MB 以内，或用 send_file 按文件发`,
       )
     }
 
@@ -427,6 +450,48 @@ function schedulerFor(event) {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt }),
     list: () => listSchedules(sessionKey),
     remove: (id) => removeSchedule(id, sessionKey),
+  }
+}
+
+function fileSenderFor(event) {
+  const downloadDir = path.join(projectRoot, 'downloads')
+
+  return async (input, options = {}) => {
+    const target = String(input ?? '').trim()
+    if (!target) throw new Error('缺少文件路径')
+
+    const resolved = path.resolve(downloadDir, target)
+    if (!resolved.startsWith(downloadDir + path.sep)) {
+      throw new Error('只能发送 downloads 目录下的文件')
+    }
+    if (!fs.existsSync(resolved)) throw new Error(mediaMissingHint(downloadDir, resolved))
+
+    const stat = fs.statSync(resolved)
+    if (stat.size > 200 * 1024 * 1024) {
+      throw new Error(`文件 ${(stat.size / 1048576).toFixed(1)}MB，超过 200MB 硬上限`)
+    }
+
+    const isGroup = event.message_type === 'group'
+    const id = isGroup ? event.group_id : event.user_id
+    const entry = isGroup ? bot.group(id) : bot.user(id)
+    const fileName = String(options.fileName ?? path.basename(resolved)).slice(0, 120)
+
+    const upload = await entry.upload(fs.readFileSync(resolved), { fileType: 4, fileName })
+
+    const body = {
+      content: '',
+      msg_type: 7,
+      media: { file_info: upload.file_info },
+    }
+
+    if (!isStaleMessage(event)) {
+      body.msg_id = event.message_id
+      body.msg_seq = 1
+    }
+
+    await bot.request.post(isGroup ? `/v2/groups/${id}/messages` : `/v2/users/${id}/messages`, body)
+
+    return `${fileName}（${(stat.size / 1024).toFixed(1)} KB）`
   }
 }
 
@@ -585,6 +650,7 @@ async function handleMessage(event, trigger = 'at') {
       sendImage: imageSenderFor(event),
       audioSender: audioSenderFor(event),
       videoSender: videoSenderFor(event),
+      fileSender: fileSenderFor(event),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>

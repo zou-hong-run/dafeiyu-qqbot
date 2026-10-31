@@ -16,7 +16,8 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 ### 媒体发送（文件必须放在 downloads/ 目录）
 - `send_image` 图片：jpg / png / gif / webp / bmp，10MB 内
 - `send_audio` 语音：silk / mp3 / wav / ogg / flac，20MB 内
-- `send_video` 视频：**仅 mp4**，20MB 内
+- `send_video` 视频：**仅 mp4**，软上限 30MB，超过会降级成文件
+- `send_file` 任意文件：PDF / Word / Excel / 压缩包 / 代码，上限 200MB，群里显示成可下载的文件卡片
 
 ### 联网与查询
 - `search` 联网搜索（支持 site: after: 语法）、`fetch` 抓网页正文

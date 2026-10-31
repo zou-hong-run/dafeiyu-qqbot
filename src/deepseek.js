@@ -29,6 +29,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'send_image',
   'send_audio',
   'send_video',
+  'send_file',
   'clear_memory',
   'start_task',
   'schedule_task',
@@ -97,6 +98,23 @@ const LOCAL_TOOLS = [
         type: 'object',
         properties: {
           path: { type: 'string', description: 'downloads 目录下的 mp4 文件名，或 http(s) 链接' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_file',
+      description:
+        '把任意格式的文件发送到当前聊天（PDF、Word、Excel、压缩包、代码等），群里会显示成可下载的文件卡片。' +
+        '单文件上限 200MB。只能发 downloads/ 目录下的文件。图片/视频/语音请分别用 send_image / send_video / send_audio。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'downloads 目录下的文件名或者相对路径' },
+          fileName: { type: 'string', description: '显示给对方看的文件名（可选）' },
         },
         required: ['path'],
       },
@@ -223,6 +241,14 @@ function buildSystemPrompt(sessionKey, userText) {
   const self = selfDoc()
   if (self) parts.push(`【自身能力说明】\n${self}`)
 
+  if (env.markdownReply) {
+    parts.push(
+      '【输出格式（优先于上文的格式要求）】当前环境支持 Markdown 渲染：可以用 **粗体**、- 列表、' +
+        '[链接](url)、代码块。总长控制在 2000 字以内，别用表格和过深的标题层级，QQ 客户端渲染有限。' +
+        '上文中「不要用 Markdown」的约束在本轮不适用。',
+    )
+  }
+
   const goal = goalPrompt(sessionKey)
   if (goal) parts.push(goal)
 
@@ -277,7 +303,18 @@ function stripToolMarkup(text) {
 
 async function runTool(
   call,
-  { scope, callTool, sessionKey, sendImage, audioSender, videoSender, startTask, scheduler, notifyUser },
+  {
+    scope,
+    callTool,
+    sessionKey,
+    sendImage,
+    audioSender,
+    videoSender,
+    fileSender,
+    startTask,
+    scheduler,
+    notifyUser,
+  },
 ) {
   const name = call.function?.name ?? ''
 
@@ -343,6 +380,21 @@ async function runTool(
       return `视频已发送：${sent}`
     } catch (error) {
       return `发视频失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'send_file') {
+    if (!isToolAllowed('send_file', scope)) {
+      return `工具 send_file 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (typeof fileSender !== 'function') {
+      return '当前场景不支持发送文件。'
+    }
+    try {
+      const sent = await fileSender(args.path, { fileName: args.fileName })
+      return `文件已发送：${sent}`
+    } catch (error) {
+      return `发文件失败：${error?.message ?? error}`
     }
   }
 
@@ -513,6 +565,7 @@ export async function chat(sessionKey, userText, options = {}) {
     sendImage = null,
     audioSender = null,
     videoSender = null,
+    fileSender = null,
     startTask = null,
     scheduler = null,
     onStep = null,
@@ -682,6 +735,7 @@ export async function chat(sessionKey, userText, options = {}) {
         sendImage,
         audioSender,
         videoSender,
+        fileSender,
         startTask,
         scheduler,
       })
