@@ -216,10 +216,21 @@ QQ 网关 ──WS──▶ index.js
 ```bash
 pnpm start                   # 前台跑，直接看日志
 pnpm dev                     # --watch 热重载
-node scripts/diagnose.js     # 逐层体检：配置 → MCP 工具 → 裸 API 调用
+pnpm diagnose                # 逐层体检：配置 → MCP 工具 → 裸 API 调用
 ```
 
 `TOOL_DEBUG=false` 可以关掉每轮的 `[请求]` `[执行]` `[结果]` 日志，日志量会小很多。
+
+**发版**：一条命令搞定改版本号、提交、打 tag、推送（工作区必须干净，且要在 main 分支）。
+
+```bash
+pnpm version:tag patch       # 1.0.0 → 1.0.1
+pnpm version:tag minor       # 1.0.0 → 1.1.0
+pnpm version:tag 2.0.0       # 直接指定版本
+pnpm version:tag minor --dry-run   # 只看会做什么，不动文件
+```
+
+tag 说明会自动带上「上一个 tag 到当前 HEAD」的提交列表，推送后去 Releases 页预览发布即可。
 
 ## License
 

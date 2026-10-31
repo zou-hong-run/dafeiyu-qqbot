@@ -13,7 +13,9 @@
     "pm2:stop": "pm2 stop dafeiyu",
     "pm2:delete": "pm2 delete dafeiyu",
     "pm2:logs": "pm2 logs dafeiyu",
-    "pm2:status": "pm2 status dafeiyu"
+    "pm2:status": "pm2 status dafeiyu",
+    "diagnose": "node scripts/diagnose.js",
+    "version:tag": "node scripts/release.js"
   },
   "engines": {
     "node": ">=20.12"
