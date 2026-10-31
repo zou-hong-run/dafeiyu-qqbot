@@ -262,7 +262,12 @@ async function runTool(
   try {
     args = JSON.parse(call.function?.arguments || '{}')
   } catch {
-    return `调用 ${name} 的参数不是合法 JSON，请重新调用。`
+    const rawLength = String(call.function?.arguments ?? '').length
+    return (
+      `调用 ${name} 的参数不是合法 JSON（原始 ${rawLength} 字符，多半是内容太长被输出上限截断了）。\n` +
+      '大文件不要一次写完：先用 write_file 写核心骨架，再分多次调用逐步补全，' +
+      '或改用 shell 分批追加（每次不超过 3000 字符）。'
+    )
   }
 
   if (name === 'remember') {
@@ -504,7 +509,7 @@ export async function chat(sessionKey, userText, options = {}) {
   const callHistory = []
 
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
-    const payload = { model: env.model, messages, max_tokens: 2048 }
+    const payload = { model: env.model, messages, max_tokens: env.maxOutputTokens }
 
     if (usableTools.length > 0) {
       payload.tools = usableTools
@@ -520,6 +525,12 @@ export async function chat(sessionKey, userText, options = {}) {
     const completion = await client.chat.completions.create(payload)
     const message = completion.choices?.[0]?.message
     if (!message) throw new Error('DeepSeek 返回了空响应')
+
+    if (completion.choices?.[0]?.finish_reason === 'length') {
+      console.warn(
+        `[截断] ${sessionKey} 第${round + 1}轮达到输出上限 ${env.maxOutputTokens} tokens，工具参数可能不完整`,
+      )
+    }
 
     if (env.toolDebug) {
       console.log(
@@ -636,7 +647,7 @@ export async function runTaskAgent({
   const total = env.taskMaxRounds
 
   for (let round = 0; round < total; round += 1) {
-    const payload = { model: env.model, messages, max_tokens: 2048 }
+    const payload = { model: env.model, messages, max_tokens: env.maxOutputTokens }
 
     if (usableTools.length > 0) {
       payload.tools = usableTools

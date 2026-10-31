@@ -70,6 +70,7 @@ export const env = {
   taskMaxReports: Math.floor(positiveNumber('TASK_MAX_REPORTS', 5)),
   taskConcurrency: Math.floor(positiveNumber('TASK_CONCURRENCY', 3)),
   maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 100)),
+  maxOutputTokens: Math.floor(positiveNumber('MAX_OUTPUT_TOKENS', 8192)),
   progressInterval: positiveNumber('PROGRESS_INTERVAL', 25) * 1000,
   progressMax: Math.floor(positiveNumber('PROGRESS_MAX', 8)),
   toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 30) * 1000,
