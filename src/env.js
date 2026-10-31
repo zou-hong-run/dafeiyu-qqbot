@@ -83,10 +83,10 @@ export const env = {
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
   markdownReply: process.env.MARKDOWN_REPLY === 'true',
-  // always=每条都引用；judge=只在真正插话时引用（默认）；false=从不引用
+  // false=从不引用（默认）；judge=只在真正插话时引用；always=每条都引用
   quoteReply: (() => {
     const raw = (process.env.QUOTE_REPLY ?? '').trim().toLowerCase()
-    if (['false', 'off', '0', 'no'].includes(raw)) return false
+    if (!raw || ['false', 'off', '0', 'no'].includes(raw)) return false
     if (['always', 'true', '1', 'yes', 'on'].includes(raw)) return 'always'
     return 'judge'
   })(),

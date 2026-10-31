@@ -84,19 +84,20 @@ function endpointOf(event) {
 }
 
 // 引用回复要用 msg_idx（形如 REFIDX_xxx），官方只放在 message_scene.ext 里
-// 只在「真的插一句」时引用：judge 触发 + 最近没跟这个人一来一回
+// 默认整体关闭（QUOTE_REPLY 未设置即 false）；开成 judge 时，只有「群里冷场后我插一句」才引用
 const quotedMessages = new Set()
-const lastReplyAt = new Map()
+const lastSpokeAt = new Map()
 
-function chatKeyOf(event) {
-  return `${event?.group_id ?? 'c2c'}:${event?.user_id ?? ''}`
+function groupKeyOf(event) {
+  return event?.group_id ?? 'private'
 }
 
 function markQuote(event) {
   const id = event?.message_id
   if (!id) return
 
-  const since = Date.now() - (lastReplyAt.get(chatKeyOf(event)) ?? 0)
+  // 3 分钟内这个群我刚说过话，说明还在对话中，不盖引用气泡
+  const since = Date.now() - (lastSpokeAt.get(groupKeyOf(event)) ?? 0)
   if (since < env.quoteWindowMs) return
 
   quotedMessages.add(id)
@@ -106,10 +107,10 @@ function markQuote(event) {
 }
 
 function noteSpoke(event) {
-  lastReplyAt.set(chatKeyOf(event), Date.now())
+  lastSpokeAt.set(groupKeyOf(event), Date.now())
 
-  if (lastReplyAt.size > 500) {
-    for (const key of [...lastReplyAt.keys()].slice(0, 250)) lastReplyAt.delete(key)
+  if (lastSpokeAt.size > 500) {
+    for (const key of [...lastSpokeAt.keys()].slice(0, 250)) lastSpokeAt.delete(key)
   }
 }
 
@@ -186,8 +187,10 @@ async function postMessage(event, body, { reference = true } = {}) {
   const ref = usePassive && reference ? quoteRefOf(event) : null
   if (ref) body.message_reference = { message_id: ref }
 
-  if (env.toolDebug) {
-    console.log(`[引用] ${ref ? `${ref.slice(0, 18)}…` : '未取到 msg_idx，本条不带引用'}`)
+  if (ref) {
+    if (env.toolDebug) console.log(`[引用] REFIDX ${ref.slice(0, 18)}…`)
+  } else if (shouldQuote(event) && env.toolDebug) {
+    console.log('[引用] 本轮该引用但没取到 msg_idx，本条不带引用')
   }
 
   if (usePassive) {
