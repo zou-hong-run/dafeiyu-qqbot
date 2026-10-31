@@ -178,6 +178,14 @@ export async function chat(sessionKey, userText, options = {}) {
     ? [...LOCAL_TOOLS, ...tools.filter((tool) => !LOCAL_TOOL_NAMES.has(tool.function?.name))]
     : LOCAL_TOOLS
 
+  const toolNames = usableTools.map((tool) => tool.function?.name).filter(Boolean)
+  if (env.toolDebug) {
+    console.log(
+      `[工具] ${sessionKey} 场景=${scope} 可用 ${toolNames.length} 个：` +
+        (toolNames.join(',') || '（空！模型会认为自己没有任何工具）'),
+    )
+  }
+
   let answer = ''
 
   for (let round = 0; round <= env.maxToolRounds + 1; round += 1) {
@@ -188,9 +196,21 @@ export async function chat(sessionKey, userText, options = {}) {
       payload.tool_choice = 'auto'
     }
 
+    if (env.toolDebug) {
+      console.log(
+        `[请求] ${sessionKey} 第${round + 1}轮 | 发出工具=${payload.tools?.length ?? 0} 个 | 上下文=${messages.length} 条`,
+      )
+    }
+
     const completion = await client.chat.completions.create(payload)
     const message = completion.choices?.[0]?.message
     if (!message) throw new Error('DeepSeek 返回了空响应')
+
+    if (env.toolDebug) {
+      console.log(
+        `[响应] ${sessionKey} 第${round + 1}轮 | 模型要求调用工具=${message.tool_calls?.length ?? 0} 个 | 文本长度=${(message.content ?? '').length}`,
+      )
+    }
 
     if (!message.tool_calls?.length) {
       answer = message.content?.trim() ?? ''
