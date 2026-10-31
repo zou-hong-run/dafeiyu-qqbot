@@ -9,6 +9,7 @@ const memoryFile = path.join(dataDir, 'memory.json')
 const SHORT_TERM_LIMIT = 16
 const LONG_TERM_LIMIT = 60
 const MID_TERM_LIMIT = 2000
+const TOOL_MARKUP = /DSML/i
 
 let state = { sessions: {} }
 let saveTimer = null
@@ -20,6 +21,14 @@ try {
   }
 } catch (error) {
   console.error('[记忆] 读取失败，从空档案开始：', error?.message ?? error)
+}
+
+function cleanContent(text) {
+  const raw = String(text ?? '')
+  if (!TOOL_MARKUP.test(raw)) return raw.trim()
+
+  const cut = raw.search(/[<]?[｜|]{2}DSML/)
+  return (cut > 0 ? raw.slice(0, cut) : '').trim()
 }
 
 function persist() {
@@ -54,9 +63,12 @@ export function getSession(key) {
 
 export function appendTurn(key, userText, assistantText) {
   const session = getSession(key)
+  const answer = cleanContent(assistantText)
+  if (!answer) return
+
   session.shortTerm.push(
-    { role: 'user', content: userText },
-    { role: 'assistant', content: assistantText },
+    { role: 'user', content: String(userText ?? '').trim() },
+    { role: 'assistant', content: answer },
   )
   session.updatedAt = Date.now()
   scheduleSave()
@@ -72,7 +84,7 @@ export function takeOverflow(key) {
 
 export function setMidTerm(key, summary) {
   const session = getSession(key)
-  session.midTerm = String(summary ?? '').slice(0, MID_TERM_LIMIT)
+  session.midTerm = cleanContent(summary).slice(0, MID_TERM_LIMIT)
   session.updatedAt = Date.now()
   scheduleSave()
 }
@@ -97,7 +109,7 @@ function relevance(queryGrams, text, createdAt) {
 }
 
 export function addLongTerm(key, text) {
-  const clean = String(text ?? '').trim()
+  const clean = cleanContent(text).slice(0, 500)
   if (!clean) return false
 
   const session = getSession(key)
@@ -105,7 +117,7 @@ export function addLongTerm(key, text) {
 
   session.longTerm.push({
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-    text: clean.slice(0, 500),
+    text: clean,
     createdAt: Date.now(),
   })
 
@@ -127,7 +139,7 @@ export function recallLongTerm(key, query, limit = 6) {
     .map((item) => ({ ...item, score: relevance(queryGrams, item.text, item.createdAt) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
-    .filter((item) => item.score > 0.1)
+    .filter((item) => item.score > 0.1 && !TOOL_MARKUP.test(item.text))
 }
 
 export function recentLongTerm(key, limit = 5) {
@@ -136,11 +148,22 @@ export function recentLongTerm(key, limit = 5) {
 }
 
 export function history(key) {
-  return getSession(key).shortTerm
+  const list = getSession(key).shortTerm
+  const result = []
+
+  for (let i = 0; i + 1 < list.length; i += 2) {
+    const user = list[i]
+    const assistant = list[i + 1]
+    if (!user || !assistant) break
+    if (TOOL_MARKUP.test(user.content ?? '') || TOOL_MARKUP.test(assistant.content ?? '')) continue
+    result.push(user, assistant)
+  }
+
+  return result
 }
 
 export function midTerm(key) {
-  return getSession(key).midTerm
+  return cleanContent(getSession(key).midTerm)
 }
 
 export function reset(key) {
