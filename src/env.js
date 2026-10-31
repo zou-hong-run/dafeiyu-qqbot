@@ -75,7 +75,7 @@ export const env = {
   maxOutputTokens: Math.floor(positiveNumber('MAX_OUTPUT_TOKENS', 8192)),
   progressInterval: positiveNumber('PROGRESS_INTERVAL', 25) * 1000,
   progressMax: Math.floor(positiveNumber('PROGRESS_MAX', 8)),
-  toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 30) * 1000,
+  toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 60) * 1000,
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),
   contextWindowTokens: Math.floor(positiveNumber('CONTEXT_WINDOW_TOKENS', 1000000)),

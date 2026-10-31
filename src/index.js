@@ -70,46 +70,68 @@ function isStaleMessage(event, ttlMs = 4 * 60_000) {
   return Date.now() - ts > ttlMs
 }
 
+const passiveUsed = new Map()
+const MAX_PASSIVE_PER_MESSAGE = 4
+
+function passiveCountOf(event) {
+  return passiveUsed.get(event?.message_id) ?? 0
+}
+
+function canUsePassive(event) {
+  if (!event?.message_id) return false
+  if (isStaleMessage(event)) return false
+  return passiveCountOf(event) < MAX_PASSIVE_PER_MESSAGE
+}
+
+function notePassive(event) {
+  const id = event?.message_id
+  if (!id) return
+
+  passiveUsed.set(id, passiveCountOf(event) + 1)
+
+  if (passiveUsed.size > 500) {
+    for (const key of [...passiveUsed.keys()].slice(0, 250)) passiveUsed.delete(key)
+  }
+}
+
+async function deliver(event, payload) {
+  if (canUsePassive(event)) {
+    try {
+      await event.reply.call(event, payload)
+      notePassive(event)
+      return
+    } catch (error) {
+      const message = String(error?.message ?? error)
+      if (!/40034128|40034005|过期|超限|超过限制/.test(message)) throw error
+      console.warn(`[回复] 被动回复不可用（${message.slice(0, 40)}），改主动消息`)
+    }
+  }
+
+  if (event.message_type === 'group') await bot.group(event.group_id).send(payload)
+  else await bot.user(event.user_id).send(payload)
+}
+
 async function sendReply(event, text) {
   const body = clip(String(text ?? '').trim())
   if (!body) return
 
-  const useMarkdown = () => env.markdownReply && markdownState !== false
-  const payload = useMarkdown() ? segment.markdown(body) : body
+  const wantMarkdown = env.markdownReply && markdownState !== false
 
-  if (!isStaleMessage(event)) {
-    try {
-      await event.reply.call(event, payload)
-      if (payload !== body) markdownState = true
+  try {
+    await deliver(event, wantMarkdown ? segment.markdown(body) : body)
+    if (wantMarkdown) markdownState = true
+  } catch (error) {
+    const message = String(error?.message ?? error)
+
+    if (/304036|40034127|markdown 模板权限|no markdown/i.test(message)) {
+      markdownState = false
+      console.warn('[回复] 没有 Markdown 权限，永久降级为纯文本')
+      await deliver(event, body)
       return
-    } catch (error) {
-      const message = String(error?.message ?? error)
-
-      if (/304036|40034127|markdown 模板权限|no markdown/i.test(message)) {
-        markdownState = false
-        console.warn('[回复] 没有 Markdown 权限，永久降级为纯文本')
-        try {
-          await event.reply.call(event, body)
-          return
-        } catch (retryError) {
-          if (!/40034005|msg_id.*过期|已过期/.test(String(retryError?.message ?? retryError))) {
-            throw retryError
-          }
-        }
-      } else if (/40034005|msg_id.*过期|已过期/.test(message)) {
-        console.warn('[回复] msg_id 已过期，改用主动消息')
-      } else {
-        throw error
-      }
     }
-  } else {
-    console.warn('[回复] 消息超过 4 分钟，直接走主动消息')
+
+    throw error
   }
-
-  const activePayload = env.markdownReply && markdownState !== false ? segment.markdown(body) : body
-
-  if (event.message_type === 'group') await bot.group(event.group_id).send(activePayload)
-  else await bot.user(event.user_id).send(activePayload)
 }
 
 const chains = new Map()
@@ -306,7 +328,7 @@ function imageSenderFor(event) {
     if (!target) throw new Error('缺少图片路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await sendReply(event, segment.image(target))
+      await deliver(event, segment.image(target))
       return target
     }
 
@@ -326,7 +348,7 @@ function imageSenderFor(event) {
       throw new Error(`图片 ${(size / 1048576).toFixed(1)}MB，超过 10MB 平台传不上去`)
     }
 
-    await sendReply(event, segment.image(resolved))
+    await deliver(event, segment.image(resolved))
     return path.basename(resolved)
   }
 }
@@ -339,7 +361,7 @@ function audioSenderFor(event) {
     if (!target) throw new Error('缺少音频路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await sendReply(event, segment.audio(target))
+      await deliver(event, segment.audio(target))
       return target
     }
 
@@ -359,7 +381,7 @@ function audioSenderFor(event) {
       throw new Error(`音频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 传不上去`)
     }
 
-    await sendReply(event, segment.audio(resolved))
+    await deliver(event, segment.audio(resolved))
     return path.basename(resolved)
   }
 }
@@ -372,7 +394,7 @@ function videoSenderFor(event) {
     if (!target) throw new Error('缺少视频路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await sendReply(event, segment.video(target))
+      await deliver(event, segment.video(target))
       return target
     }
 
@@ -394,7 +416,7 @@ function videoSenderFor(event) {
       )
     }
 
-    await sendReply(event, segment.video(resolved))
+    await deliver(event, segment.video(resolved))
     return path.basename(resolved)
   }
 }
@@ -478,18 +500,33 @@ function fileSenderFor(event) {
 
     const upload = await entry.upload(fs.readFileSync(resolved), { fileType: 4, fileName })
 
+    const messagePath = isGroup
+      ? `/v2/groups/${id}/messages`
+      : `/v2/users/${id}/messages`
+
     const body = {
       content: '',
       msg_type: 7,
       media: { file_info: upload.file_info },
     }
 
-    if (!isStaleMessage(event)) {
+    const usePassive = canUsePassive(event)
+    if (usePassive) {
       body.msg_id = event.message_id
-      body.msg_seq = 1
+      body.msg_seq = passiveCountOf(event) + 1
     }
 
-    await bot.request.post(isGroup ? `/v2/groups/${id}/messages` : `/v2/users/${id}/messages`, body)
+    try {
+      await bot.request.post(messagePath, body)
+      if (usePassive) notePassive(event)
+    } catch (error) {
+      const message = String(error?.message ?? error)
+      if (!usePassive || !/40034128|40034005|过期|超限/.test(message)) throw error
+
+      delete body.msg_id
+      delete body.msg_seq
+      await bot.request.post(messagePath, body)
+    }
 
     return `${fileName}（${(stat.size / 1024).toFixed(1)} KB）`
   }
