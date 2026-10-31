@@ -73,7 +73,7 @@ SELF.md            机器人的自我能力说明（会注入提示词，可被�
 **2. 装依赖、填配置**
 
 ```bash
-git clone <你的仓库地址>
+git clone https://github.com/zou-hong-run/dafeiyu-qqbot.git
 cd robot
 pnpm install
 cp .env.example .env
