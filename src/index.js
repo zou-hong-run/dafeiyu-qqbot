@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
 import { Bot, ReceiverMode, segment } from 'qq-official-bot'
 import { chat, summarizeGroup, judgeRelevance, runTaskAgent } from './deepseek.js'
-import { startTask as launchTask, busyTasks, taskStatus, describeTool } from './task-runner.js'
+import { startTask as launchTask, busyTasks, taskStatus, describeTool, killTask, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, describePolicy } from './policy.js'
@@ -454,6 +454,33 @@ async function handleMessage(event, trigger = 'at') {
     return
   }
 
+  if (text.startsWith('/task ') || text.startsWith('后台任务 ')) {
+    const goal = text.replace(/^(\/task\s+|后台任务\s+)/, '').trim()
+
+    if (goal.length < 5) {
+      await event.reply('用法：/task 目标描述，写清楚要产出什么、什么算完成')
+      return
+    }
+
+    try {
+      const { id } = launchTask({
+        sessionKey: key,
+        scope,
+        goal,
+        notify: notifierFor(event),
+        tools: toolsForScope(scope),
+        sendImage: imageSenderFor(event),
+        audioSender: audioSenderFor(event),
+        videoSender: videoSenderFor(event),
+        callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
+      })
+      await event.reply(`已启动后台任务 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
+    } catch (error) {
+      await event.reply(`启动失败：${error?.message ?? error}`)
+    }
+    return
+  }
+
   if (text === '/tasks' || text === '任务状态') {
     const running = taskStatus()
     if (running.length === 0) {
@@ -462,9 +489,22 @@ async function handleMessage(event, trigger = 'at') {
     }
 
     const lines = running.map(
-      (task) => `${task.id}｜第 ${task.step} 步｜已跑 ${task.elapsed} 秒`,
+      (task) =>
+        `${task.id}｜第 ${task.step} 步｜已跑 ${task.elapsed} 秒｜${task.idle} 秒无新动作`,
     )
-    await event.reply(`正在跑 ${running.length} 个任务：\n${lines.join('\n')}`)
+    await event.reply(`正在跑 ${running.length} 个任务：\n${lines.join('\n')}\n\n发 /kill <任务id> 可以终止。`)
+    return
+  }
+
+  if (text.startsWith('/kill ')) {
+    const id = text.slice(6).trim()
+
+    try {
+      killTask(id)
+      await event.reply(`已请求终止 ${id}，它会在下一个步骤检查时停下。`)
+    } catch (error) {
+      await event.reply(`终止失败：${error?.message ?? error}`)
+    }
     return
   }
 
@@ -685,6 +725,23 @@ try {
     },
     runTask: runScheduledTask,
   })
+
+  const interrupted = takeInterruptedTasks()
+  for (const task of interrupted) {
+    const body =
+      `上次有个后台任务被中断了（${task.id}）：\n${String(task.goal ?? '').slice(0, 100)}\n\n` +
+      '需要重跑的话发 /task 重新发起。'
+    try {
+      if (task.target?.type === 'group') await bot.group(task.target.id).send(body)
+      else if (task.target?.id) await bot.user(task.target.id).send(body)
+    } catch (error) {
+      console.error('[任务] 中断通知发送失败：', error?.message ?? error)
+    }
+  }
+
+  if (interrupted.length > 0) {
+    console.log(`[启动] 发现 ${interrupted.length} 个被中断的任务，已通知对应会话`)
+  }
 
   if (process.send) process.send('ready')
 } catch (error) {

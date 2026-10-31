@@ -556,6 +556,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
   let answer = ''
   let autoPushes = 0
+  let forceToolChoice = false
   const callHistory = []
 
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
@@ -565,7 +566,8 @@ export async function chat(sessionKey, userText, options = {}) {
 
     if (usableTools.length > 0) {
       payload.tools = usableTools
-      payload.tool_choice = 'auto'
+      payload.tool_choice = forceToolChoice ? 'required' : 'auto'
+      forceToolChoice = false
     }
 
     if (env.toolDebug) {
@@ -602,25 +604,24 @@ export async function chat(sessionKey, userText, options = {}) {
         if (retry.length > answer.length) answer = retry
       }
 
-      const soundsLikePromise =
-        answer.length > 0 &&
-        answer.length < 400 &&
-        /(马上|稍等|这就|正在做|立刻|一会儿|我去做|我来做|开始做|接着推进|直接推进|这就开始|稍后就|这就去)/.test(
-          answer,
-        )
+      const hasGoalNow = Boolean(getGoal(sessionKey))
+      const looksDone = /(完成|做好了|已发送|已经发|已生成|发给你|搞定|弄好了)/.test(answer)
+      const noActionUnderGoal =
+        hasGoalNow && !looksDone && answer.length > 0 && answer.length < 400
 
-      if (soundsLikePromise && autoPushes < 2 && getGoal(sessionKey)) {
+      if (noActionUnderGoal && autoPushes < 2) {
         autoPushes += 1
+        forceToolChoice = true
         console.warn(
-          `[空承诺] ${sessionKey} 第${round + 1}轮说要做但没调工具，自动追问 ${autoPushes}/2`,
+          `[空承诺] ${sessionKey} 第${round + 1}轮有目标却没调工具，下一轮强制 required（${autoPushes}/2）`,
         )
 
         messages.push({ role: 'assistant', content: answer })
         messages.push({
           role: 'user',
           content:
-            '（系统提示）你刚才只是承诺要去做，没有产生任何实际动作，用户什么都不会收到。' +
-            '现在立刻调用工具执行；如果要多步才能完成，用 start_task 交给后台。不要再用纯文字回复。',
+            '（系统提示）目标还没完成。你刚才只回了文字、没有产生任何动作，用户什么都收不到。' +
+            '下一轮必须调用工具推进；要多步完成就用 start_task 交给后台。',
         })
 
         answer = ''
@@ -706,6 +707,7 @@ export async function runTaskAgent({
   videoSender,
   onStep,
   notifyUser,
+  signal,
 }) {
   const messages = [
     { role: 'system', content: TASK_SYSTEM_PROMPT },
@@ -724,6 +726,8 @@ export async function runTaskAgent({
   const total = env.taskMaxRounds
 
   for (let round = 0; round < total; round += 1) {
+    if (signal?.aborted) throw new Error('任务被用户中止')
+
     const payload = { model: env.model, messages, max_tokens: env.maxOutputTokens }
 
     if (usableTools.length > 0) {
@@ -793,8 +797,47 @@ export async function runTaskAgent({
   return answer
 }
 
-export async function summarizeGroup(transcript, label = '') {
-  const completion = await client.chat.completions.create({
+const TASK_VERIFY_PROMPT = `你是任务验收员。判断给定目标是否真的完成。
+
+判定标准：
+- 目标要求的产出必须实际存在：文件已生成、消息已发送、结论已给出、命令输出可查
+- 不能只凭执行过程中的「我说做完了」就算完成，要看有没有实际证据
+- 目标有多项要求时，任一项明显缺失就算未完成
+- 目标模糊时按字面理解，不要擅自降低标准
+
+只输出 json，不要额外文字：
+{"done": true 或 false, "reason": "不超过 40 字的理由", "nextStep": "没完成的话下一步该做什么，一句话"}`
+
+export async function verifyCompletion(goal, transcript) {
+  try {
+    const completion = await client.chat.completions.create({
+      model: env.model,
+      messages: [
+        { role: 'system', content: TASK_VERIFY_PROMPT },
+        {
+          role: 'user',
+          content: `目标：${goal}\n\n执行记录：\n${String(transcript).slice(-5000)}`,
+        },
+      ],
+      max_tokens: 300,
+      response_format: { type: 'json_object' },
+    })
+
+    const raw = completion.choices?.[0]?.message?.content?.trim() ?? '{}'
+    const parsed = JSON.parse(raw)
+
+    return {
+      done: parsed.done === true,
+      reason: String(parsed.reason ?? '').slice(0, 100),
+      nextStep: String(parsed.nextStep ?? '').slice(0, 200),
+    }
+  } catch (error) {
+    console.error('[验收] 调用失败，按完成处理：', error?.message ?? error)
+    return { done: true, reason: '验收调用失败', nextStep: '' }
+  }
+}
+
+export async function summarizeGroup(transcript, label = '') {  const completion = await client.chat.completions.create({
     model: env.model,
     messages: [
       {
