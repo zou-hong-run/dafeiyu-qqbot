@@ -84,16 +84,32 @@ function endpointOf(event) {
 }
 
 // 引用回复要用 msg_idx（形如 REFIDX_xxx），官方只放在 message_scene.ext 里
-// 是否引用由触发方式决定：默认只在自动插话（judge）时引用，@ 和点名不引用
+// 只在「真的插一句」时引用：judge 触发 + 最近没跟这个人一来一回
 const quotedMessages = new Set()
+const lastReplyAt = new Map()
+
+function chatKeyOf(event) {
+  return `${event?.group_id ?? 'c2c'}:${event?.user_id ?? ''}`
+}
 
 function markQuote(event) {
   const id = event?.message_id
   if (!id) return
 
+  const since = Date.now() - (lastReplyAt.get(chatKeyOf(event)) ?? 0)
+  if (since < env.quoteWindowMs) return
+
   quotedMessages.add(id)
   if (quotedMessages.size > 500) {
     for (const key of [...quotedMessages].slice(0, 250)) quotedMessages.delete(key)
+  }
+}
+
+function noteSpoke(event) {
+  lastReplyAt.set(chatKeyOf(event), Date.now())
+
+  if (lastReplyAt.size > 500) {
+    for (const key of [...lastReplyAt.keys()].slice(0, 250)) lastReplyAt.delete(key)
   }
 }
 
@@ -220,21 +236,25 @@ async function sendReply(event, text) {
   const body = clip(String(text ?? '').trim())
   if (!body) return
 
-  if (env.markdownReply && markdownState !== false) {
-    const sent = await sendMarkdownMessage(event, body)
-    if (sent) return
-  }
-
-  if (quoteRefOf(event)) {
-    try {
-      await postMessage(event, { msg_type: 0, content: body })
-      return
-    } catch (error) {
-      console.warn(`[引用] 引用回复失败（${String(error?.message ?? error).slice(0, 60)}），改普通回复`)
+  try {
+    if (env.markdownReply && markdownState !== false) {
+      const sent = await sendMarkdownMessage(event, body)
+      if (sent) return
     }
-  }
 
-  await deliver(event, body)
+    if (quoteRefOf(event)) {
+      try {
+        await postMessage(event, { msg_type: 0, content: body })
+        return
+      } catch (error) {
+        console.warn(`[引用] 引用回复失败（${String(error?.message ?? error).slice(0, 60)}），改普通回复`)
+      }
+    }
+
+    await deliver(event, body)
+  } finally {
+    noteSpoke(event)
+  }
 }
 
 const chains = new Map()

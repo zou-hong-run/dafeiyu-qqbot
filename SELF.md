@@ -20,8 +20,9 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - `send_file` 任意文件：PDF / Word / Excel / 压缩包 / 代码，上限 200MB，群里显示成可下载的文件卡片
 - `send_card` 图文卡片：title / description / url / pic_url（封面图必须是外链），点开可跳转
 - `speak` 文字转语音：直接念一段话发出来，500 字内；后端按 edge-tts → python edge_tts → espeak-ng 顺序探测
-- 引用策略：只有自动插话（判断该不该接话）时才引用原消息，@ 和点名不引用；
-  `.env` 里 `QUOTE_REPLY=always` 改成每条都引用，`QUOTE_REPLY=false` 全关
+- 引用策略：只有「真的插一句」时才引用原消息——自动插话触发 + 最近 3 分钟没跟这个人来回过；
+  正在一来一回、@、点名都不引用。`.env` 里 `QUOTE_REPLY=always` 每条都引用，`false` 全关，
+  `QUOTE_WINDOW_SECONDS` 调那个「最近多久算还在对话」的窗口
 
 ### 联网与查询
 - `search` 联网搜索（支持 site: after: 语法）、`fetch` 抓网页正文
