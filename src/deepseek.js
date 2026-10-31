@@ -377,6 +377,7 @@ export async function chat(sessionKey, userText, options = {}) {
     audioSender = null,
     startTask = null,
     scheduler = null,
+    onStep = null,
   } = options
 
   const messages = [
@@ -397,14 +398,33 @@ export async function chat(sessionKey, userText, options = {}) {
     )
   }
 
-  let answer = ''
+  const finalize = async (label) => {
+    try {
+      const response = await client.chat.completions.create({
+        model: env.model,
+        messages: [
+          ...messages,
+          { role: 'assistant', content: '（工具调用阶段结束）' },
+          { role: 'user', content: '现在不要调用任何工具，直接用中文把结论说完整。' },
+        ],
+        max_tokens: 800,
+      })
+      return stripToolMarkup(response.choices?.[0]?.message?.content?.trim() ?? '')
+    } catch (error) {
+      console.error(`[兜底] ${label} 收尾失败：`, error?.message ?? error)
+      return ''
+    }
+  }
 
-  for (let round = 0; round <= env.maxToolRounds + 1; round += 1) {
+  let answer = ''
+  const callHistory = []
+
+  outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
     const payload = { model: env.model, messages, max_tokens: 2048 }
 
     if (usableTools.length > 0) {
       payload.tools = usableTools
-      payload.tool_choice = round < env.maxToolRounds ? 'auto' : 'none'
+      payload.tool_choice = 'auto'
     }
 
     if (env.toolDebug) {
@@ -427,15 +447,12 @@ export async function chat(sessionKey, userText, options = {}) {
       const raw = message.content?.trim() ?? ''
       answer = stripToolMarkup(raw)
 
-      if (raw && !answer) {
+      if (raw.length > 60 && answer.length < 20) {
         console.warn(
-          `[警告] ${sessionKey} 模型把工具调用写成了纯文本（没走标准 tool_calls），已丢弃。原始开头：${raw.slice(0, 200)}`,
+          `[兜底] ${sessionKey} 第${round + 1}轮输出 ${raw.length} 字符，绝大部分是工具标记，重新要一次纯文本`,
         )
-        answer = '我这边调用工具的通道好像断了，麻烦把日志发给管理员看看。'
-      } else if (raw !== answer) {
-        console.warn(
-          `[警告] ${sessionKey} 模型输出里混入了工具标记，已清理 ${raw.length - answer.length} 个字符`,
-        )
+        const retry = await finalize(sessionKey)
+        if (retry.length > answer.length) answer = retry
       }
 
       break
@@ -449,11 +466,10 @@ export async function chat(sessionKey, userText, options = {}) {
 
     for (const call of message.tool_calls) {
       const toolName = call.function?.name ?? '未知工具'
+      const argsText = String(call.function?.arguments ?? '')
 
       if (env.toolDebug) {
-        console.log(
-          `[执行] ${sessionKey} ${toolName}(${String(call.function?.arguments ?? '').slice(0, 150)})`,
-        )
+        console.log(`[执行] ${sessionKey} ${toolName}(${argsText.slice(0, 150)})`)
       }
 
       const result = await runTool(call, {
@@ -473,10 +489,31 @@ export async function chat(sessionKey, userText, options = {}) {
       }
 
       messages.push({ role: 'tool', tool_call_id: call.id, content: result })
+
+      if (typeof onStep === 'function') {
+        try {
+          Promise.resolve(onStep({ round, tool: toolName })).catch(() => {})
+        } catch {
+          // 进度回调异常不影响主流程
+        }
+      }
+
+      callHistory.push(`${toolName}:${argsText.slice(0, 80)}`)
+      if (callHistory.length > 6) callHistory.shift()
+
+      const lastCall = callHistory[callHistory.length - 1]
+      if (callHistory.filter((item) => item === lastCall).length >= 3) {
+        console.warn(`[停滞] ${sessionKey} 连续重复同样的调用（${toolName}），提前收尾`)
+        answer = await finalize(sessionKey)
+        break outer
+      }
     }
   }
 
-  if (!answer) answer = '我这边没整理出答案，换个问法再试试？'
+  if (!answer) {
+    answer =
+      (await finalize(sessionKey)) || '这个问题我没整理出结论，换个问法或者把任务拆小一点再试试？'
+  }
 
   appendTurn(sessionKey, userText, answer)
 

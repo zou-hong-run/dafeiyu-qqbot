@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
 import { Bot, ReceiverMode, segment } from 'qq-official-bot'
 import { chat, summarizeGroup, judgeRelevance, runTaskAgent } from './deepseek.js'
-import { startTask as launchTask, busyTasks, taskStatus } from './task-runner.js'
+import { startTask as launchTask, busyTasks, taskStatus, describeTool } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, describePolicy } from './policy.js'
@@ -303,6 +303,22 @@ async function runScheduledTask(task) {
   })
 }
 
+function progressReporter(event) {
+  const notify = notifierFor(event)
+  let lastAt = Date.now()
+  let count = 0
+
+  return async ({ round, tool }) => {
+    if (round < 1) return
+    if (count >= env.progressMax) return
+    if (Date.now() - lastAt < env.progressInterval) return
+
+    lastAt = Date.now()
+    count += 1
+    await notify(`还在处理｜第 ${round + 1} 步：${describeTool(tool)}`)
+  }
+}
+
 function schedulerFor(event) {
   const sessionKey = sessionKeyOf(event)
   const isGroup = event.message_type === 'group'
@@ -390,6 +406,7 @@ async function handleMessage(event, trigger = 'at') {
       sendImage: imageSenderFor(event),
       audioSender: audioSenderFor(event),
       scheduler: schedulerFor(event),
+      onStep: progressReporter(event),
       startTask: (goal) =>
         launchTask({
           sessionKey: key,

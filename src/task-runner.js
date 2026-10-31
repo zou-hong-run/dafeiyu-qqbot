@@ -25,7 +25,7 @@ const TOOL_LABELS = {
   write_skill: '写技能',
 }
 
-function describeTool(name) {
+export function describeTool(name) {
   return TOOL_LABELS[name] ?? `调用 ${name}`
 }
 
