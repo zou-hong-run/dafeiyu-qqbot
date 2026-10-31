@@ -31,6 +31,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'send_video',
   'send_file',
   'send_card',
+  'speak',
   'clear_memory',
   'start_task',
   'schedule_task',
@@ -139,6 +140,23 @@ const LOCAL_TOOLS = [
           pic_url: { type: 'string', description: '封面图外链，https 开头，1024 字符以内' },
         },
         required: ['title', 'description', 'url', 'pic_url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'speak',
+      description:
+        '把一段文字合成语音发到当前聊天（真人女声，比文字更有味道，适合安慰、吐槽、卖萌、念通知）。' +
+        '参数只有 text，一次性传要念的整段话，500 字以内，不要带 Markdown 标记和链接。' +
+        '用户说「转语音」「念给我听」「说句话」时必须调这个工具，只回文字等于没做到。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要念出来的纯文本，500 字以内' },
+        },
+        required: ['text'],
       },
     },
   },
@@ -334,6 +352,7 @@ async function runTool(
     videoSender,
     fileSender,
     cardSender,
+    speakSender,
     startTask,
     scheduler,
     notifyUser,
@@ -433,6 +452,21 @@ async function runTool(
       return `图文卡片已发送：${sent}`
     } catch (error) {
       return `发卡片失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'speak') {
+    if (!isToolAllowed('speak', scope)) {
+      return `工具 speak 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+    if (typeof speakSender !== 'function') {
+      return '当前场景不支持语音合成。'
+    }
+    try {
+      const result = await speakSender(args.text)
+      return `语音已发送：${result.chars} 字，合成后端 ${result.backend}`
+    } catch (error) {
+      return `转语音失败：${error?.message ?? error}`
     }
   }
 
@@ -605,6 +639,7 @@ export async function chat(sessionKey, userText, options = {}) {
     videoSender = null,
     fileSender = null,
     cardSender = null,
+    speakSender = null,
     startTask = null,
     scheduler = null,
     onStep = null,
@@ -776,6 +811,7 @@ export async function chat(sessionKey, userText, options = {}) {
         videoSender,
         fileSender,
         cardSender,
+        speakSender,
         startTask,
         scheduler,
       })
@@ -831,6 +867,7 @@ export async function runTaskAgent({
   videoSender,
   fileSender,
   cardSender,
+  speakSender,
   onStep,
   notifyUser,
   signal,
@@ -889,6 +926,7 @@ export async function runTaskAgent({
         videoSender,
         fileSender,
         cardSender,
+        speakSender,
         startTask: null,
         notifyUser,
       })

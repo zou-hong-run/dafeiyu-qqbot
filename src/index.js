@@ -1,5 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
 import { Bot, ReceiverMode, segment } from 'qq-official-bot'
@@ -16,6 +18,7 @@ import * as groupLog from './group-log.js'
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
+const run = promisify(execFile)
 const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell'])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 
@@ -81,8 +84,27 @@ function endpointOf(event) {
 }
 
 // 引用回复要用 msg_idx（形如 REFIDX_xxx），官方只放在 message_scene.ext 里
+// 是否引用由触发方式决定：默认只在自动插话（judge）时引用，@ 和点名不引用
+const quotedMessages = new Set()
+
+function markQuote(event) {
+  const id = event?.message_id
+  if (!id) return
+
+  quotedMessages.add(id)
+  if (quotedMessages.size > 500) {
+    for (const key of [...quotedMessages].slice(0, 250)) quotedMessages.delete(key)
+  }
+}
+
+function shouldQuote(event) {
+  if (!env.quoteReply) return false
+  if (env.quoteReply === 'always') return true
+  return quotedMessages.has(event?.message_id)
+}
+
 function quoteRefOf(event) {
-  if (!env.quoteReply) return null
+  if (!shouldQuote(event)) return null
 
   const ext = event?.message_scene?.ext
   if (!ext) return null
@@ -467,6 +489,101 @@ function audioSenderFor(event) {
   }
 }
 
+const TTS_VOICE = process.env.TTS_VOICE?.trim() || 'zh-CN-XiaoxiaoNeural'
+const TTS_MAX_CHARS = 500
+
+function firstLineOf(error) {
+  return String(error?.stderr || error?.message || error)
+    .split('\n')
+    .find((line) => line.trim()) ?? '未知错误'
+}
+
+// 依次尝试 edge-tts（音质最好，需联网）→ python edge_tts → espeak-ng + ffmpeg（离线机器音）
+async function synthesizeSpeech(text) {
+  const tmpDir = path.join(projectRoot, 'tmp')
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const mp3 = path.join(tmpDir, `tts-${stamp}.mp3`)
+  const wav = path.join(tmpDir, `tts-${stamp}.wav`)
+  const childEnv = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    LANG: process.env.LANG ?? 'zh_CN.UTF-8',
+    PYTHONIOENCODING: 'utf-8',
+  }
+  const attempts = []
+
+  const usable = (file) => fs.existsSync(file) && fs.statSync(file).size > 1024
+
+  try {
+    await run(
+      'edge-tts',
+      ['--text', text, '--voice', TTS_VOICE, '--write-media', mp3],
+      { timeout: 90_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
+    )
+    if (usable(mp3)) return { file: mp3, backend: 'edge-tts' }
+    attempts.push('edge-tts 没产出音频')
+  } catch (error) {
+    attempts.push(`edge-tts: ${firstLineOf(error)}`)
+  }
+
+  try {
+    await run(
+      'python3',
+      ['-m', 'edge_tts', '--text', text, '--voice', TTS_VOICE, '--write-media', mp3],
+      { timeout: 90_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
+    )
+    if (usable(mp3)) return { file: mp3, backend: 'python edge-tts' }
+    attempts.push('python edge_tts 没产出音频')
+  } catch (error) {
+    attempts.push(`python edge_tts: ${firstLineOf(error)}`)
+  }
+
+  try {
+    await run('espeak-ng', ['-v', 'cmn', '-s', '165', '-w', wav, text], {
+      timeout: 60_000,
+      env: childEnv,
+      maxBuffer: 4 * 1024 * 1024,
+    })
+    await run(
+      'ffmpeg',
+      ['-y', '-v', 'error', '-i', wav, '-ar', '24000', '-b:a', '48k', mp3],
+      { timeout: 60_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
+    )
+    fs.rmSync(wav, { force: true })
+    if (usable(mp3)) return { file: mp3, backend: 'espeak-ng' }
+    attempts.push('espeak-ng 没产出音频')
+  } catch (error) {
+    attempts.push(`espeak-ng: ${firstLineOf(error)}`)
+  }
+
+  fs.rmSync(wav, { force: true })
+  throw new Error(
+    '服务器上没有可用的语音合成后端，转不了语音。试过的：\n' +
+      `${attempts.join('\n')}\n` +
+      '修法：pip3 install edge-tts（音质最好，需要能访问外网），或 apt-get install espeak-ng（离线但机器音）',
+  )
+}
+
+function speakSenderFor(event) {
+  return async (input) => {
+    const text = String(input ?? '').trim()
+    if (!text) throw new Error('缺少要念的文本')
+    if (text.length > TTS_MAX_CHARS) {
+      throw new Error(`文本 ${text.length} 字，太长，压到 ${TTS_MAX_CHARS} 字以内再合成`)
+    }
+
+    const { file, backend } = await synthesizeSpeech(text)
+
+    try {
+      await deliver(event, segment.audio(file))
+    } finally {
+      fs.rm(file, { force: true }, () => {})
+    }
+
+    return { backend, chars: text.length }
+  }
+}
+
 function videoSenderFor(event) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
@@ -662,6 +779,9 @@ async function handleMessage(event, trigger = 'at') {
   const text = (event.content ?? '').trim()
   if (!text) return
 
+  // 只有自动插话才引用原消息；被 @、被点名、私聊都不加引用气泡
+  if (trigger === 'judge') markQuote(event)
+
   const key = sessionKeyOf(event)
   const scope = event.message_type === 'group' ? 'group' : 'private'
 
@@ -785,6 +905,7 @@ async function handleMessage(event, trigger = 'at') {
       videoSender: videoSenderFor(event),
       fileSender: fileSenderFor(event),
       cardSender: cardSenderFor(event),
+      speakSender: speakSenderFor(event),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>
@@ -799,6 +920,7 @@ async function handleMessage(event, trigger = 'at') {
           videoSender: videoSenderFor(event),
           fileSender: fileSenderFor(event),
           cardSender: cardSenderFor(event),
+          speakSender: speakSenderFor(event),
           callTool: async (name, args) => {
             const result = await callTool(name, args, env.toolTimeoutMs)
             if (AUDITED_TOOLS.has(name)) audit(key, name, args, result)
