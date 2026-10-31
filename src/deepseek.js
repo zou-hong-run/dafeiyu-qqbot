@@ -3,6 +3,7 @@ import { env } from './env.js'
 import { isToolAllowed, SCOPE_LABEL } from './policy.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
+import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
 import {
   appendTurn,
   addLongTerm,
@@ -24,6 +25,7 @@ const client = new OpenAI({
 const summarizing = new Set()
 const LOCAL_TOOL_NAMES = new Set([
   'remember',
+  'goal',
   'send_image',
   'send_audio',
   'send_video',
@@ -169,6 +171,24 @@ const LOCAL_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'goal',
+      description:
+        '管理当前会话的长期目标，让多轮对话里的长任务不会说完就断片。' +
+        'action=set 在用户交办需要多步、跨多轮才能完成的事时立刻设定；action=status 查询当前目标；' +
+        'action=clear 仅在目标里所有事项确实做完、产出已交付后才用——回答问题、汇报进度、闲聊时都不要清除。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['set', 'status', 'clear'], description: '操作类型' },
+          text: { type: 'string', description: 'action=set 时的目标描述，写清楚完成标准' },
+        },
+        required: ['action'],
+      },
+    },
+  },
 ]
 
 const TASK_SYSTEM_PROMPT = `你是后台执行任务的子助手，用户把一个复杂任务交给你独立完成。
@@ -202,6 +222,9 @@ function buildSystemPrompt(sessionKey, userText) {
 
   const self = selfDoc()
   if (self) parts.push(`【自身能力说明】\n${self}`)
+
+  const goal = goalPrompt(sessionKey)
+  if (goal) parts.push(goal)
 
   const skills = skillsPrompt()
   if (skills) parts.push(skills)
@@ -329,6 +352,32 @@ async function runTool(
     }
     resetMemory(sessionKey)
     return '当前会话的记忆已清空，从现在开始是全新的对话。'
+  }
+
+  if (name === 'goal') {
+    if (!isToolAllowed('goal', scope)) {
+      return `工具 goal 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    }
+
+    const action = String(args.action ?? '').trim()
+
+    if (action === 'set') {
+      try {
+        const goal = setGoal(sessionKey, args.text)
+        return `目标已设定：${goal.text}\n之后每一轮我都会看到它，直到你用 action=clear 清除。`
+      } catch (error) {
+        return `设定目标失败：${error?.message ?? error}`
+      }
+    }
+
+    if (action === 'clear') {
+      const existed = clearGoal(sessionKey)
+      return existed ? '目标已清除。' : '当前本来就没有目标。'
+    }
+
+    const current = getGoal(sessionKey)
+    if (!current) return '当前没有未完成的目标。'
+    return `当前目标（${Math.round((Date.now() - current.createdAt) / 60000)} 分钟前设定）：\n${current.text}`
   }
 
   if (name === 'start_task') {
@@ -506,9 +555,12 @@ export async function chat(sessionKey, userText, options = {}) {
   }
 
   let answer = ''
+  let autoPushes = 0
   const callHistory = []
 
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
+    messages[0] = { role: 'system', content: buildSystemPrompt(sessionKey, userText) }
+
     const payload = { model: env.model, messages, max_tokens: env.maxOutputTokens }
 
     if (usableTools.length > 0) {
@@ -548,6 +600,31 @@ export async function chat(sessionKey, userText, options = {}) {
         )
         const retry = await finalize(sessionKey)
         if (retry.length > answer.length) answer = retry
+      }
+
+      const soundsLikePromise =
+        answer.length > 0 &&
+        answer.length < 400 &&
+        /(马上|稍等|这就|正在做|立刻|一会儿|我去做|我来做|开始做|接着推进|直接推进|这就开始|稍后就|这就去)/.test(
+          answer,
+        )
+
+      if (soundsLikePromise && autoPushes < 2 && getGoal(sessionKey)) {
+        autoPushes += 1
+        console.warn(
+          `[空承诺] ${sessionKey} 第${round + 1}轮说要做但没调工具，自动追问 ${autoPushes}/2`,
+        )
+
+        messages.push({ role: 'assistant', content: answer })
+        messages.push({
+          role: 'user',
+          content:
+            '（系统提示）你刚才只是承诺要去做，没有产生任何实际动作，用户什么都不会收到。' +
+            '现在立刻调用工具执行；如果要多步才能完成，用 start_task 交给后台。不要再用纯文字回复。',
+        })
+
+        answer = ''
+        continue
       }
 
       break

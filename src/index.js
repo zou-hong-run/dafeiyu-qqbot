@@ -214,6 +214,38 @@ function recordGroupMessage(event, text) {
   })
 }
 
+function mediaMissingHint(downloadDir, resolved) {
+  const name = path.basename(resolved)
+  const hits = []
+
+  const walk = (dir, depth) => {
+    if (depth > 4 || hits.length >= 5) return
+    let entries = []
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full, depth + 1)
+      else if (entry.name === name) hits.push(path.relative(downloadDir, full).split(path.sep).join('/'))
+    }
+  }
+
+  walk(downloadDir, 0)
+
+  const list = hits.length
+    ? `\n在 downloads 下找到同名文件，可以直接传这些相对路径：\n${hits.map((item) => `  ${item}`).join('\n')}`
+    : ''
+
+  return (
+    `文件不存在：${name}\n` +
+    '提示：path 是相对 downloads/ 目录的。文件在 downloads/vtest/a.png 就传 "vtest/a.png"，不要带 downloads/ 前缀。' +
+    list
+  )
+}
+
 function imageSenderFor(event) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
@@ -234,7 +266,7 @@ function imageSenderFor(event) {
       throw new Error('只能发送图片（jpg/png/gif/webp/bmp），其他文件类型 QQ 平台不支持')
     }
     if (!fs.existsSync(resolved)) {
-      throw new Error(`文件不存在：${path.basename(resolved)}`)
+      throw new Error(mediaMissingHint(downloadDir, resolved))
     }
 
     const size = fs.statSync(resolved).size
@@ -267,7 +299,7 @@ function audioSenderFor(event) {
       throw new Error('只接受 QQ 支持的语音格式（silk/mp3/wav/ogg/flac）')
     }
     if (!fs.existsSync(resolved)) {
-      throw new Error(`文件不存在：${path.basename(resolved)}`)
+      throw new Error(mediaMissingHint(downloadDir, resolved))
     }
 
     const size = fs.statSync(resolved).size
@@ -300,7 +332,7 @@ function videoSenderFor(event) {
       throw new Error('只接受 mp4 格式，QQ 视频消息不支持其他容器')
     }
     if (!fs.existsSync(resolved)) {
-      throw new Error(`文件不存在：${path.basename(resolved)}`)
+      throw new Error(mediaMissingHint(downloadDir, resolved))
     }
 
     const size = fs.statSync(resolved).size

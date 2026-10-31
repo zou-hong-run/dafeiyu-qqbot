@@ -21,6 +21,7 @@ export const TOOL_POLICY = {
   dns: READ_ONLY,
 
   remember: OPEN,
+  goal: OPEN,
   send_image: OPEN,
   send_audio: OPEN,
   send_video: OPEN,
