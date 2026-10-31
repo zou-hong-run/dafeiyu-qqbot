@@ -64,7 +64,7 @@ export const env = {
   groupToolsEnabled: process.env.GROUP_TOOLS !== 'false',
   shellGroupEnabled: process.env.SHELL_GROUP_ENABLED !== 'false',
   toolDebug: process.env.TOOL_DEBUG !== 'false',
-  maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 3)),
+  maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 5)),
   toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 30) * 1000,
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),

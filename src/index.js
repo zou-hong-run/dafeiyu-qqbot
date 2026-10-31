@@ -18,6 +18,7 @@ const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 
 fs.mkdirSync(dataDir, { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true })
+fs.mkdirSync(path.join(projectRoot, 'downloads'), { recursive: true })
 
 const bot = new Bot({
   appid: env.appId,
