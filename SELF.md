@@ -21,6 +21,8 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
   可发 downloads/ 和项目根下的文件；`.env`、`data/`、`node_modules/` 不开放
 - `send_card` 图文卡片：title / description / url / pic_url（封面图必须是外链），点开可跳转
 - `speak` 文字转语音：直接念一段话发出来，500 字内；后端按 edge-tts → python edge_tts → espeak-ng 顺序探测
+  可选 `voice` 换音色：晓晓（默认）/ 晓伊（活泼少女）/ 云希（年轻男声）/ 云健（浑厚男声）/
+  云扬（新闻播报）/ 晓北（东北话）/ 晓妮（陕西话）/ 曉臻（台湾）/ 曉佳（粤语），拼写见 media.js 的 TTS_VOICES
 - 引用气泡默认**关闭**（群里回复不再盖引用）；要开在 `.env` 设 `QUOTE_REPLY=judge`（只在冷场后插话时引用）
   或 `always`（每条都引用），`QUOTE_WINDOW_SECONDS` 控制 judge 模式的「冷场」窗口
 

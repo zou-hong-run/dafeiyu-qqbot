@@ -149,13 +149,21 @@ const LOCAL_TOOLS = [
     function: {
       name: 'speak',
       description:
-        '把一段文字合成语音发到当前聊天（真人女声，比文字更有味道，适合安慰、吐槽、卖萌、念通知）。' +
-        '参数只有 text，一次性传要念的整段话，500 字以内，不要带 Markdown 标记和链接。' +
+        '把一段文字合成语音发到当前聊天（真人发声，比文字更有味道，适合安慰、吐槽、卖萌、念通知）。' +
+        'text 一次性传要念的整段话（500 字以内，不要带 Markdown 和链接）。' +
+        'voice 可选，用来换音色：默认晓晓（温和女声），换活泼少女用 zh-CN-XiaoyiNeural，' +
+        '换男声用 zh-CN-YunxiNeural / zh-CN-YunjianNeural，要口音可用东北话 zh-CN-liaoning-XiaobeiNeural ' +
+        '或粤语 zh-HK-HiuGaaiNeural。用户说「换个声音」「用御姐音/萝莉音」就换 voice。' +
         '用户说「转语音」「念给我听」「说句话」时必须调这个工具，只回文字等于没做到。',
       parameters: {
         type: 'object',
         properties: {
           text: { type: 'string', description: '要念出来的纯文本，500 字以内' },
+          voice: {
+            type: 'string',
+            description:
+              'edge-tts 音色名，形如 zh-CN-XiaoyiNeural。不填就用 .env 里的 TTS_VOICE（默认晓晓）',
+          },
         },
         required: ['text'],
       },
@@ -478,8 +486,8 @@ async function runTool(
       return '当前场景不支持语音合成。'
     }
     try {
-      const result = await speakSender(args.text)
-      return `语音已发送：${result.chars} 字，合成后端 ${result.backend}`
+      const result = await speakSender({ text: args.text, voice: args.voice })
+      return `语音已发送：${result.chars} 字，音色 ${result.voice}，合成后端 ${result.backend}`
     } catch (error) {
       return `转语音失败：${error?.message ?? error}`
     }

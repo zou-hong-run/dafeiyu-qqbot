@@ -114,6 +114,35 @@ export function audioSenderFor(event) {
 const TTS_VOICE = process.env.TTS_VOICE?.trim() || 'zh-CN-XiaoxiaoNeural'
 const TTS_MAX_CHARS = 500
 
+// edge-tts 的音色名形如 zh-CN-XiaoyiNeural；只放行这个格式，别把任意字符串塞给命令行
+const VOICE_PATTERN = /^[a-zA-Z]{2,3}-[a-zA-Z]{2,4}-[a-zA-Z]+Neural$/
+
+export const TTS_VOICES = {
+  'zh-CN-XiaoxiaoNeural': '晓晓 · 温和女声（默认）',
+  'zh-CN-XiaoyiNeural': '晓伊 · 活泼少女',
+  'zh-CN-YunxiNeural': '云希 · 年轻男声',
+  'zh-CN-YunjianNeural': '云健 · 浑厚男声',
+  'zh-CN-YunyangNeural': '云扬 · 新闻播报男声',
+  'zh-CN-liaoning-XiaobeiNeural': '晓北 · 东北话女声',
+  'zh-CN-shaanxi-XiaoniNeural': '晓妮 · 陕西话女声',
+  'zh-TW-HsiaoChenNeural': '曉臻 · 台湾女声',
+  'zh-HK-HiuGaaiNeural': '曉佳 · 粤语女声',
+}
+
+export function resolveVoice(input) {
+  const voice = String(input ?? '').trim()
+  if (!voice || voice === 'default') return TTS_VOICE
+
+  if (!VOICE_PATTERN.test(voice)) {
+    throw new Error(
+      `音色名不合法：${voice}。要形如 zh-CN-XiaoyiNeural 的值，` +
+        `可选：${Object.keys(TTS_VOICES).join(' / ')}`,
+    )
+  }
+
+  return voice
+}
+
 function firstLineOf(error) {
   return String(error?.stderr || error?.message || error)
     .split('\n')
@@ -121,7 +150,7 @@ function firstLineOf(error) {
 }
 
 // 依次尝试 edge-tts（音质最好，需联网）→ python edge_tts → espeak-ng + ffmpeg（离线机器音）
-async function synthesizeSpeech(text) {
+async function synthesizeSpeech(text, voice = TTS_VOICE) {
   const tmpDir = path.join(projectRoot, 'tmp')
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   const mp3 = path.join(tmpDir, `tts-${stamp}.mp3`)
@@ -139,7 +168,7 @@ async function synthesizeSpeech(text) {
   try {
     await run(
       'edge-tts',
-      ['--text', text, '--voice', TTS_VOICE, '--write-media', mp3],
+      ['--text', text, '--voice', voice, '--write-media', mp3],
       { timeout: 90_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
     )
     if (usable(mp3)) return { file: mp3, backend: 'edge-tts' }
@@ -151,7 +180,7 @@ async function synthesizeSpeech(text) {
   try {
     await run(
       'python3',
-      ['-m', 'edge_tts', '--text', text, '--voice', TTS_VOICE, '--write-media', mp3],
+      ['-m', 'edge_tts', '--text', text, '--voice', voice, '--write-media', mp3],
       { timeout: 90_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
     )
     if (usable(mp3)) return { file: mp3, backend: 'python edge-tts' }
@@ -188,13 +217,16 @@ async function synthesizeSpeech(text) {
 
 export function speakSenderFor(event) {
   return async (input) => {
-    const text = String(input ?? '').trim()
+    const payload = typeof input === 'string' ? { text: input } : (input ?? {})
+    const text = String(payload.text ?? '').trim()
+
     if (!text) throw new Error('缺少要念的文本')
     if (text.length > TTS_MAX_CHARS) {
       throw new Error(`文本 ${text.length} 字，太长，压到 ${TTS_MAX_CHARS} 字以内再合成`)
     }
 
-    const { file, backend } = await synthesizeSpeech(text)
+    const voice = resolveVoice(payload.voice)
+    const { file, backend } = await synthesizeSpeech(text, voice)
 
     try {
       await deliver(event, segment.audio(file))
@@ -202,7 +234,7 @@ export function speakSenderFor(event) {
       fs.rm(file, { force: true }, () => {})
     }
 
-    return { backend, chars: text.length }
+    return { backend, chars: text.length, voice }
   }
 }
 
