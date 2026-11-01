@@ -55,7 +55,7 @@ src/
     client.js      MCP 客户端：启动内置服务、热加载 data/mcp-registry.json 里注册的外部服务
   mcp-server/
     index.js       内置工具服务：搜索、抓网页、时间、天气、汇率、计算、时区、DNS
-    shell.js       shell 执行（带黑名单 + 重试）
+    shell.js       shell 执行与 run_script（黑名单 + 重试 + 后台运行）
     fs-tools.js    文件读写、列目录
     evolve.js      写技能、注册 MCP、装包
     download.js    下载网络文件
@@ -119,6 +119,7 @@ pnpm start
 | `QUOTE_REPLY` | 引用气泡：`false` 关（默认）/ `judge` 只在插话时 / `always` 每条都引用 |
 | `TTS_VOICE` | `speak` 工具用的 edge-tts 音色（`zh-CN-XiaoxiaoNeural`） |
 | `SHELL_GROUP_ENABLED` | 设成 `false` 后 shell 只给私聊用 |
+| `SHELL_UNRESTRICTED` | `true` 时彻底放开 shell/run_script，连读 `.env`、打印密钥都不拦（危险） |
 
 ## 部署（pm2）
 
@@ -159,7 +160,8 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | --- | --- |
 | `search` / `fetch` | 联网搜索（支持 `site:` `after:` 语法）/ 抓网页正文 |
 | `now` / `weather` / `exchange` / `calc` / `timezone` / `dns` | 时间、天气、汇率、精确计算、时区、DNS |
-| `shell` | 执行命令。黑名单：删根目录/家目录、关机、磁盘操作、下载即执行远程脚本、读 `.env`、导出环境变量、打印密钥、用 pm2 管理自身进程；装包/编译这类重命令前先查可用内存；失败自动重试 3 次 |
+| `shell` | 执行命令，pm2 等运维命令也能跑。只拦：删根目录/家目录、关机、磁盘操作、读 `.env`、导出环境变量、打印密钥、系统账号与 SSH 密钥；装包/编译前先查可用内存；失败自动重试 3 次；`background:true` 可后台跑 |
+| `run_script` | 把多行脚本写进 `tmp/` 再执行（bash / python / node），不用处理引号转义；支持后台运行和保留脚本 |
 | `read_file` / `write_file` / `list_dir` | 项目内文件读写（`.env`、`data/` 不可写） |
 | `download` | 下载网络文件到 `downloads/` |
 | `write_skill` / `list_skills` | 写技能 Markdown 到 `skills/`，后续对话自动注入 |
@@ -192,7 +194,7 @@ QQ 网关 ──WS──▶ index.js
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 
-- `shell` 默认群聊可用 —— 任何群友都能让机器人执行命令。建议 `.env` 加 `SHELL_GROUP_ENABLED=false`
+- `shell` / `run_script` 默认群聊可用 —— 任何群友都能让机器人执行命令、跑脚本。建议 `.env` 加 `SHELL_GROUP_ENABLED=false`
 - `write_file` / `install_package` / `add_mcp` 同样默认群聊可用，调 `src/policy.js` 里的 `TOOL_POLICY` 可以逐项改
 - shell 子进程的环境变量只透传 `PATH` 等基础变量和模型 key，**QQ_APP_ID / QQ_APP_SECRET 不会进子进程**
 - `.env`、`data/` 对模型的文件写入工具不可写；`.env` 读取被 shell 黑名单拦住

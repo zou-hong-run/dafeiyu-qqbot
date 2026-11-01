@@ -19,7 +19,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
 const run = promisify(execFile)
-const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell'])
+const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell', 'run_script'])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 
 fs.mkdirSync(dataDir, { recursive: true })

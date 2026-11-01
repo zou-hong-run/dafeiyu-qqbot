@@ -32,6 +32,7 @@ export const TOOL_POLICY = {
   download: OPEN,
 
   shell: SHELL,
+  run_script: SHELL,
 
   start_task: OPEN,
   schedule_task: OPEN,

@@ -97,7 +97,12 @@ async function dropDeadConnections() {
 
 export async function startMcp({ apiKey, baseURL }) {
   baseEnv = { DEEP_SEEK_API_KEY: apiKey, DEEPSEEK_BASE_URL: baseURL }
-  builtinSpec = { command: process.execPath, args: [builtinServerPath] }
+  builtinSpec = {
+    command: process.execPath,
+    args: [builtinServerPath],
+    // shell/run_script 的放开开关得传进去，否则子进程读不到
+    env: { SHELL_UNRESTRICTED: process.env.SHELL_UNRESTRICTED ?? '' },
+  }
   await connect('builtin', builtinSpec)
   await syncRegistry(true)
   return getTools()
