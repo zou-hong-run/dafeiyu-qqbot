@@ -241,6 +241,33 @@ export function videoSenderFor(event) {
   }
 }
 
+// 能发的文件范围：downloads/ 和项目根下的文件
+// 密钥、记忆、依赖目录一律不发——群里任何拿不到 shell 的人也能调这个工具
+const FILE_BLOCKED = ['.env', 'data/', 'node_modules/', '.git/', '.ssh/']
+
+export function resolveSendableFile(target) {
+  const roots = [path.join(projectRoot, 'downloads'), projectRoot]
+  const cleaned = String(target ?? '')
+    .trim()
+    .replace(/^\.[/\\]/, '')
+    .replace(/^[/\\]+/, '')
+
+  for (const root of roots) {
+    const resolved = path.resolve(root, cleaned)
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) continue
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue
+
+    const rel = path.relative(projectRoot, resolved).split(path.sep).join('/')
+    if (FILE_BLOCKED.some((prefix) => rel === prefix || rel.startsWith(prefix.replace(/\/$/, '/')))) {
+      throw new Error(`这个文件不开放发送（${rel}）：密钥、记忆和依赖目录不在可发范围内`)
+    }
+
+    return resolved
+  }
+
+  return null
+}
+
 export function fileSenderFor(event) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
@@ -248,11 +275,8 @@ export function fileSenderFor(event) {
     const target = String(input ?? '').trim()
     if (!target) throw new Error('缺少文件路径')
 
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
-    if (!fs.existsSync(resolved)) throw new Error(mediaMissingHint(downloadDir, resolved))
+    const resolved = resolveSendableFile(target)
+    if (!resolved) throw new Error(mediaMissingHint(downloadDir, path.resolve(downloadDir, target)))
 
     const stat = fs.statSync(resolved)
     if (stat.size > 200 * 1024 * 1024) {

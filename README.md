@@ -156,7 +156,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 
 | 工具 | 作用 |
 | --- | --- |
-| `send_image` / `send_audio` / `send_video` / `send_file` | 发图片 / 语音 / 视频 / 任意文件（文件走 `msg_type=7`，群里显示成可下载卡片） |
+| `send_image` / `send_audio` / `send_video` / `send_file` | 发图片 / 语音 / 视频 / 任意文件（文件走 `msg_type=7`，群里显示成可下载卡片）。文件可发 `downloads/` 和项目根下的文件，`.env`、`data/`、`node_modules/` 不开放 |
 | `send_card` | 图文卡片：标题 + 描述 + 链接 + 封面图外链 |
 | `speak` | 文字转语音（edge-tts → python edge_tts → espeak-ng 依次探测） |
 | `remember` / `clear_memory` | 写长期记忆 / 清空当前会话全部记忆 |

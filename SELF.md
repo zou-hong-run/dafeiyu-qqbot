@@ -17,7 +17,8 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - `send_image` 图片：jpg / png / gif / webp / bmp，10MB 内
 - `send_audio` 语音：silk / mp3 / wav / ogg / flac，20MB 内
 - `send_video` 视频：**仅 mp4**，软上限 30MB，超过会降级成文件
-- `send_file` 任意文件：PDF / Word / Excel / 压缩包 / 代码，上限 200MB，群里显示成可下载的文件卡片
+- `send_file` 任意文件：PDF / Word / Excel / 压缩包 / 代码 / SELF.md / README.md，上限 200MB，
+  可发 downloads/ 和项目根下的文件；`.env`、`data/`、`node_modules/` 不开放
 - `send_card` 图文卡片：title / description / url / pic_url（封面图必须是外链），点开可跳转
 - `speak` 文字转语音：直接念一段话发出来，500 字内；后端按 edge-tts → python edge_tts → espeak-ng 顺序探测
 - 引用气泡默认**关闭**（群里回复不再盖引用）；要开在 `.env` 设 `QUOTE_REPLY=judge`（只在冷场后插话时引用）

@@ -111,7 +111,8 @@ const LOCAL_TOOLS = [
       name: 'send_file',
       description:
         '把任意格式的文件发送到当前聊天（PDF、Word、Excel、压缩包、代码等），群里会显示成可下载的文件卡片。' +
-        '单文件上限 200MB。只能发 downloads/ 目录下的文件。图片/视频/语音请分别用 send_image / send_video / send_audio。',
+        '单文件上限 200MB。能发 downloads/ 下的文件和项目根下的文件（SELF.md、README.md、package.json、src/ 里的源码都可以）。' +
+        '.env、data/、node_modules/ 不开放。图片/视频/语音请分别用 send_image / send_video / send_audio。',
       parameters: {
         type: 'object',
         properties: {
@@ -446,7 +447,11 @@ async function runTool(
       const sent = await fileSender(args.path, { fileName: args.fileName })
       return `文件已发送：${sent}`
     } catch (error) {
-      return `发文件失败：${error?.message ?? error}`
+      return (
+        `发文件失败：${error?.message ?? error}
+` +
+        '这条必须如实告诉用户「发送失败了」并说明原因，不要说已经发出去了。'
+      )
     }
   }
 
