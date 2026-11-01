@@ -200,6 +200,8 @@ QQ 网关 ──WS──▶ index.js
                   └─ 发送：被动回复优先（每条消息最多 4 次），超时/超次自动降级主动消息
 ```
 
+**自动清理**：每小时跑一次——闲置超过 `SESSION_TTL_MINUTES` 的会话清空短期/中期记忆（`remember` 写的长期事实保留），`downloads/incoming/` 里超过 `MEDIA_TTL_HOURS` 的附件删除。
+
 **记忆分层**：短期只保留最近 `HISTORY_TURNS` 轮原文（超出的自动压成中期摘要），另有一道 token 上限兜底；`remember` 写入的长期事实跨重启保留。
 
 > 这两道上限必须都在：只按 token 裁的话，`CONTEXT_WINDOW_TOKENS` 设得大就永远不触发，短期记忆会一直长下去。

@@ -106,6 +106,37 @@ export async function describeInbound(items) {
   return `\n\n（对方还发了 ${items.length} 个附件）\n${text}`.slice(0, MAX_TEXT_CHARS * 4)
 }
 
+// 入站附件按 mtime 定期清理：2G 机器磁盘也不富裕，收进来的图/语音不该永久堆积
+export async function cleanupIncoming(ttlHours = 24) {
+  if (!(ttlHours > 0)) return 0
+
+  let names = []
+  try {
+    names = fs.readdirSync(incomingDir)
+  } catch {
+    return 0
+  }
+
+  const ttlMs = ttlHours * 3600 * 1000
+  const now = Date.now()
+  let removed = 0
+
+  for (const name of names) {
+    const full = path.join(incomingDir, name)
+    try {
+      const info = fs.statSync(full)
+      if (!info.isFile()) continue
+      if (now - info.mtimeMs <= ttlMs) continue
+      fs.rmSync(full, { force: true })
+      removed += 1
+    } catch {
+      // 单个文件删不掉不影响其他
+    }
+  }
+
+  return removed
+}
+
 export function clearIncoming() {
   try {
     fs.rmSync(incomingDir, { recursive: true, force: true })

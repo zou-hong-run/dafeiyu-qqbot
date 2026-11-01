@@ -9,12 +9,12 @@ import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
-import { reset, stats, flush } from './memory.js'
+import { evictIdleSessions, reset, stats, flush } from './memory.js'
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
-import { describeInbound, extractInbound } from './incoming.js'
+import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
 import { clip, passiveCountOf, sendReply } from './sender.js'
 import {
@@ -854,6 +854,22 @@ try {
       }
     },
   })
+
+  const mediaTtlHours = Number(process.env.MEDIA_TTL_HOURS || 24)
+  const cleaner = setInterval(async () => {
+    try {
+      const { cleared, removed } = evictIdleSessions(env.sessionTtlMs)
+      const files = await cleanupIncoming(mediaTtlHours)
+      if (cleared || removed || files) {
+        console.log(
+          `[清理] 闲置会话：清空 ${cleared} 个、删除 ${removed} 个空壳；回收附件 ${files} 个`,
+        )
+      }
+    } catch (error) {
+      console.error('[清理] 失败：', error?.message ?? error)
+    }
+  }, 60 * 60 * 1000)
+  cleaner.unref?.()
 
   if (process.send) process.send('ready')
 } catch (error) {

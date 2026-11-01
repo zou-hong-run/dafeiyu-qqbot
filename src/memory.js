@@ -210,6 +210,40 @@ export function midTerm(key) {
   return cleanContent(getSession(key).midTerm)
 }
 
+// 闲置会话回收：短期/中期是「这次聊天」，隔太久就该忘；
+// 长期事实（remember 写的）永远保留，不受闲置影响
+export function evictIdleSessions(ttlMs) {
+  if (!(ttlMs > 0)) return { cleared: 0, removed: 0 }
+
+  const now = Date.now()
+  let cleared = 0
+  let removed = 0
+
+  for (const [key, session] of Object.entries(state.sessions)) {
+    const idle = now - (session.updatedAt ?? 0)
+    if (idle <= ttlMs) continue
+
+    const hasLongTerm = Array.isArray(session.longTerm) && session.longTerm.length > 0
+    const hasShortTerm = session.shortTerm.length > 0 || Boolean(session.midTerm)
+
+    if (!hasShortTerm && !hasLongTerm) {
+      delete state.sessions[key]
+      removed += 1
+      continue
+    }
+
+    if (hasShortTerm) {
+      session.shortTerm = []
+      session.midTerm = ''
+      session.updatedAt = now
+      cleared += 1
+    }
+  }
+
+  if (cleared > 0 || removed > 0) scheduleSave()
+  return { cleared, removed }
+}
+
 export function reset(key) {
   state.sessions[key] = blank()
   scheduleSave()
