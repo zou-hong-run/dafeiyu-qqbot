@@ -48,6 +48,8 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - 主进程堆 320MB、内置 MCP 子进程 192MB、每条 shell 命令 ulimit 512MB、send_file 单文件 50MB
 - 同时最多 2 个工单；ffmpeg 额外降到 480MB 虚拟内存 + 低优先级
 - 内存不够时命令会被直接拒，别反复试，先 `free -m` 看，再考虑加 swap 或降规模
+- 执行前会**按脚本内容预估内存**：引用的视频 ×2.5、音频 ×4、图片 ×6、CSV ×4、JSON ×3，
+  外加 bytearray / numpy / Buffer 的显式分配量。预估超过可用内存直接拒绝，结果里会回显预估数字
 
 ### 系统操作
 - **高危工具只有管理员能用**（`ADMIN_OPENIDS` 白名单）：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`。
