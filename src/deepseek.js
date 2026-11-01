@@ -246,11 +246,17 @@ const LOCAL_TOOLS = [
       description:
         '读取当前这个群最近的聊天记录（时间 + 昵称 + 内容）。只能在群里用，只能看到当前群，' +
         '看不到别的群，也看不到私聊。被问「刚才大家聊了什么」「我们的聊天记录」「复盘一下」时用它。' +
-        '如果返回为空或只有几条，说明这个群没开「获取群内全部消息」，我只能看到 @ 我的那几条。',
+        '如果返回为空或只有几条，说明这个群没开「获取群内全部消息」，我只能看到 @ 我的那几条。' +
+        '要统计「谁说过话 / 群里有几个人」，把 mode 设成 people，直接返回昵称和发言条数。',
       parameters: {
         type: 'object',
         properties: {
           limit: { type: 'integer', description: '取最近多少条，默认 30，上限 200' },
+          mode: {
+            type: 'string',
+            description: 'messages=原始对话（默认）；people=只返回出现过的人和各自发言条数',
+            enum: ['messages', 'people'],
+          },
         },
       },
     },
@@ -527,7 +533,7 @@ async function runTool(
       return '当前场景读不到群聊记录（私聊没有群记录）。'
     }
     try {
-      return await historyReader(args.limit)
+      return await historyReader(args.limit, args.mode)
     } catch (error) {
       return `读群聊记录失败：${error?.message ?? error}`
     }

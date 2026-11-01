@@ -90,7 +90,7 @@ function historyReaderFor(event) {
   const groupId = event.group_id
   if (!groupId) return null
 
-  return async (limit) => {
+  return async (limit, mode) => {
     const count = Math.min(Math.max(Number(limit) || 30, 5), 200)
     const entries = groupLog.recent(groupId, count)
 
@@ -103,9 +103,21 @@ function historyReaderFor(event) {
     }
 
     const info = groupLog.statsOf(groupId)
+
+    if (String(mode) === 'people') {
+      const people = new Map()
+      for (const entry of entries) {
+        const name = entry.n || `用户${String(entry.u ?? '').slice(-4)}`
+        people.set(name, (people.get(name) ?? 0) + 1)
+      }
+
+      const list = [...people.entries()].sort((a, b) => b[1] - a[1])
+      const lines = list.map(([name, times], index) => `${index + 1}. ${name}（${times} 条）`)
+      return `当前群最近 ${entries.length} 条记录里出现过 ${list.length} 个人：\n${lines.join('\n')}`
+    }
+
     return (
-      `当前群最近 ${entries.length} 条（库里共 ${info.count} 条，最早 ${info.from ?? '-'}）：
-` +
+      `当前群最近 ${entries.length} 条（库里共 ${info.count} 条，最早 ${info.from ?? '-'}）：\n` +
       groupLog.formatForSummary(entries)
     )
   }
