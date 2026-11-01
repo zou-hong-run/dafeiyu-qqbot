@@ -771,12 +771,15 @@ function reportMemory() {
       `[内存] 总计 ${(total / 1024).toFixed(1)}G｜可用 ${available}MB｜swap ${(swap / 1024).toFixed(1)}G`,
     )
     console.log(
-      `[内存] 预算：主进程堆 ${process.env.MAIN_HEAP_MB || 320}MB + MCP ${process.env.MCP_HEAP_MB || 192}MB，` +
-        `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB，同时最多 ${env.taskConcurrency} 个工单`,
+      `[内存] 预算：主进程堆 ${process.env.MAIN_HEAP_MB || 320}MB + MCP ${process.env.MCP_HEAP_MB || 160}MB，` +
+        `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB，命令预估安全线 ${Math.max(120, Math.floor(available * 0.75))}MB，` +
+        `同时最多 ${env.taskConcurrency} 个工单`,
     )
 
-    if (available < 500) {
-      console.warn(`[内存] 可用只剩 ${available}MB，建议先腾出空间再跑重活`)
+    if (available < 300) {
+      console.warn(`[内存] 可用只剩 ${available}MB：低于 300MB 时所有 shell 命令都会被拒绝，只剩救援命令`)
+    } else if (available < 500) {
+      console.warn(`[内存] 可用 ${available}MB，偏紧：重命令会被预估拦截，先腾内存或加 swap`)
     }
     if (swap < 512) {
       console.warn(

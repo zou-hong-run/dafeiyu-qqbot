@@ -44,7 +44,7 @@ const HEAVY_COMMAND =
 // 视频转码是最容易把 2G 小机器打死的操作：一个 ffmpeg 能吃 700MB，
 // 超时后模型还可能重试，几个进程叠起来就 OOM
 const VIDEO_PROCESS = /\b(ffmpeg|ffprobe|avconv)\b/i
-const VIDEO_NEED_MB = 800
+const VIDEO_NEED_MB = 700
 const VIDEO_ULIMIT_MB = 480
 const DEFAULT_ULIMIT_MB = Number(process.env.SHELL_ULIMIT_MB || 512)
 
@@ -183,15 +183,18 @@ function assertEstimate(estimate, text) {
   const { memMB, notes } = estimate
   const detail = notes.length > 0 ? `\n明细：\n  ${notes.join('\n  ')}` : ''
 
-  if (memMB >= mem.availableMB) {
+  // 留 25% 缓冲：这台机器总共才 1.6G，扣掉系统和其他服务，不能把可用内存吃干
+  const ceiling = Math.max(120, Math.floor(mem.availableMB * 0.75))
+
+  if (memMB > ceiling) {
     throw new Error(
-      `预估要 ${memMB}MB 内存，但当前可用只有 ${mem.availableMB.toFixed(0)}MB（总计 ${mem.totalMB.toFixed(0)}MB），` +
-        `直接跑必然 OOM。${detail}\n` +
+      `预估要 ${memMB}MB，超过安全线 ${ceiling}MB（当前可用 ${mem.availableMB.toFixed(0)}MB × 75%，` +
+        `总内存 ${mem.totalMB.toFixed(0)}MB）。直接跑很可能触发 OOM。${detail}\n` +
         '改法：缩小输入（截取片段、降分辨率）、分批处理、或者先腾内存（free -m 看谁占着）。',
     )
   }
 
-  const tight = mem.availableMB - memMB < 200
+  const tight = mem.availableMB - memMB < 150
   if (tight) {
     console.warn(`[预估] 内存偏紧：预估 ${memMB}MB，可用 ${mem.availableMB.toFixed(0)}MB`)
   }
@@ -205,9 +208,18 @@ function assertMemory(command) {
 
   if (MEMORY_RESCUE.test(command)) return
 
+  // 可用内存不到 300MB 时除了救援命令一律停摆：这时候再跑任何东西都可能触发 OOM
+  if (mem.availableMB < 300) {
+    throw new Error(
+      `可用内存只剩 ${mem.availableMB.toFixed(0)}MB（总 ${mem.totalMB.toFixed(0)}MB），` +
+        '现在跑任何命令都可能把整机拖进 OOM，先腾内存再说。\n' +
+        '救援命令不受限制：free -m、ps aux --sort=-%mem | head、kill <pid>、pm2 list',
+    )
+  }
+
   const video = VIDEO_PROCESS.test(command)
   const heavy = HEAVY_COMMAND.test(command)
-  const needMB = video ? VIDEO_NEED_MB : heavy ? 600 : 150
+  const needMB = video ? VIDEO_NEED_MB : heavy ? 550 : 120
 
   // 小机器没 swap，随便一个重活就能把整机拖死，先拦住
   if ((video || heavy) && mem.totalMB < 2048 && mem.swapTotalMB < 500) {
