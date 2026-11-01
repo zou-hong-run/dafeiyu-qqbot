@@ -108,8 +108,18 @@ export const env = {
   groupAutoReply: process.env.GROUP_AUTO_REPLY !== 'false',
   groupTriggerCooldown: nonNegativeNumber('GROUP_TRIGGER_COOLDOWN', 0) * 1000,
 
-  // 自动判断该不该插话：默认关闭，只有显式 GROUP_JUDGE=true 才开，避免在群里乱接话
-  groupJudge: process.env.GROUP_JUDGE === 'true',
+  // 是否自动判断该不该插话：off / observe（只看不动）/ auto
+  // 旧变量 GROUP_JUDGE=true 等价 auto；新变量 JUDGE_MODE 优先
+  judgeMode: (() => {
+    const raw = (process.env.JUDGE_MODE ?? '').trim().toLowerCase()
+    if (['off', 'observe', 'auto'].includes(raw)) return raw
+    return process.env.GROUP_JUDGE === 'true' ? 'auto' : 'off'
+  })(),
+  groupJudge: (() => {
+    const raw = (process.env.JUDGE_MODE ?? '').trim().toLowerCase()
+    if (['off', 'observe', 'auto'].includes(raw)) return raw !== 'off'
+    return process.env.GROUP_JUDGE === 'true'
+  })(),
   judgeDebounceMs: positiveNumber('JUDGE_DEBOUNCE_MS', 3000),
   judgeMaxWaitMs: positiveNumber('JUDGE_MAX_WAIT_MS', 10000),
   judgeContextSize: Math.floor(positiveNumber('JUDGE_CONTEXT_SIZE', 10)),

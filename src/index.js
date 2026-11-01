@@ -6,16 +6,17 @@ import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
 import { Bot, ReceiverMode, segment } from 'qq-official-bot'
 import { chat, summarizeGroup, judgeRelevance, runTaskAgent } from './deepseek.js'
-import { startTask as launchTask, busyTasks, taskStatus, describeTool, killTask, takeInterruptedTasks } from './task-runner.js'
+import { startTask as launchTask, busyTasks, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
-import { filterTools, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
+import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
 import { reset, stats, flush } from './memory.js'
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import * as groupLog from './group-log.js'
+import * as observe from './observe.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
@@ -396,6 +397,20 @@ async function runJudge(event) {
 
   if (!verdict.reply) {
     console.log(`[群判断] 不回：${verdict.reason}`)
+    return
+  }
+
+  // 观察态：记一笔「本来会接这句」，但不发消息。用来先看它会插手什么，再决定放不放开
+  if (env.judgeMode === 'observe') {
+    observe.record({
+      groupId,
+      userId: event.user_id,
+      userName: event.sender?.user_name,
+      text: event.content,
+      urgency: verdict.urgency,
+      reason: verdict.reason,
+    })
+    console.log(`[观察] 本来会接（${verdict.urgency}）：${verdict.reason}`)
     return
   }
 
@@ -806,7 +821,7 @@ function notifierFor(event) {
 }
 
 async function handleMessage(event, trigger = 'at') {
-  const text = (event.content ?? '').trim()
+  let text = (event.content ?? '').trim()
   if (!text) return
 
   // 只有自动插话才引用原消息；被 @、被点名、私聊都不加引用气泡
@@ -824,6 +839,46 @@ async function handleMessage(event, trigger = 'at') {
         `群：${event.group_id ?? '（私聊）'}\n` +
         `管理员权限：${admin ? '有' : '无'}\n\n` +
         '要开高危工具（执行命令、写文件、装包、加 MCP）就把上面这串 openid 填进 .env 的 ADMIN_OPENIDS，逗号分隔。',
+    )
+    return
+  }
+
+  if (text === '/observe' || text.startsWith('/observe ')) {
+    if (!isAdmin(scope, event.user_id ?? '')) {
+      await sendReply(event, '观察记录只对管理员开放。')
+      return
+    }
+
+    const groupId = event.group_id ?? ''
+
+    if (text.includes('clear')) {
+      observe.clear(groupId)
+      await sendReply(event, '观察记录已清空。')
+      return
+    }
+
+    const info = observe.stats(groupId)
+    const items = observe.recent(groupId, 10)
+
+    if (items.length === 0) {
+      await sendReply(
+        event,
+        `还没有观察记录（累计 ${info.total} 条）。\n` +
+          '把 .env 设成 JUDGE_MODE=observe 后，机器人会在「本来想接话」时只记一笔、不回复，' +
+          '你隔天用 /observe 就能看出它会插手哪些消息。',
+      )
+      return
+    }
+
+    const lines = items.map((item) => {
+      const time = new Date(item.t).toLocaleTimeString('zh-CN', { hour12: false })
+      return `${time} ${item.userName || '某人'}（${item.urgency}）：${item.reason}\n  「${item.text}」`
+    })
+
+    await sendReply(
+      event,
+      `观察记录：今天 ${info.today} 条 / 累计 ${info.total} 条\n\n${lines.join('\n')}\n\n` +
+        '想让它在这些时候真的接话，就把 JUDGE_MODE 改成 auto。',
     )
     return
   }
@@ -935,6 +990,20 @@ async function handleMessage(event, trigger = 'at') {
 
   if (text.length > env.maxInputChars) {
     await sendReply(event, `消息太长了，请压缩到 ${env.maxInputChars} 字以内再发给我。`)
+    return
+  }
+
+  // 订阅直通：这个会话已经有工单在跑，新消息直接投给那个 Worker，不再另开一轮对话
+  // 想绕过它单独聊天，就发 /chat 开头
+  const bypassTicket = text.startsWith('/chat ')
+  if (bypassTicket) text = text.slice(6).trim()
+
+  const runningTicket = bypassTicket ? null : submitInput(key, text)
+  if (runningTicket) {
+    await sendReply(
+      event,
+      `已经转给正在跑的工单 ${runningTicket}，它下一步就会看到。\n想单独聊别的事就发 /chat 开头。`,
+    )
     return
   }
 
@@ -1151,7 +1220,13 @@ try {
   console.log(`[启动] 人格: ${env.personaName}，模型: ${env.model}，记忆: 短期 ${env.historyTurns} 轮 / 中期摘要 / 长期事实`)
   console.log(
     `[启动] 群聊：${env.groupAutoReply ? `提到「${env.botAliases.join('/')}」必回（冷却 ${env.groupTriggerCooldown / 1000}s）` : '名字触发已关'}；` +
-      `${env.groupJudge ? `自动判断是否插话（每小时上限 ${env.judgeHourlyLimit} 次，回复后冷却 ${env.judgeCooldown / 1000}s）` : '自动判断已关'}；` +
+      `${
+        env.judgeMode === 'auto'
+          ? `自动判断插话（每小时上限 ${env.judgeHourlyLimit} 次，回复后冷却 ${env.judgeCooldown / 1000}s）`
+          : env.judgeMode === 'observe'
+            ? '观察模式（会评估该不该接话，但只记录不回复，发 /observe 看）'
+            : '自动判断已关'
+      }；` +
       `「/总结」复盘最近 ${env.summaryLimit} 条`,
   )
 

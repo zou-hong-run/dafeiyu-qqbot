@@ -20,7 +20,8 @@
 - **30+ 工具**：联网搜索/抓网页、shell、文件读写、图片/语音/视频/文件/图文卡片发送、文字转语音、定时任务、技能与 MCP 自我扩展
 - **后台子助手**：复杂任务用 `start_task` 交给子 agent，最多 20 步，期间往群里推进度，做完自动汇报
 - **定时任务**：cron 五段表达式，到点执行并把结果推到群里（`schedule_task`）
-- **只在被叫时说**：群里 @ 我、或者提到「大肥鱼」等别名才接话；自动判断插话默认关闭（`GROUP_JUDGE=true` 才开），不会没事接话茬
+- **只在被叫时说**：群里 @ 我、或者提到「大肥鱼」等别名才接话；插话判断默认关闭，不会没事接话茬
+- **观察模式**：`JUDGE_MODE=observe` 时它会评估「这句我本来会接」，但只记一笔不回复，`/observe` 能看到它想插手哪些消息
 - **自我进化**：`write_skill` 写技能、`add_mcp` 注册新 MCP 服务（热加载，不用重启）、`install_package` 装 npm 包
 - **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；子进程只拿 PATH 和模型 key，**不拿 QQ 密钥**
 - **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` 的每次调用都记到 `data/audit.log`
@@ -113,7 +114,8 @@ pnpm start
 | `DEEPSEEK_MODEL` | 模型名（`deepseek-chat`） |
 | `SYSTEM_PROMPT` | 单行覆盖整个人格提示词 |
 | `BOT_ALIASES` | 群里提到这些词必回（`大肥鱼,鱼鱼,万能大肥鱼`） |
-| `GROUP_AUTO_REPLY` / `GROUP_JUDGE` | 关掉关键字触发 / 打开自动插话判断（默认关闭，只响应 @ 和关键字） |
+| `GROUP_AUTO_REPLY` | 关掉关键字触发 |
+| `JUDGE_MODE` | 插话判断：`off` 不判断（默认）/ `observe` 只记录不回复 / `auto` 真的接话 |
 | `MAX_TOOL_ROUNDS` | 单次对话最多几轮工具调用（100） |
 | `TOOL_TIMEOUT_SECONDS` | 单个工具调用超时（60） |
 | `TASK_MAX_ROUNDS` / `TASK_CONCURRENCY` | 子助手最多几步（20）/ 并发任务数（3） |
@@ -199,6 +201,8 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
        └─ Worker（worker.js）独立上下文执行，只往 Router 的口子丢消息，结果由 Router 交付
 外部 Watchdog（watchdog.js）每 30 秒从外面看一眼：停滞太久 / 连续调同一个工具 → 告警或掐掉
 ```
+
+**订阅直通**：工单跑着的时候，同一会话的新消息不再另开一轮对话，直接投进那个 Worker 的下一轮；想绕过它单独聊天就发 `/chat` 开头。
 
 这样做的直接收益：
 

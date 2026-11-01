@@ -890,6 +890,7 @@ export async function runTaskAgent({
   speakSender,
   onStep,
   notifyUser,
+  pullInput = null,
   signal,
 }) {
   const systemPrompt = workdir
@@ -917,6 +918,24 @@ export async function runTaskAgent({
 
   for (let round = 0; round < total; round += 1) {
     if (signal?.aborted) throw new Error('任务被用户中止')
+
+    // 订阅直通：工单跑着的时候用户补充的话，直接进这个 Worker 的下一轮
+    if (typeof pullInput === 'function') {
+      let pending = []
+      try {
+        pending = (await pullInput()) ?? []
+      } catch {
+        pending = []
+      }
+
+      if (pending.length > 0) {
+        console.log(`[Worker:${sessionKey}] 收到用户补充 ${pending.length} 条`)
+        messages.push({
+          role: 'user',
+          content: `（用户补充，优先考虑）\n${pending.join('\n')}`,
+        })
+      }
+    }
 
     const payload = { model: env.model, messages, max_tokens: env.maxOutputTokens }
 

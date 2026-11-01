@@ -79,6 +79,20 @@ export function taskStatus() {
   })
 }
 
+// 订阅直通：工单跑着的时候，同一会话的新消息直接投给这个 Worker
+export function submitInput(sessionKey, text) {
+  const body = String(text ?? '').trim()
+  if (!body) return null
+
+  for (const [id, worker] of running) {
+    if (worker.ticket.sessionKey !== sessionKey) continue
+    worker.inputs.push(body.slice(0, 1000))
+    return id
+  }
+
+  return null
+}
+
 export function killTask(id) {
   const key = String(id ?? '').trim()
   const controller = controllers.get(key)
@@ -126,7 +140,7 @@ export function startTask({
     await notify(text).catch(() => {})
   }
 
-  running.set(ticket.id, { ticket, controller, context })
+  running.set(ticket.id, { ticket, controller, context, inputs: [] })
   controllers.set(ticket.id, controller)
   updateTicket(ticket.id, { status: STATUS.running })
 
@@ -144,6 +158,12 @@ export function startTask({
     lastReportAt = Date.now()
     updateTicket(ticket.id, { reports: current.reports + 1 })
     await say(`工单 ${ticket.id}｜第 ${current.step} 步：${describeTool(tool)}`)
+  }
+
+  const pullInput = async () => {
+    const worker = running.get(ticket.id)
+    if (!worker) return []
+    return worker.inputs.splice(0, worker.inputs.length)
   }
 
   const sendUserMessage = async (text) => {
@@ -190,6 +210,7 @@ export function startTask({
           speakSender,
           onStep,
           notifyUser: sendUserMessage,
+          pullInput,
           signal: controller.signal,
           sessionKey: context.sessionKey,
           workdir: context.dir,

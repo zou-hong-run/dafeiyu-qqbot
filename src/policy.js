@@ -18,6 +18,13 @@ export const DANGEROUS_TOOLS = new Set([
   'restart_self',
 ])
 
+// 管理员判定：配了白名单就只认名单，没配就只认私聊
+export function isAdmin(scope, actor) {
+  const admins = env.adminOpenIds
+  if (admins.length > 0) return Boolean(actor) && admins.includes(String(actor))
+  return scope === 'private'
+}
+
 function dangerAllowed(scope, actor) {
   // 定时任务到点执行，视为建任务的人已授权
   if (actor === 'scheduler') return true
