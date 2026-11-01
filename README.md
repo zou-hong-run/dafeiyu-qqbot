@@ -11,7 +11,7 @@
 
 ![群聊演示](assets/demo.png)
 
-> 真实群聊截屏：@ 它、叫它名字、或者它判断该插话时才会接话；引用气泡只在这一句真的「插进来」时出现。
+> 真实群聊截屏：只有 @ 它或提到「大肥鱼」时才会接话；上图里那个引用气泡是旧版本行为，现在默认关闭。
 
 ## 特性
 
@@ -20,7 +20,7 @@
 - **30+ 工具**：联网搜索/抓网页、shell、文件读写、图片/语音/视频/文件/图文卡片发送、文字转语音、定时任务、技能与 MCP 自我扩展
 - **后台子助手**：复杂任务用 `start_task` 交给子 agent，最多 20 步，期间往群里推进度，做完自动汇报
 - **定时任务**：cron 五段表达式，到点执行并把结果推到群里（`schedule_task`）
-- **群聊自动接话**：@ 我必回、提到名字必回、没有点名时用一次轻量判断决定要不要插话，避免刷屏
+- **只在被叫时说**：群里 @ 我、或者提到「大肥鱼」等别名才接话；自动判断插话默认关闭（`GROUP_JUDGE=true` 才开），不会没事接话茬
 - **自我进化**：`write_skill` 写技能、`add_mcp` 注册新 MCP 服务（热加载，不用重启）、`install_package` 装 npm 包
 - **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；子进程只拿 PATH 和模型 key，**不拿 QQ 密钥**
 - **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` 的每次调用都记到 `data/audit.log`
@@ -110,7 +110,7 @@ pnpm start
 | `DEEPSEEK_MODEL` | 模型名（`deepseek-chat`） |
 | `SYSTEM_PROMPT` | 单行覆盖整个人格提示词 |
 | `BOT_ALIASES` | 群里提到这些词必回（`大肥鱼,鱼鱼,万能大肥鱼`） |
-| `GROUP_AUTO_REPLY` / `GROUP_JUDGE` | 关掉名字触发 / 关掉自动插话判断 |
+| `GROUP_AUTO_REPLY` / `GROUP_JUDGE` | 关掉关键字触发 / 打开自动插话判断（默认关闭，只响应 @ 和关键字） |
 | `MAX_TOOL_ROUNDS` | 单次对话最多几轮工具调用（100） |
 | `TOOL_TIMEOUT_SECONDS` | 单个工具调用超时（60） |
 | `TASK_MAX_ROUNDS` / `TASK_CONCURRENCY` | 子助手最多几步（20）/ 并发任务数（3） |
@@ -175,7 +175,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 ```
 QQ 网关 ──WS──▶ index.js
                   ├─ 记录群聊到 group-log
-                  ├─ 触发判定：@我 / 提到名字 / 自动插话判断
+                  ├─ 触发判定：@我 / 提到关键字（自动插话判断默认关闭）
                   ├─ 组装上下文：系统提示词(SELF.md+技能+长期事实) + 短期历史 + 本轮输入
                   ├─ deepseek.js 循环调用模型，直到不再请求工具（上限 MAX_TOOL_ROUNDS）
                   │    └─ 工具：本地发送类 / MCP 子进程工具
@@ -209,7 +209,7 @@ QQ 网关 ──WS──▶ index.js
 | `40034127 / 304036 无 Markdown 权限` | 平台已开放自定义 Markdown，若仍报错请检查请求体里不要带废弃的 `template_id` / `custom_template_id` |
 | `speak` 报「没有可用的语音合成后端」 | 服务器装一个：`pip3 install edge-tts`（音质好，需外网）或 `apt-get install espeak-ng`（离线） |
 | 群里只收到 @ 它的消息 | 群里把「机器人可获取的群聊消息范围」设成「获取群内全部消息」 |
-| 机器人不说话 / 一直「插话」 | 调 `JUDGE_HOURLY_LIMIT`、`JUDGE_MIN_LENGTH`，或直接 `GROUP_JUDGE=false` |
+| 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；`GROUP_JUDGE=true` 才会自动插话，关掉就完全不会乱接 |
 
 ## 开发与自检
 
