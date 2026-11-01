@@ -84,7 +84,7 @@ function quoteRefOf(event) {
 const passiveUsed = new Map()
 const MAX_PASSIVE_PER_MESSAGE = 4
 
-function passiveCountOf(event) {
+export function passiveCountOf(event) {
   return passiveUsed.get(event?.message_id) ?? 0
 }
 

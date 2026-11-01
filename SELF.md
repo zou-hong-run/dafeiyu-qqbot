@@ -45,6 +45,7 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - 巡检每 30 秒在外部看一眼：停滞太久会提醒，连续 4 次卡在同一个工具上会直接掐掉
 - 工单跑着时有新消息进来，会直接投给那个 Worker（订阅直通），不再另开对话；用户想单独聊可以发 /chat 开头
 - `/observe` 看「本来会接哪些话」的观察记录（需要 JUDGE_MODE=observe 且是管理员）
+- `/diag` 自检：生成一张测试图，分别试 send_image 和 send_file，把两条通道的真实结果和错误码回显（管理员）
 - `schedule_task` 定时任务，cron 5 段表达式，到点自动执行并把结果推到群里
 - `list_schedules` / `remove_schedule` 管理定时任务
 - `write_skill` 写技能 Markdown 到 skills/，会自动注入后续对话

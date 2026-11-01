@@ -243,6 +243,7 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 | `40034127 / 304036 无 Markdown 权限` | 平台已开放自定义 Markdown，若仍报错请检查请求体里不要带废弃的 `template_id` / `custom_template_id` |
 | `speak` 报「没有可用的语音合成后端」 | 服务器装一个：`pip3 install edge-tts`（音质好，需外网）或 `apt-get install espeak-ng`（离线） |
 | 群里只收到 @ 它的消息 | 群里把「机器人可获取的群聊消息范围」设成「获取群内全部消息」 |
+| 发了文件但对方没收到 | 让机器人发 `/diag`（管理员），它会实测 `send_image` 和 `send_file` 并把真实错误贴出来 |
 | 机器人说「不在白名单里」 | 发 `/id` 拿到自己的 openid，填进 `.env` 的 `ADMIN_OPENIDS` 后重启 |
 | 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；`GROUP_JUDGE=true` 才会自动插话，关掉就完全不会乱接 |
 

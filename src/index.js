@@ -15,7 +15,7 @@ import { startWatchdog, stopWatchdog } from './watchdog.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { bot } from './bot.js'
-import { clip, sendReply } from './sender.js'
+import { clip, passiveCountOf, sendReply } from './sender.js'
 import {
   audioSenderFor,
   cardSenderFor,
@@ -197,6 +197,51 @@ async function handleMessage(event, trigger = 'at') {
         `管理员权限：${admin ? '有' : '无'}\n\n` +
         '要开高危工具（执行命令、写文件、装包、加 MCP）就把上面这串 openid 填进 .env 的 ADMIN_OPENIDS，逗号分隔。',
     )
+    return
+  }
+
+  if (text === '/diag' || text === '/diag send') {
+    if (!isAdmin(scope, event.user_id ?? '')) {
+      await sendReply(event, '自检只对管理员开放。')
+      return
+    }
+
+    const lines = []
+    const pngPath = path.join(projectRoot, 'downloads', 'diag.png')
+
+    try {
+      // 1x1 透明 PNG，够用来验证上传和发送链路
+      fs.writeFileSync(
+        pngPath,
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          'base64',
+        ),
+      )
+      const size = fs.statSync(pngPath).size
+      lines.push(`测试图已生成：downloads/diag.png（${size} 字节）`)
+    } catch (error) {
+      await sendReply(event, `自检失败：生成测试图出错 ${error?.message ?? error}`)
+      return
+    }
+
+    try {
+      const sent = await imageSenderFor(event)('diag.png')
+      lines.push(`send_image：成功（${sent}）`)
+    } catch (error) {
+      lines.push(`send_image：失败 → ${error?.message ?? error}`)
+    }
+
+    try {
+      const sent = await fileSenderFor(event)('diag.png')
+      lines.push(`send_file：成功（${sent}）`)
+    } catch (error) {
+      lines.push(`send_file：失败 → ${error?.message ?? error}`)
+    }
+
+    lines.push(`被动回复剩余额度：${Math.max(0, 4 - passiveCountOf(event))} / 4`)
+
+    await sendReply(event, `自检结果：\n${lines.join('\n')}`)
     return
   }
 
