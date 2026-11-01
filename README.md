@@ -39,7 +39,11 @@
 
 ```
 src/
-  index.js         入口：QQ 收发、发送层（文本/Markdown/文件/卡片/语音）、群聊触发与插话判断
+  index.js         Router：收消息、判断要不要干、建工单、命令处理、统一对外说话
+  bot.js           QQ 网关单例，各层共用
+  sender.js        发送层：被动回复配额、引用气泡、Markdown 降级
+  media.js         媒体发送器：图片 / 语音 / 视频 / 文件 / 卡片 / 文字转语音
+  trigger.js       触发层：两级过滤（程序规则 → 语义判断）、插话预算、观察模式
   deepseek.js      模型调用、工具定义与执行、记忆注入、后台子 agent
   env.js           环境变量解析与校验（缺失直接退出）
   persona.js       人格提示词

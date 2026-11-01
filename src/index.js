@@ -1,12 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
-import { Bot, ReceiverMode, segment } from 'qq-official-bot'
-import { chat, summarizeGroup, judgeRelevance, runTaskAgent } from './deepseek.js'
-import { startTask as launchTask, busyTasks, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
+import { chat, summarizeGroup, runTaskAgent } from './deepseek.js'
+import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
@@ -17,11 +14,32 @@ import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
+import { bot } from './bot.js'
+import { clip, sendReply } from './sender.js'
+import {
+  audioSenderFor,
+  cardSenderFor,
+  fileSenderFor,
+  imageSenderFor,
+  speakSenderFor,
+  videoSenderFor,
+} from './media.js'
+import {
+  coolingDown,
+  enqueue,
+  hasReplied,
+  initTrigger,
+  markReplied,
+  mentionsBot,
+  recordGroupMessage,
+  scheduleJudge,
+  touch,
+  worthJudging,
+} from './trigger.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
-const run = promisify(execFile)
 const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell', 'run_script', 'restart_self'])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 
@@ -33,15 +51,6 @@ fs.mkdirSync(dataDir, { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'downloads'), { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'tmp'), { recursive: true })
-
-const bot = new Bot({
-  appid: env.appId,
-  secret: env.appSecret,
-  intents: ['GROUP_AND_C2C_EVENT'],
-  mode: ReceiverMode.WEBSOCKET,
-  removeAt: true,
-  logLevel: env.logLevel,
-})
 
 function audit(sessionKey, tool, args, result) {
   const line = [
@@ -65,602 +74,6 @@ function toolsForScope(scope, actor = '') {
 
 function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
-}
-
-let markdownState = null
-
-function clip(text) {
-  if (text.length <= env.replyMaxChars) return text
-  return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
-}
-
-function isStaleMessage(event, ttlMs = 4 * 60_000) {
-  const ts = Number(event?.timestamp) * 1000
-  if (!Number.isFinite(ts) || ts <= 0) return false
-  return Date.now() - ts > ttlMs
-}
-
-function endpointOf(event) {
-  const isGroup = event.message_type === 'group'
-  const id = isGroup ? event.group_id : event.user_id
-  return {
-    isGroup,
-    id,
-    apiPath: isGroup ? `/v2/groups/${id}/messages` : `/v2/users/${id}/messages`,
-  }
-}
-
-// 引用回复要用 msg_idx（形如 REFIDX_xxx），官方只放在 message_scene.ext 里
-// 默认整体关闭（QUOTE_REPLY 未设置即 false）；开成 judge 时，只有「群里冷场后我插一句」才引用
-const quotedMessages = new Set()
-const lastSpokeAt = new Map()
-
-function groupKeyOf(event) {
-  return event?.group_id ?? 'private'
-}
-
-function markQuote(event) {
-  const id = event?.message_id
-  if (!id) return
-
-  // 3 分钟内这个群我刚说过话，说明还在对话中，不盖引用气泡
-  const since = Date.now() - (lastSpokeAt.get(groupKeyOf(event)) ?? 0)
-  if (since < env.quoteWindowMs) return
-
-  quotedMessages.add(id)
-  if (quotedMessages.size > 500) {
-    for (const key of [...quotedMessages].slice(0, 250)) quotedMessages.delete(key)
-  }
-}
-
-function noteSpoke(event) {
-  lastSpokeAt.set(groupKeyOf(event), Date.now())
-
-  if (lastSpokeAt.size > 500) {
-    for (const key of [...lastSpokeAt.keys()].slice(0, 250)) lastSpokeAt.delete(key)
-  }
-}
-
-function shouldQuote(event) {
-  if (!env.quoteReply) return false
-  if (env.quoteReply === 'always') return true
-  return quotedMessages.has(event?.message_id)
-}
-
-function quoteRefOf(event) {
-  if (!shouldQuote(event)) return null
-
-  const ext = event?.message_scene?.ext
-  if (!ext) return null
-
-  for (const item of Array.isArray(ext) ? ext : [ext]) {
-    if (typeof item === 'string') {
-      const matched = item.match(/msg_idx=([^\s&]+)/)
-      if (matched) return matched[1]
-    } else if (item && typeof item === 'object' && item.msg_idx) {
-      return String(item.msg_idx)
-    }
-  }
-
-  return null
-}
-
-const passiveUsed = new Map()
-const MAX_PASSIVE_PER_MESSAGE = 4
-
-function passiveCountOf(event) {
-  return passiveUsed.get(event?.message_id) ?? 0
-}
-
-function canUsePassive(event) {
-  if (!event?.message_id) return false
-  if (isStaleMessage(event)) return false
-  return passiveCountOf(event) < MAX_PASSIVE_PER_MESSAGE
-}
-
-function notePassive(event) {
-  const id = event?.message_id
-  if (!id) return
-
-  passiveUsed.set(id, passiveCountOf(event) + 1)
-
-  if (passiveUsed.size > 500) {
-    for (const key of [...passiveUsed.keys()].slice(0, 250)) passiveUsed.delete(key)
-  }
-}
-
-async function deliver(event, payload) {
-  if (canUsePassive(event)) {
-    try {
-      await event.reply.call(event, payload)
-      notePassive(event)
-      return
-    } catch (error) {
-      const message = String(error?.message ?? error)
-      if (!/40034128|40034005|过期|超限|超过限制/.test(message)) throw error
-      console.warn(`[回复] 被动回复不可用（${message.slice(0, 40)}），改主动消息`)
-    }
-  }
-
-  if (event.message_type === 'group') await bot.group(event.group_id).send(payload)
-  else await bot.user(event.user_id).send(payload)
-}
-
-async function postMessage(event, body, { reference = true } = {}) {
-  const { apiPath } = endpointOf(event)
-  const usePassive = canUsePassive(event)
-
-  // 引用只能挂在被动回复上：主动消息没有可引用的会话上下文
-  const ref = usePassive && reference ? quoteRefOf(event) : null
-  if (ref) body.message_reference = { message_id: ref }
-
-  if (ref) {
-    if (env.toolDebug) console.log(`[引用] REFIDX ${ref.slice(0, 18)}…`)
-  } else if (shouldQuote(event) && env.toolDebug) {
-    console.log('[引用] 本轮该引用但没取到 msg_idx，本条不带引用')
-  }
-
-  if (usePassive) {
-    body.msg_id = event.message_id
-    body.msg_seq = passiveCountOf(event) + 1
-  }
-
-  try {
-    await bot.request.post(apiPath, body)
-    if (usePassive) notePassive(event)
-  } catch (error) {
-    const message = String(error?.message ?? error)
-    if (!usePassive || !/40034128|40034005|过期|超限|超过限制/.test(message)) throw error
-
-    console.warn(`[回复] 被动回复不可用（${message.slice(0, 40)}），改主动消息`)
-    delete body.msg_id
-    delete body.msg_seq
-    delete body.message_reference
-    await bot.request.post(apiPath, body)
-  }
-}
-
-async function sendMarkdownMessage(event, content) {
-  try {
-    await postMessage(event, { msg_type: 2, markdown: { content } })
-    return true
-  } catch (error) {
-    const message = String(error?.message ?? error)
-
-    if (/304036|40034127|markdown 模板权限|无markdown/i.test(message)) {
-      markdownState = false
-      console.warn('[Markdown] 平台未开放 Markdown 权限，永久降级为纯文本')
-      return false
-    }
-
-    if (/40034008|40034124|40034011/.test(message)) {
-      console.warn(`[Markdown] 参数被拒（${message.slice(0, 60)}），本次改用纯文本`)
-      return false
-    }
-
-    throw error
-  }
-}
-
-async function sendReply(event, text) {
-  const body = clip(String(text ?? '').trim())
-  if (!body) return
-
-  try {
-    if (env.markdownReply && markdownState !== false) {
-      const sent = await sendMarkdownMessage(event, body)
-      if (sent) return
-    }
-
-    if (quoteRefOf(event)) {
-      try {
-        await postMessage(event, { msg_type: 0, content: body })
-        return
-      } catch (error) {
-        console.warn(`[引用] 引用回复失败（${String(error?.message ?? error).slice(0, 60)}），改普通回复`)
-      }
-    }
-
-    await deliver(event, body)
-  } finally {
-    noteSpoke(event)
-  }
-}
-
-const chains = new Map()
-
-function enqueue(key, task) {
-  const previous = chains.get(key) ?? Promise.resolve()
-  const next = previous.then(task, task).catch((error) => {
-    console.error(`[任务失败] ${key}:`, error)
-  })
-  chains.set(key, next)
-  next.finally(() => {
-    if (chains.get(key) === next) chains.delete(key)
-  })
-}
-
-const seenKinds = new Map()
-const repliedIds = new Set()
-const repliedOrder = []
-
-function claim(msgId, kind) {
-  if (!msgId) return true
-
-  let kinds = seenKinds.get(msgId)
-  if (!kinds) {
-    kinds = new Set()
-    seenKinds.set(msgId, kinds)
-    if (seenKinds.size > 2000) {
-      for (const key of [...seenKinds.keys()].slice(0, 1000)) seenKinds.delete(key)
-    }
-  }
-
-  if (kinds.has(kind)) return false
-  kinds.add(kind)
-  return true
-}
-
-function markReplied(msgId) {
-  if (!msgId) return
-  repliedIds.add(msgId)
-  repliedOrder.push(msgId)
-  if (repliedOrder.length > 1000) {
-    for (const id of repliedOrder.splice(0, 500)) repliedIds.delete(id)
-  }
-}
-
-const lastFire = new Map()
-
-function coolingDown(key, windowMs) {
-  if (windowMs <= 0) return false
-  return Date.now() - (lastFire.get(key) ?? 0) < windowMs
-}
-
-function touch(key) {
-  lastFire.set(key, Date.now())
-}
-
-function mentionsBot(text) {
-  return env.botAliases.some((alias) => text.includes(alias))
-}
-
-const judgeSlots = new Map()
-const judgeCounters = new Map()
-
-function worthJudging(text) {
-  if (text.length < env.judgeMinLength) return false
-  if (/^[\s\p{P}\p{Extended_Pictographic}]+$/u.test(text)) return false
-  if (/^https?:\/\/\S+$/i.test(text)) return false
-  return true
-}
-
-function judgeBudgetOk(groupId) {
-  const hour = Math.floor(Date.now() / 3_600_000)
-  let counter = judgeCounters.get(groupId)
-
-  if (!counter || counter.hour !== hour) {
-    counter = { hour, count: 0 }
-    judgeCounters.set(groupId, counter)
-  }
-
-  if (counter.count >= env.judgeHourlyLimit) return false
-  counter.count += 1
-  return true
-}
-
-function scheduleJudge(event) {
-  const groupId = event.group_id
-  let slot = judgeSlots.get(groupId)
-
-  if (!slot) {
-    slot = { timer: null, event: null, firstAt: 0 }
-    judgeSlots.set(groupId, slot)
-  }
-
-  slot.event = event
-  if (!slot.firstAt) slot.firstAt = Date.now()
-
-  clearTimeout(slot.timer)
-  const elapsed = Date.now() - slot.firstAt
-  const delay = Math.max(0, Math.min(env.judgeDebounceMs, env.judgeMaxWaitMs - elapsed))
-
-  slot.timer = setTimeout(() => {
-    judgeSlots.delete(groupId)
-    const target = slot.event
-    enqueue(`group:${groupId}`, () => runJudge(target))
-  }, delay)
-  slot.timer.unref?.()
-}
-
-async function runJudge(event) {
-  const groupId = event.group_id
-  const cooldownKey = `judge:${groupId}`
-
-  if (repliedIds.has(event.message_id)) return
-  if (coolingDown(cooldownKey, env.judgeCooldown)) return
-  if (!judgeBudgetOk(groupId)) {
-    console.log(`[群判断] ${groupId} 已达每小时上限，跳过`)
-    return
-  }
-
-  const recent = groupLog.recent(groupId, env.judgeContextSize)
-  if (recent.length === 0) return
-
-  let verdict
-  try {
-    verdict = await judgeRelevance(groupLog.formatForSummary(recent), env.personaName)
-  } catch (error) {
-    console.error('[群判断] 调用失败：', error?.message ?? error)
-    return
-  }
-
-  if (!verdict.reply) {
-    console.log(`[群判断] 不回：${verdict.reason}`)
-    return
-  }
-
-  // 观察态：记一笔「本来会接这句」，但不发消息。用来先看它会插手什么，再决定放不放开
-  if (env.judgeMode === 'observe') {
-    observe.record({
-      groupId,
-      userId: event.user_id,
-      userName: event.sender?.user_name,
-      text: event.content,
-      urgency: verdict.urgency,
-      reason: verdict.reason,
-    })
-    console.log(`[观察] 本来会接（${verdict.urgency}）：${verdict.reason}`)
-    return
-  }
-
-  if (repliedIds.has(event.message_id)) return
-
-  touch(cooldownKey)
-  markReplied(event.message_id)
-  console.log(`[群判断] 插话（${verdict.urgency}）：${verdict.reason}`)
-  await handleMessage(event, 'judge')
-}
-
-function recordGroupMessage(event, text) {
-  if (!text) return
-  if (!claim(event.message_id, 'log')) return
-
-  groupLog.record(event.group_id, {
-    t: Date.now(),
-    u: event.user_id,
-    n: event.sender?.user_name,
-    c: text.slice(0, 500),
-    id: event.message_id,
-  })
-}
-
-function mediaMissingHint(downloadDir, resolved) {
-  const name = path.basename(resolved)
-  const hits = []
-
-  const walk = (dir, depth) => {
-    if (depth > 4 || hits.length >= 5) return
-    let entries = []
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walk(full, depth + 1)
-      else if (entry.name === name) hits.push(path.relative(downloadDir, full).split(path.sep).join('/'))
-    }
-  }
-
-  walk(downloadDir, 0)
-
-  const list = hits.length
-    ? `\n在 downloads 下找到同名文件，可以直接传这些相对路径：\n${hits.map((item) => `  ${item}`).join('\n')}`
-    : ''
-
-  return (
-    `文件不存在：${name}\n` +
-    '提示：path 是相对 downloads/ 目录的。文件在 downloads/vtest/a.png 就传 "vtest/a.png"，不要带 downloads/ 前缀。' +
-    list
-  )
-}
-
-function imageSenderFor(event) {
-  const downloadDir = path.join(projectRoot, 'downloads')
-
-  return async (input) => {
-    const target = String(input ?? '').trim()
-    if (!target) throw new Error('缺少图片路径')
-
-    if (/^https?:\/\//i.test(target)) {
-      await deliver(event, segment.image(target))
-      return target
-    }
-
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
-    if (!/\.(jpe?g|png|gif|webp|bmp)$/i.test(resolved)) {
-      throw new Error('只能发送图片（jpg/png/gif/webp/bmp），其他文件类型 QQ 平台不支持')
-    }
-    if (!fs.existsSync(resolved)) {
-      throw new Error(mediaMissingHint(downloadDir, resolved))
-    }
-
-    const size = fs.statSync(resolved).size
-    if (size > 10 * 1024 * 1024) {
-      throw new Error(`图片 ${(size / 1048576).toFixed(1)}MB，超过 10MB 平台传不上去`)
-    }
-
-    await deliver(event, segment.image(resolved))
-    return path.basename(resolved)
-  }
-}
-
-function audioSenderFor(event) {
-  const downloadDir = path.join(projectRoot, 'downloads')
-
-  return async (input) => {
-    const target = String(input ?? '').trim()
-    if (!target) throw new Error('缺少音频路径')
-
-    if (/^https?:\/\//i.test(target)) {
-      await deliver(event, segment.audio(target))
-      return target
-    }
-
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
-    if (!/\.(silk|mp3|wav|ogg|flac)$/i.test(resolved)) {
-      throw new Error('只接受 QQ 支持的语音格式（silk/mp3/wav/ogg/flac）')
-    }
-    if (!fs.existsSync(resolved)) {
-      throw new Error(mediaMissingHint(downloadDir, resolved))
-    }
-
-    const size = fs.statSync(resolved).size
-    if (size > 20 * 1024 * 1024) {
-      throw new Error(`音频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 传不上去`)
-    }
-
-    await deliver(event, segment.audio(resolved))
-    return path.basename(resolved)
-  }
-}
-
-const TTS_VOICE = process.env.TTS_VOICE?.trim() || 'zh-CN-XiaoxiaoNeural'
-const TTS_MAX_CHARS = 500
-
-function firstLineOf(error) {
-  return String(error?.stderr || error?.message || error)
-    .split('\n')
-    .find((line) => line.trim()) ?? '未知错误'
-}
-
-// 依次尝试 edge-tts（音质最好，需联网）→ python edge_tts → espeak-ng + ffmpeg（离线机器音）
-async function synthesizeSpeech(text) {
-  const tmpDir = path.join(projectRoot, 'tmp')
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-  const mp3 = path.join(tmpDir, `tts-${stamp}.mp3`)
-  const wav = path.join(tmpDir, `tts-${stamp}.wav`)
-  const childEnv = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    LANG: process.env.LANG ?? 'zh_CN.UTF-8',
-    PYTHONIOENCODING: 'utf-8',
-  }
-  const attempts = []
-
-  const usable = (file) => fs.existsSync(file) && fs.statSync(file).size > 1024
-
-  try {
-    await run(
-      'edge-tts',
-      ['--text', text, '--voice', TTS_VOICE, '--write-media', mp3],
-      { timeout: 90_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
-    )
-    if (usable(mp3)) return { file: mp3, backend: 'edge-tts' }
-    attempts.push('edge-tts 没产出音频')
-  } catch (error) {
-    attempts.push(`edge-tts: ${firstLineOf(error)}`)
-  }
-
-  try {
-    await run(
-      'python3',
-      ['-m', 'edge_tts', '--text', text, '--voice', TTS_VOICE, '--write-media', mp3],
-      { timeout: 90_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
-    )
-    if (usable(mp3)) return { file: mp3, backend: 'python edge-tts' }
-    attempts.push('python edge_tts 没产出音频')
-  } catch (error) {
-    attempts.push(`python edge_tts: ${firstLineOf(error)}`)
-  }
-
-  try {
-    await run('espeak-ng', ['-v', 'cmn', '-s', '165', '-w', wav, text], {
-      timeout: 60_000,
-      env: childEnv,
-      maxBuffer: 4 * 1024 * 1024,
-    })
-    await run(
-      'ffmpeg',
-      ['-y', '-v', 'error', '-i', wav, '-ar', '24000', '-b:a', '48k', mp3],
-      { timeout: 60_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
-    )
-    fs.rmSync(wav, { force: true })
-    if (usable(mp3)) return { file: mp3, backend: 'espeak-ng' }
-    attempts.push('espeak-ng 没产出音频')
-  } catch (error) {
-    attempts.push(`espeak-ng: ${firstLineOf(error)}`)
-  }
-
-  fs.rmSync(wav, { force: true })
-  throw new Error(
-    '服务器上没有可用的语音合成后端，转不了语音。试过的：\n' +
-      `${attempts.join('\n')}\n` +
-      '修法：pip3 install edge-tts（音质最好，需要能访问外网），或 apt-get install espeak-ng（离线但机器音）',
-  )
-}
-
-function speakSenderFor(event) {
-  return async (input) => {
-    const text = String(input ?? '').trim()
-    if (!text) throw new Error('缺少要念的文本')
-    if (text.length > TTS_MAX_CHARS) {
-      throw new Error(`文本 ${text.length} 字，太长，压到 ${TTS_MAX_CHARS} 字以内再合成`)
-    }
-
-    const { file, backend } = await synthesizeSpeech(text)
-
-    try {
-      await deliver(event, segment.audio(file))
-    } finally {
-      fs.rm(file, { force: true }, () => {})
-    }
-
-    return { backend, chars: text.length }
-  }
-}
-
-function videoSenderFor(event) {
-  const downloadDir = path.join(projectRoot, 'downloads')
-
-  return async (input) => {
-    const target = String(input ?? '').trim()
-    if (!target) throw new Error('缺少视频路径')
-
-    if (/^https?:\/\//i.test(target)) {
-      await deliver(event, segment.video(target))
-      return target
-    }
-
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
-    if (!/\.mp4$/i.test(resolved)) {
-      throw new Error('只接受 mp4 格式，QQ 视频消息不支持其他容器')
-    }
-    if (!fs.existsSync(resolved)) {
-      throw new Error(mediaMissingHint(downloadDir, resolved))
-    }
-
-    const size = fs.statSync(resolved).size
-    if (size > 30 * 1024 * 1024) {
-      throw new Error(
-        `视频 ${(size / 1048576).toFixed(1)}MB，超过 30MB 会降级成文件类型；要保留视频预览请压到 30MB 以内，或用 send_file 按文件发`,
-      )
-    }
-
-    await deliver(event, segment.video(resolved))
-    return path.basename(resolved)
-  }
 }
 
 async function runScheduledTask(task) {
@@ -715,78 +128,6 @@ function schedulerFor(event) {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt }),
     list: () => listSchedules(sessionKey),
     remove: (id) => removeSchedule(id, sessionKey),
-  }
-}
-
-function fileSenderFor(event) {
-  const downloadDir = path.join(projectRoot, 'downloads')
-
-  return async (input, options = {}) => {
-    const target = String(input ?? '').trim()
-    if (!target) throw new Error('缺少文件路径')
-
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
-    if (!fs.existsSync(resolved)) throw new Error(mediaMissingHint(downloadDir, resolved))
-
-    const stat = fs.statSync(resolved)
-    if (stat.size > 200 * 1024 * 1024) {
-      throw new Error(`文件 ${(stat.size / 1048576).toFixed(1)}MB，超过 200MB 硬上限`)
-    }
-
-    const isGroup = event.message_type === 'group'
-    const id = isGroup ? event.group_id : event.user_id
-    const entry = isGroup ? bot.group(id) : bot.user(id)
-    const fileName = String(options.fileName ?? path.basename(resolved)).slice(0, 120)
-
-    const upload = await entry.upload(fs.readFileSync(resolved), { fileType: 4, fileName })
-
-    const body = {
-      content: '',
-      msg_type: 7,
-      media: { file_info: upload.file_info },
-    }
-
-    await postMessage(event, body)
-
-    return `${fileName}（${(stat.size / 1024).toFixed(1)} KB）`
-  }
-}
-
-function cardSenderFor(event) {
-  return async (input = {}) => {
-    const title = String(input.title ?? '').trim()
-    const description = String(input.description ?? '').trim()
-    const url = String(input.url ?? '').trim()
-    const picUrl = String(input.pic_url ?? input.picUrl ?? '').trim()
-
-    if (!title) throw new Error('缺少卡片标题 title')
-    if (title.length > 50) throw new Error(`标题 ${title.length} 字，QQ 图文卡片标题上限 50 字`)
-    if (!description) throw new Error('缺少卡片描述 description（5-200 字）')
-    if (description.length > 200) {
-      throw new Error(`描述 ${description.length} 字，QQ 图文卡片描述上限 200 字`)
-    }
-    if (url.length > 1024) throw new Error('链接 url 超过 1024 字符')
-    if (!/^https:\/\//i.test(url)) throw new Error('卡片链接 url 必须是 https 开头的完整网址')
-    if (!picUrl) throw new Error('缺少封面图 pic_url')
-    if (picUrl.length > 1024) throw new Error('封面图 pic_url 超过 1024 字符')
-    if (!/^https:\/\//i.test(picUrl)) {
-      throw new Error(
-        '封面图 pic_url 必须是 https 图片外链。本地图片请先用 send_image 发，或先传到图床拿到 https 链接',
-      )
-    }
-
-    await postMessage(event, {
-      msg_type: 8,
-      card: {
-        type: 'tuwen',
-        content: { title, description, url, pic_url: picUrl },
-      },
-    })
-
-    return `${title}（${url}）`
   }
 }
 
@@ -1098,14 +439,14 @@ async function handleGroupAll(event) {
   if (!text) return
 
   if (SUMMARY_CMD.test(text) && text.length <= 20) {
-    if (repliedIds.has(event.message_id)) return
+    if (hasReplied(event.message_id)) return
     markReplied(event.message_id)
     await handleSummary(event)
     return
   }
 
   if (env.groupAutoReply && mentionsBot(text)) {
-    if (repliedIds.has(event.message_id)) return
+    if (hasReplied(event.message_id)) return
 
     const cooldownKey = `trigger:${event.group_id}`
     if (coolingDown(cooldownKey, env.groupTriggerCooldown)) {
@@ -1130,7 +471,7 @@ async function handleGroupAt(event) {
   recordGroupMessage(event, text)
   if (!text) return
 
-  if (repliedIds.has(event.message_id)) return
+  if (hasReplied(event.message_id)) return
   markReplied(event.message_id)
 
   if (SUMMARY_CMD.test(text) && text.length <= 20) {
@@ -1140,6 +481,11 @@ async function handleGroupAt(event) {
 
   await handleMessage(event, 'at')
 }
+
+// 触发层判定要接话时，回调进 Router：由 Router 决定怎么组装上下文和回复
+initTrigger({
+  judge: (event) => handleMessage(event, 'judge'),
+})
 
 bot.on('message.private.friend', (event) => {
   enqueue(sessionKeyOf(event), () => handleMessage(event, 'private'))

@@ -53,7 +53,12 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 ## 项目结构
 
 ```
-src/index.js          消息入口、事件分发、QQ 发送实现
+src/index.js          Router：消息入口、事件分发、命令处理、统一发送
+src/bot.js            QQ 网关单例
+src/sender.js         发送层（被动回复配额、引用、Markdown 降级）
+src/media.js          媒体发送器（图片/语音/视频/文件/卡片/TTS）
+src/trigger.js        触发层（两级过滤、插话预算、观察模式）
+src/observe.js        观察记录
 src/deepseek.js       模型调用、工具循环、提示词组装
 src/persona.js        人格设定
 src/memory.js         三层记忆
