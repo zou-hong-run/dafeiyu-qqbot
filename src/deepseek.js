@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import OpenAI from 'openai'
 import { env } from './env.js'
 import { denyReason, isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './policy.js'
@@ -690,10 +693,45 @@ async function summarize(sessionKey, overflow) {
   }
 }
 
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const MAX_IMAGES = 3
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+}
+
+// 本地图片转成 OpenAI 多模态格式的 data URL
+function toImagePart(file) {
+  try {
+    const full = path.isAbsolute(file) ? file : path.resolve(projectRoot, file)
+    if (!fs.existsSync(full)) return null
+
+    const stat = fs.statSync(full)
+    if (stat.size > MAX_IMAGE_BYTES) return null
+
+    const mime = IMAGE_MIME[path.extname(full).toLowerCase()]
+    if (!mime) return null
+
+    return {
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${fs.readFileSync(full).toString('base64')}` },
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function chat(sessionKey, userText, options = {}) {
   const {
     scope = 'private',
     actor = '',
+    images = [],
     tools = [],
     callTool = null,
     sendImage = null,
@@ -708,10 +746,18 @@ export async function chat(sessionKey, userText, options = {}) {
     onStep = null,
   } = options
 
+  const imageParts = (Array.isArray(images) ? images : [])
+    .map(toImagePart)
+    .filter(Boolean)
+    .slice(0, MAX_IMAGES)
+
+  const userIndex = history(sessionKey).length + 1
   const messages = [
     { role: 'system', content: buildSystemPrompt(sessionKey, userText) },
     ...history(sessionKey),
-    { role: 'user', content: userText },
+    imageParts.length > 0
+      ? { role: 'user', content: [{ type: 'text', text: userText }, ...imageParts] }
+      : { role: 'user', content: userText },
   ]
 
   // 本地工具也要过权限：start_task / schedule_task 这类高危的，不配白名单就别让模型看见
@@ -797,6 +843,14 @@ export async function chat(sessionKey, userText, options = {}) {
         )
 
         completion = await client.chat.completions.create(payload)
+      } else if (imageParts.length > 0 && /image|vision|multimodal|invalid.*content/i.test(reason)) {
+        // 当前模型不认识图片：去掉图片再来一次，别让整条消息直接失败
+        console.warn(`[视觉] ${env.model} 不支持图片输入，去掉图片重试：${reason.slice(0, 100)}`)
+        imageParts.length = 0
+        messages[userIndex] = { role: 'user', content: userText }
+
+        if (env.toolDebug) console.log('[视觉] 已降级为纯文本，图片内容这次读不到')
+        round -= 1
       } else {
         throw error
       }

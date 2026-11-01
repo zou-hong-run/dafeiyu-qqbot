@@ -512,20 +512,25 @@ async function handleMessage(event, trigger = 'at') {
   try {
     const actor = event.user_id ?? ''
 
-    // 语音/图片/文件：下载后在输入里附一段说明，别让模型对附件一无所知
+    // 语音/图片/文件：下载后在输入里附一段说明，图片还会直接喂给多模态模型
     let input = `${text}${referencedContext(event)}`
+    let images = []
+
     if (inbound.length > 0) {
       try {
-        input = `${text}${await describeInbound(inbound)}`.trim()
+        const described = await describeInbound(inbound)
+        input = `${input}${described.text}`.trim()
+        images = described.images
       } catch (error) {
         console.warn('[附件] 处理失败：', error?.message ?? error)
-        input = `${text}
+        input = `${input}
 
 （对方发了 ${inbound.length} 个附件，但下载失败了：${error?.message ?? error}）`
       }
     }
 
     const answer = await chat(key, input || '（只发了附件，没有文字）', {
+      images,
       scope,
       actor,
       trigger,

@@ -75,10 +75,11 @@ async function downloadOne(item, index) {
 
 // 把附件整理成一段给模型看的说明，拼在用户输入后面
 export async function describeInbound(items) {
-  if (items.length === 0) return ''
+  if (items.length === 0) return { text: '', images: [], voice: 0 }
 
   const downloaded = await Promise.all(items.map((item, index) => downloadOne(item, index)))
   const lines = []
+  const images = []
 
   for (const item of downloaded) {
     const label = KIND_LABEL[item.type] ?? item.type
@@ -87,6 +88,7 @@ export async function describeInbound(items) {
       lines.push(
         `[${label}] 已存到 ${item.file}${item.size ? `（${(item.size / 1024).toFixed(0)} KB）` : ''}`,
       )
+      if (item.type === 'image') images.push(item.file)
     } else {
       lines.push(`[${label}] ${item.error ?? '没有拿到下载地址'}`)
     }

@@ -20,7 +20,8 @@
 - **30+ 工具**：联网搜索/抓网页、shell、文件读写、图片/语音/视频/文件/图文卡片发送、文字转语音、定时任务、技能与 MCP 自我扩展
 - **后台子助手**：复杂任务用 `start_task` 交给子 agent，最多 20 步，期间往群里推进度，做完自动汇报
 - **定时任务**：cron 五段表达式，到点执行并把结果推到群里（`schedule_task`）
-- **能收附件**：对方发的图片 / 语音 / 视频 / 文件会下载到 `downloads/incoming/` 并在对话里带上路径；引用某条消息时能拿到被引用的原文
+- **能看图**：对方发的图片直接喂给 V4.1-Flash（`deepseek-flash`）做多模态理解，能看截图、读文档照片；语音 / 视频 / 文件会下载到 `downloads/incoming/` 并带上路径
+- **引用上下文**：引用某条消息时能拿到被引用的原文
 - **只在被叫时说**：群里 @ 我、或者提到「大肥鱼」等别名才接话；插话判断默认关闭，不会没事接话茬
 - **观察模式**：`JUDGE_MODE=observe` 时它会评估「这句我本来会接」，但只记一笔不回复，`/observe` 能看到它想插手哪些消息
 - **自我进化**：`write_skill` 写技能、`add_mcp` 注册新 MCP 服务（热加载，不用重启）、`install_package` 装 npm 包
@@ -117,7 +118,7 @@ pnpm start
 | --- | --- |
 | `DEEP_SEEK_API_KEY` | 必填。也认 `DEEPSEEK_API_KEY` / `API_KEY` |
 | `QQ_APP_ID` / `QQ_APP_SECRET` | 必填。也认 `QQBOT_APP_ID` / `QQBOT_APP_SECRET` |
-| `DEEPSEEK_MODEL` | 模型名（`deepseek-chat`） |
+| `DEEPSEEK_MODEL` | 模型名（`deepseek-flash`，V4.1-Flash，原生支持图片理解；退回 `deepseek-chat` 则只看文字） |
 | `SYSTEM_PROMPT` | 单行覆盖整个人格提示词 |
 | `BOT_ALIASES` | 群里提到这些词必回（`大肥鱼,鱼鱼,万能大肥鱼`） |
 | `GROUP_AUTO_REPLY` | 关掉关键字触发 |

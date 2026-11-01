@@ -55,7 +55,8 @@ export const env = {
 
   apiKey,
   baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com',
-  model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-chat',
+  // deepseek-flash = V4.1-Flash，原生支持图片理解；老模型不认识图片，发图会自动降级
+  model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash',
 
   personaName: customPrompt ? '自定义' : personaName,
   systemPrompt: customPrompt || personaPrompt,
