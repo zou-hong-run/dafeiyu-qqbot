@@ -72,6 +72,19 @@ function toolsForScope(scope, actor = '') {
   return toDeepSeekTools(filterTools(getTools(), scope, actor))
 }
 
+// 「大肥鱼 /reset」「/reset 大肥鱼」这类写法，先剥掉别名再判断是不是命令
+function stripBotAlias(text) {
+  let value = String(text ?? '').trim()
+
+  for (const alias of env.botAliases) {
+    if (!value.startsWith(alias)) continue
+    value = value.slice(alias.length).replace(/^[，,、:：\s]+/, '').trim()
+    break
+  }
+
+  return value
+}
+
 function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
@@ -181,6 +194,10 @@ async function handleMessage(event, trigger = 'at') {
   let text = (event.content ?? '').trim()
   if (!text) return
 
+  // 「大肥鱼 /reset」这种带名字的命令也要认：只有剥掉别名后确实以 / 开头才替换
+  const stripped = stripBotAlias(text).replace(/[@＠]\S+$/, '').trim()
+  if (stripped.startsWith('/')) text = stripped
+
   // 只有自动插话才引用原消息；被 @、被点名、私聊都不加引用气泡
   if (trigger === 'judge') markQuote(event)
 
@@ -285,7 +302,7 @@ async function handleMessage(event, trigger = 'at') {
     return
   }
 
-  if (text === '/reset' || text === '重置对话') {
+  if (text === '/reset' || text === '重置对话' || text === '清空记忆' || text === '重新开始') {
     reset(key)
     await sendReply(event, '记忆已清空，我们重新开始吧。')
     return
