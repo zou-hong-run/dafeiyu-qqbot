@@ -100,8 +100,12 @@ export async function startMcp({ apiKey, baseURL }) {
   builtinSpec = {
     command: process.execPath,
     args: [builtinServerPath],
-    // shell/run_script 的放开开关得传进去，否则子进程读不到
-    env: { SHELL_UNRESTRICTED: process.env.SHELL_UNRESTRICTED ?? '' },
+    // 子进程默认只有最小 env，这些开关得显式传
+    env: {
+      SHELL_UNRESTRICTED: process.env.SHELL_UNRESTRICTED ?? '',
+      PM2_MANAGED: process.env.PM2_MANAGED ?? '',
+      PM2_APP_NAME: process.env.PM2_APP_NAME ?? '',
+    },
   }
   await connect('builtin', builtinSpec)
   await syncRegistry(true)

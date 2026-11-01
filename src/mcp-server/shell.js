@@ -228,7 +228,35 @@ async function shell({ command, cwd, timeout_ms: timeoutMs, retries, background 
   return lines.join('\n')
 }
 
-export const SHELL_HANDLERS = { shell, run_script: runScript }
+export const SHELL_HANDLERS = { shell, run_script: runScript, restart_self: restartSelf }
+
+const PM2_MANAGED = process.env.PM2_MANAGED === '1'
+const PM2_APP = process.env.PM2_APP_NAME?.trim() || 'dafeiyu'
+
+async function restartSelf({ delay_seconds: delaySeconds = 6, reason = '' }) {
+  if (!PM2_MANAGED) {
+    throw new Error(
+      '当前进程不是 pm2 托管的，自重启用不了。本地开发直接 Ctrl+C 再 pnpm start；' +
+        '线上请用 ecosystem.config.cjs 启动（pm2 start ecosystem.config.cjs）。',
+    )
+  }
+
+  const delay = Math.min(Math.max(Number(delaySeconds) || 6, 2), 60)
+  const note = String(reason ?? '').trim().slice(0, 120)
+  const { pid, logFile } = runInBackground(`sleep ${delay} && pm2 restart ${PM2_APP}`, projectRoot)
+
+  return [
+    `已安排 ${delay} 秒后重启 ${PM2_APP}（调度进程 PID ${pid}）。`,
+    note ? `原因：${note}` : '',
+    `日志：${logFile}`,
+    '',
+    '现在立刻用一句简短的话告诉用户「正在重启，稍等十几秒」，不要再调用其他工具。',
+    '重启会中断当前对话（进程被 pm2 拉起后是全新的），记忆已落盘不会丢。',
+    '如果过一分钟还没反应，用 tail 看上面那个日志，或者 pm2 list 看进程状态。',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 
 const INTERPRETERS = {
   bash: { ext: 'sh', cmd: 'bash' },
@@ -350,6 +378,24 @@ export const SHELL_TOOLS = [
         keep: { type: 'boolean', description: 'true = 执行后保留脚本文件，方便继续修改' },
       },
       required: ['code'],
+    },
+  },
+  {
+    name: 'restart_self',
+    description:
+      '重启自己（pm2 拉起的那个进程）。改完源码、改了 .env、装了依赖需要生效时用这个，' +
+      '不要用 shell 直接敲 pm2 restart——那样命令还没返回进程就被杀了，用户收不到回复。' +
+      '调用后会延迟几秒再重启，你有时间先把「正在重启」这句话发出去。只管理员可用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        delay_seconds: {
+          type: 'integer',
+          description: '延迟多少秒后重启，默认 6，范围 2-60，给回复留发送时间',
+        },
+        reason: { type: 'string', description: '为什么要重启，写进日志方便以后回溯' },
+      },
+      required: [],
     },
   },
 ]

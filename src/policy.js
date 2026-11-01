@@ -15,6 +15,7 @@ export const DANGEROUS_TOOLS = new Set([
   'add_mcp',
   'start_task',
   'schedule_task',
+  'restart_self',
 ])
 
 function dangerAllowed(scope, actor) {
@@ -55,6 +56,7 @@ export const TOOL_POLICY = {
 
   shell: SHELL,
   run_script: SHELL,
+  restart_self: SHELL,
 
   start_task: OPEN,
   schedule_task: OPEN,

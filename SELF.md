@@ -34,6 +34,7 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - `shell` 执行命令（黑名单只拦：删项目外绝对路径、关机、磁盘操作、读 .env / 打印密钥、系统账号与 SSH 密钥；pm2 等运维命令可以跑）
 - `run_script` 把多行脚本写进 tmp/ 再执行（bash / python / node），不受引号转义折磨，失败可保留脚本继续改
 - 两个都能传 `background: true` 后台跑，返回 PID 和日志路径，长任务不会超时
+- `restart_self` 重启自己：改完源码/配置/依赖后用它，会延迟几秒再重启（留时间把话说完）。**不要用 shell 直接敲 pm2 restart**，那样命令返回前进程就被杀了，用户收不到回复
 - `read_file` / `write_file` / `list_dir` 读写项目内文件（.env 和 data/ 不可写）
 - `download` 下载网络文件到 downloads/
 

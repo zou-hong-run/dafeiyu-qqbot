@@ -163,6 +163,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `now` / `weather` / `exchange` / `calc` / `timezone` / `dns` | 时间、天气、汇率、精确计算、时区、DNS |
 | `shell` | 执行命令，pm2 等运维命令也能跑。只拦：删根目录/家目录、关机、磁盘操作、读 `.env`、导出环境变量、打印密钥、系统账号与 SSH 密钥；装包/编译前先查可用内存；失败自动重试 3 次；`background:true` 可后台跑 |
 | `run_script` | 把多行脚本写进 `tmp/` 再执行（bash / python / node），不用处理引号转义；支持后台运行和保留脚本 |
+| `restart_self` | 重启自己：延迟几秒后 `pm2 restart <应用名>`，留时间把话说完再重启（应用名自动取 pm2 注入的 `name`） |
 | `read_file` / `write_file` / `list_dir` | 项目内文件读写（`.env`、`data/` 不可写） |
 | `download` | 下载网络文件到 `downloads/` |
 | `write_skill` / `list_skills` | 写技能 Markdown 到 `skills/`，后续对话自动注入 |
@@ -198,7 +199,7 @@ QQ 网关 ──WS──▶ index.js
 - **高危工具走白名单**：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task` 这 8 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
   没配白名单时：群里一律禁用，私聊放开。**一定要配**——否则任何 QQ 用户私聊机器人都能执行命令。
   机器人里发 `/id` 就能拿到自己的 openid。
-- `start_task` / `schedule_task` 也算高危，是因为它们能间接调起子 agent 和定时任务去执行命令，不挡住的话白名单就是摆设
+- `start_task` / `schedule_task` / `restart_self` 也算高危：前两个能间接调起子 agent 和定时任务去执行命令，后一个能重启服务，不挡住白名单就是摆设
 - 命令黑名单只拦真正危险的：删项目外绝对路径、关机、磁盘操作、读 `.env`、导出环境变量、打印密钥、系统账号、SSH 密钥。它挡不住所有绕过写法，真正的边界是白名单
 - shell 子进程的环境变量只透传 `PATH` 等基础变量和模型 key，**QQ_APP_ID / QQ_APP_SECRET 不会进子进程**
 - `.env`、`data/` 对模型的文件写入工具不可写；`.env` 读取被 shell 黑名单拦住

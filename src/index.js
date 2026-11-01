@@ -19,8 +19,12 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
 const run = promisify(execFile)
-const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell', 'run_script'])
+const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell', 'run_script', 'restart_self'])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
+
+// 让内置 MCP 子进程知道自己在 pm2 里、应用叫什么，restart_self 要用
+process.env.PM2_MANAGED = process.env.pm_id !== undefined ? '1' : '0'
+process.env.PM2_APP_NAME = process.env.name?.trim() || process.env.PM2_APP_NAME?.trim() || 'dafeiyu'
 
 fs.mkdirSync(dataDir, { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true })
