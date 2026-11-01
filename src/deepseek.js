@@ -26,6 +26,7 @@ const summarizing = new Set()
 const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'goal',
+  'read_group_history',
   'send_image',
   'send_audio',
   'send_video',
@@ -241,6 +242,22 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'read_group_history',
+      description:
+        '读取当前这个群最近的聊天记录（时间 + 昵称 + 内容）。只能在群里用，只能看到当前群，' +
+        '看不到别的群，也看不到私聊。被问「刚才大家聊了什么」「我们的聊天记录」「复盘一下」时用它。' +
+        '如果返回为空或只有几条，说明这个群没开「获取群内全部消息」，我只能看到 @ 我的那几条。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', description: '取最近多少条，默认 30，上限 200' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'goal',
       description:
         '管理当前会话的长期目标，让多轮对话里的长任务不会说完就断片。' +
@@ -363,6 +380,7 @@ async function runTool(
     fileSender,
     cardSender,
     speakSender,
+    historyReader,
     startTask,
     scheduler,
     notifyUser,
@@ -499,6 +517,20 @@ async function runTool(
     }
     resetMemory(sessionKey)
     return '当前会话的记忆已清空，从现在开始是全新的对话。'
+  }
+
+  if (name === 'read_group_history') {
+    if (!isToolAllowed('read_group_history', scope, actor)) {
+      return `${denyReason('read_group_history', scope, actor)}。群聊记录只能在群里读。`
+    }
+    if (typeof historyReader !== 'function') {
+      return '当前场景读不到群聊记录（私聊没有群记录）。'
+    }
+    try {
+      return await historyReader(args.limit)
+    } catch (error) {
+      return `读群聊记录失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'goal') {
@@ -664,6 +696,7 @@ export async function chat(sessionKey, userText, options = {}) {
     fileSender = null,
     cardSender = null,
     speakSender = null,
+    historyReader = null,
     startTask = null,
     scheduler = null,
     onStep = null,
@@ -842,6 +875,7 @@ export async function chat(sessionKey, userText, options = {}) {
         fileSender,
         cardSender,
         speakSender,
+        historyReader,
         startTask,
         scheduler,
       })

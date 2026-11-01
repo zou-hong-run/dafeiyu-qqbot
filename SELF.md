@@ -26,6 +26,11 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - 引用气泡默认**关闭**（群里回复不再盖引用）；要开在 `.env` 设 `QUOTE_REPLY=judge`（只在冷场后插话时引用）
   或 `always`（每条都引用），`QUOTE_WINDOW_SECONDS` 控制 judge 模式的「冷场」窗口
 
+### 群聊记录
+- `read_group_history` 读当前群最近 N 条聊天（时间 + 昵称 + 内容），**只能看本群**，看不到别的群和私聊
+- 记录是每群独立的，存在 data/groups/<群id>.jsonl；如果返回很少，说明这个群没开「获取群内全部消息」
+- `/总结` 命令走的也是这份记录（取最近 200 条做复盘）
+
 ### 联网与查询
 - `search` 联网搜索（支持 site: after: 语法）、`fetch` 抓网页正文
 - `weather` 天气、`exchange` 汇率、`timezone` 时区、`now` 当前时间

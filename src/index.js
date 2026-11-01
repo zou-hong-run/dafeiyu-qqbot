@@ -85,6 +85,32 @@ function stripBotAlias(text) {
   return value
 }
 
+// 给模型读当前群聊记录用：只读本群，不跨群
+function historyReaderFor(event) {
+  const groupId = event.group_id
+  if (!groupId) return null
+
+  return async (limit) => {
+    const count = Math.min(Math.max(Number(limit) || 30, 5), 200)
+    const entries = groupLog.recent(groupId, count)
+
+    if (entries.length === 0) {
+      return (
+        '这个群还没有任何聊天记录。' +
+        '如果刚拉我进来，可能是群没开「机器人可获取的群聊消息范围 = 获取群内全部消息」，' +
+        '那种情况下我只能看到 @ 我的消息。'
+      )
+    }
+
+    const info = groupLog.statsOf(groupId)
+    return (
+      `当前群最近 ${entries.length} 条（库里共 ${info.count} 条，最早 ${info.from ?? '-'}）：
+` +
+      groupLog.formatForSummary(entries)
+    )
+  }
+}
+
 function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
@@ -458,6 +484,7 @@ async function handleMessage(event, trigger = 'at') {
       fileSender: fileSenderFor(event),
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
+      historyReader: historyReaderFor(event),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>

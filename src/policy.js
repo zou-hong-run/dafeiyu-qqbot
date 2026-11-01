@@ -3,6 +3,7 @@ import { env } from './env.js'
 const OPEN = { scopes: ['private', 'group'], readOnly: false }
 const READ_ONLY = { scopes: ['private', 'group'], readOnly: true }
 const PRIVATE_ONLY = { scopes: ['private'], readOnly: false }
+const GROUP_ONLY = { scopes: ['group'], readOnly: true }
 
 // 高危工具：能执行命令、改文件、装包、挂 MCP、写技能（会影响后续提示词）的一律走白名单
 // 另外 start_task / schedule_task 也在这里：否则群友能借子 agent 或定时任务绕过限制
@@ -51,6 +52,7 @@ export const TOOL_POLICY = {
   dns: READ_ONLY,
 
   remember: OPEN,
+  read_group_history: GROUP_ONLY,
   goal: OPEN,
   send_image: OPEN,
   send_audio: OPEN,
