@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { env } from './env.js'
-import { isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './policy.js'
+import { denyReason, isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './policy.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
@@ -384,16 +384,16 @@ async function runTool(
   }
 
   if (name === 'remember') {
-    if (!isToolAllowed('remember', scope)) {
-      return `工具 remember 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('remember', scope, actor)) {
+      return `${denyReason('remember', scope, actor)}。`
     }
     const saved = addLongTerm(sessionKey, args.text)
     return saved ? `已记住：${args.text}` : '这条已经记过了。'
   }
 
   if (name === 'send_image') {
-    if (!isToolAllowed('send_image', scope)) {
-      return `工具 send_image 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('send_image', scope, actor)) {
+      return `${denyReason('send_image', scope, actor)}。`
     }
     if (typeof sendImage !== 'function') {
       return '当前场景不支持发送图片。'
@@ -407,8 +407,8 @@ async function runTool(
   }
 
   if (name === 'send_audio') {
-    if (!isToolAllowed('send_audio', scope)) {
-      return `工具 send_audio 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('send_audio', scope, actor)) {
+      return `${denyReason('send_audio', scope, actor)}。`
     }
     if (typeof audioSender !== 'function') {
       return '当前场景不支持发送音频。'
@@ -422,8 +422,8 @@ async function runTool(
   }
 
   if (name === 'send_video') {
-    if (!isToolAllowed('send_video', scope)) {
-      return `工具 send_video 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('send_video', scope, actor)) {
+      return `${denyReason('send_video', scope, actor)}。`
     }
     if (typeof videoSender !== 'function') {
       return '当前场景不支持发送视频。'
@@ -437,8 +437,8 @@ async function runTool(
   }
 
   if (name === 'send_file') {
-    if (!isToolAllowed('send_file', scope)) {
-      return `工具 send_file 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('send_file', scope, actor)) {
+      return `${denyReason('send_file', scope, actor)}。`
     }
     if (typeof fileSender !== 'function') {
       return '当前场景不支持发送文件。'
@@ -456,8 +456,8 @@ async function runTool(
   }
 
   if (name === 'send_card') {
-    if (!isToolAllowed('send_card', scope)) {
-      return `工具 send_card 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('send_card', scope, actor)) {
+      return `${denyReason('send_card', scope, actor)}。`
     }
     if (typeof cardSender !== 'function') {
       return '当前场景不支持发送图文卡片。'
@@ -471,8 +471,8 @@ async function runTool(
   }
 
   if (name === 'speak') {
-    if (!isToolAllowed('speak', scope)) {
-      return `工具 speak 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('speak', scope, actor)) {
+      return `${denyReason('speak', scope, actor)}。`
     }
     if (typeof speakSender !== 'function') {
       return '当前场景不支持语音合成。'
@@ -486,16 +486,16 @@ async function runTool(
   }
 
   if (name === 'clear_memory') {
-    if (!isToolAllowed('clear_memory', scope)) {
-      return `工具 clear_memory 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('clear_memory', scope, actor)) {
+      return `${denyReason('clear_memory', scope, actor)}。`
     }
     resetMemory(sessionKey)
     return '当前会话的记忆已清空，从现在开始是全新的对话。'
   }
 
   if (name === 'goal') {
-    if (!isToolAllowed('goal', scope)) {
-      return `工具 goal 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('goal', scope, actor)) {
+      return `${denyReason('goal', scope, actor)}。`
     }
 
     const action = String(args.action ?? '').trim()
@@ -520,8 +520,8 @@ async function runTool(
   }
 
   if (name === 'start_task') {
-    if (!isToolAllowed('start_task', scope)) {
-      return `工具 start_task 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('start_task', scope, actor)) {
+      return `${denyReason('start_task', scope, actor)}。`
     }
     if (typeof startTask !== 'function') {
       return '当前场景不支持后台任务。'
@@ -538,8 +538,8 @@ async function runTool(
   }
 
   if (name === 'schedule_task') {
-    if (!isToolAllowed('schedule_task', scope)) {
-      return `工具 schedule_task 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('schedule_task', scope, actor)) {
+      return `${denyReason('schedule_task', scope, actor)}。`
     }
     if (!scheduler) return '当前场景不支持定时任务。'
 
@@ -568,8 +568,8 @@ async function runTool(
   }
 
   if (name === 'remove_schedule') {
-    if (!isToolAllowed('remove_schedule', scope)) {
-      return `工具 remove_schedule 在${SCOPE_LABEL[scope] ?? scope}场景不可用。`
+    if (!isToolAllowed('remove_schedule', scope, actor)) {
+      return `${denyReason('remove_schedule', scope, actor)}。`
     }
     if (!scheduler) return '当前场景不支持定时任务。'
 
@@ -597,7 +597,7 @@ async function runTool(
     }
   }
 
-  if (!isToolAllowed(name, scope)) {
+  if (!isToolAllowed(name, scope, actor)) {
     return `工具 ${name} 在${SCOPE_LABEL[scope] ?? scope}场景不可用，请直接用已有知识回答。`
   }
 

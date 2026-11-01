@@ -94,6 +94,28 @@ export function isToolAllowed(toolName, scope, actor = '') {
   return true
 }
 
+// 被拒时给出可执行的原因，别只回一句「不可用」
+export function denyReason(toolName, scope, actor = '') {
+  const rule = TOOL_POLICY[toolName]
+
+  if (rule && !rule.scopes.includes(scope)) {
+    const allowed = rule.scopes.map((item) => SCOPE_LABEL[item] ?? item).join('、')
+    return `工具 ${toolName} 只能在${allowed}用，当前是${SCOPE_LABEL[scope] ?? scope}`
+  }
+
+  if (DANGEROUS_TOOLS.has(toolName)) {
+    if (env.adminOpenIds.length > 0) {
+      return (
+        `工具 ${toolName} 需要管理员权限：你的 openid ${actor || '未知'} 不在 ADMIN_OPENIDS 名单里。` +
+        '让管理员把这串 openid 加进 .env 后重启。'
+      )
+    }
+    return `工具 ${toolName} 需要管理员权限：服务器还没配 ADMIN_OPENIDS，群里默认禁用（私聊可用）`
+  }
+
+  return `工具 ${toolName} 在${SCOPE_LABEL[scope] ?? scope}场景不可用`
+}
+
 export function filterTools(tools, scope, actor = '') {
   return tools.filter((tool) => isToolAllowed(tool.name, scope, actor))
 }
