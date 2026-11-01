@@ -91,15 +91,30 @@ export function historyTokens(key) {
 
 export function takeOverflow(key, budgetTokens = Number.POSITIVE_INFINITY) {
   const session = getSession(key)
-  if (session.shortTerm.length <= SHORT_TERM_LIMIT) return null
 
-  let total = session.shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0)
-  if (total <= budgetTokens) return null
+  // 两道上限，谁的触发条件先满足都算溢出：
+  // 1) 轮数上限（HISTORY_TURNS）——短期记忆就只该保留这么多轮
+  // 2) token 上限——超长内容即使轮数不多也要压摘要
+  if (session.shortTerm.length <= SHORT_TERM_LIMIT) {
+    const totalTokens = session.shortTerm.reduce(
+      (sum, message) => sum + estimateTokens(message.content),
+      0,
+    )
+    if (totalTokens <= budgetTokens) return null
+  }
 
   const target = Math.floor(budgetTokens * 0.7)
   const overflow = []
 
-  while (total > target && session.shortTerm.length > SHORT_TERM_LIMIT) {
+  // 先按轮数裁：保留最近 SHORT_TERM_LIMIT 条
+  while (session.shortTerm.length > SHORT_TERM_LIMIT) {
+    const message = session.shortTerm.shift()
+    overflow.push(message)
+  }
+
+  // 再按 token 裁：轮数没超但内容太长时继续丢前面的
+  let total = session.shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  while (total > target && session.shortTerm.length > 2) {
     const message = session.shortTerm.shift()
     total -= estimateTokens(message.content)
     overflow.push(message)
