@@ -219,7 +219,12 @@ async function handleMessage(event, trigger = 'at') {
 
   if (text === '/diag' || text === '/diag send') {
     if (!isAdmin(scope, event.user_id ?? '')) {
-      await sendReply(event, '自检只对管理员开放。')
+      await sendReply(
+        event,
+        `自检只对管理员开放，因为要往群里发测试图。你的 openid：${event.user_id ?? '未知'}。` +
+          '把它填进服务器 .env 的 ADMIN_OPENIDS（逗号分隔多个），重启后群里就能用；' +
+          '不想改配置就先私聊我发 /diag。',
+      )
       return
     }
 
@@ -264,7 +269,11 @@ async function handleMessage(event, trigger = 'at') {
 
   if (text === '/observe' || text.startsWith('/observe ')) {
     if (!isAdmin(scope, event.user_id ?? '')) {
-      await sendReply(event, '观察记录只对管理员开放。')
+      await sendReply(
+        event,
+        `观察记录只对管理员开放（里面会有群友的对话原文）。你的 openid：${event.user_id ?? '未知'}。` +
+          '填进服务器 .env 的 ADMIN_OPENIDS 后重启即可。',
+      )
       return
     }
 
@@ -328,7 +337,11 @@ async function handleMessage(event, trigger = 'at') {
     }
 
     if (!isToolAllowed('start_task', scope, event.user_id ?? '')) {
-      await sendReply(event, '后台任务只对管理员开放，你的 openid 不在白名单里。')
+      await sendReply(
+        event,
+        `后台任务只对管理员开放。你的 openid：${event.user_id ?? '未知'}。` +
+          '填进服务器 .env 的 ADMIN_OPENIDS 后重启即可。',
+      )
       return
     }
 
