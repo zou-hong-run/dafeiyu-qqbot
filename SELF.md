@@ -39,7 +39,9 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - `download` 下载网络文件到 downloads/
 
 ### 任务与自我进化
-- `start_task` 把复杂任务交给后台子助手（最多 20 步，会汇报进度），主对话不必干等
+- `start_task` 建工单并交给 Worker（最多 20 步，会汇报进度），主对话不必干等
+- 工单号形如 `t-3`，发 `/tasks` 看正在跑的，发 `/kill t-3` 终止；工单落盘在 data/tickets.json，重启不丢
+- 巡检每 30 秒在外部看一眼：停滞太久会提醒，连续 4 次卡在同一个工具上会直接掐掉
 - `schedule_task` 定时任务，cron 5 段表达式，到点自动执行并把结果推到群里
 - `list_schedules` / `remove_schedule` 管理定时任务
 - `write_skill` 写技能 Markdown 到 skills/，会自动注入后续对话
@@ -53,7 +55,10 @@ src/index.js          消息入口、事件分发、QQ 发送实现
 src/deepseek.js       模型调用、工具循环、提示词组装
 src/persona.js        人格设定
 src/memory.js         三层记忆
-src/task-runner.js    后台子任务
+src/task-runner.js    兼容层（老接口转发到 ticket + worker）
+src/ticket.js         工单：授权、进展、交付，落盘可恢复
+src/worker.js         Worker：上下文隔离的执行单元
+src/watchdog.js       巡检：停滞与无效循环检测
 src/scheduler.js      定时任务
 src/group-log.js      群聊记录
 src/skills.js         技能加载

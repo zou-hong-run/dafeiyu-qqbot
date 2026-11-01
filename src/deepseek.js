@@ -878,6 +878,8 @@ export async function runTaskAgent({
   taskPrompt,
   scope,
   actor = '',
+  sessionKey = 'worker',
+  workdir = '',
   tools,
   callTool,
   sendImage,
@@ -890,8 +892,12 @@ export async function runTaskAgent({
   notifyUser,
   signal,
 }) {
+  const systemPrompt = workdir
+    ? `${TASK_SYSTEM_PROMPT}\n\n本次工作的目录：${workdir}\n中间产物写在这里，别散落到项目根。`
+    : TASK_SYSTEM_PROMPT
+
   const messages = [
-    { role: 'system', content: TASK_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: taskPrompt },
   ]
 
@@ -936,13 +942,13 @@ export async function runTaskAgent({
 
     for (const call of message.tool_calls) {
       const toolName = call.function?.name ?? '未知工具'
-      console.log(`[子任务] 第${round + 1}步 ${toolName}`)
+      console.log(`[Worker:${sessionKey}] 第${round + 1}步 ${toolName}`)
 
       const result = await runTool(call, {
         scope,
         actor,
         callTool,
-        sessionKey: 'task',
+        sessionKey,
         sendImage,
         audioSender,
         videoSender,

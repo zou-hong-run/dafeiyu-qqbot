@@ -73,7 +73,8 @@ export const env = {
   toolDebug: process.env.TOOL_DEBUG !== 'false',
 
   taskMaxRounds: Math.floor(positiveNumber('TASK_MAX_ROUNDS', 20)),
-  taskMaxContinuations: Math.floor(positiveNumber('TASK_MAX_CONTINUATIONS', 3)),
+  // 允许设成 0：关掉验收不过时的自动续跑
+  taskMaxContinuations: Math.floor(nonNegativeNumber('TASK_MAX_CONTINUATIONS', 3)),
   taskStallMs: positiveNumber('TASK_STALL_SECONDS', 300) * 1000,
   taskReportInterval: positiveNumber('TASK_REPORT_INTERVAL', 60) * 1000,
   taskMaxReports: Math.floor(positiveNumber('TASK_MAX_REPORTS', 5)),

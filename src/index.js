@@ -13,6 +13,8 @@ import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } 
 import { filterTools, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
 import { reset, stats, flush } from './memory.js'
+import { flushTickets } from './ticket.js'
+import { startWatchdog, stopWatchdog } from './watchdog.js'
 import * as groupLog from './group-log.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -869,7 +871,7 @@ async function handleMessage(event, trigger = 'at') {
         videoSender: videoSenderFor(event),
         callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
       })
-      await sendReply(event, `已启动后台任务 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
+      await sendReply(event, `已建工单 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
     } catch (error) {
       await sendReply(event, `启动失败：${error?.message ?? error}`)
     }
@@ -879,7 +881,7 @@ async function handleMessage(event, trigger = 'at') {
   if (text === '/tasks' || text === '任务状态') {
     const running = taskStatus()
     if (running.length === 0) {
-      await sendReply(event, '当前没有正在跑的后台任务。')
+      await sendReply(event, '当前没有正在跑的工单。')
       return
     }
 
@@ -887,7 +889,7 @@ async function handleMessage(event, trigger = 'at') {
       (task) =>
         `${task.id}｜第 ${task.step} 步｜已跑 ${task.elapsed} 秒｜${task.idle} 秒无新动作`,
     )
-    await sendReply(event, `正在跑 ${running.length} 个任务：\n${lines.join('\n')}\n\n发 /kill <任务id> 可以终止。`)
+    await sendReply(event, `正在跑 ${running.length} 个工单：\n${lines.join('\n')}\n\n发 /kill <工单号> 可以终止。`)
     return
   }
 
@@ -1098,9 +1100,12 @@ async function shutdown(signal) {
   console.log(`\n[退出] 收到 ${signal}，正在落盘记忆并断开连接...`)
   try {
     flush()
+    flushTickets()
   } catch (error) {
-    console.error('[退出] 记忆落盘失败：', error?.message ?? error)
+    console.error('[退出] 落盘失败：', error?.message ?? error)
   }
+
+  stopWatchdog()
 
   await withTimeout(stopMcp(), 5000)
   await withTimeout(bot.stop(), 5000)
@@ -1162,19 +1167,36 @@ try {
   const interrupted = takeInterruptedTasks()
   for (const task of interrupted) {
     const body =
-      `上次有个后台任务被中断了（${task.id}）：\n${String(task.goal ?? '').slice(0, 100)}\n\n` +
-      '需要重跑的话发 /task 重新发起。'
+      `上次有个工单没跑完（${task.id}）：\n${String(task.goal ?? '').slice(0, 100)}\n\n` +
+      '需要重跑的话发 /task 重新发起，或者直接说「继续刚才那个」。'
     try {
       if (task.target?.type === 'group') await bot.group(task.target.id).send(body)
       else if (task.target?.id) await bot.user(task.target.id).send(body)
     } catch (error) {
-      console.error('[任务] 中断通知发送失败：', error?.message ?? error)
+      console.error('[工单] 中断通知发送失败：', error?.message ?? error)
     }
   }
 
   if (interrupted.length > 0) {
-    console.log(`[启动] 发现 ${interrupted.length} 个被中断的任务，已通知对应会话`)
+    console.log(`[启动] 发现 ${interrupted.length} 个被中断的工单，已通知对应会话`)
   }
+
+  // 外部控制回路：只在外面看工单有没有真的在往前走，不参与执行
+  startWatchdog({
+    send: async (target, text) => {
+      const body = clip(text)
+      if (target?.type === 'group') await bot.group(target.id).send(body)
+      else if (target?.id) await bot.user(target.id).send(body)
+    },
+    abort: (ticketId) => {
+      try {
+        killTask(ticketId)
+        return true
+      } catch {
+        return false
+      }
+    },
+  })
 
   if (process.send) process.send('ready')
 } catch (error) {

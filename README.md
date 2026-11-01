@@ -45,7 +45,10 @@ src/
   policy.js        工具权限表（哪个场景能用哪个工具）
   memory.js        三层记忆：短期/中期/长期 + 落盘 data/memory.json
   group-log.js     群聊记录（每群保留最近若干条，供插话判断和 /总结 用）
-  task-runner.js   后台任务调度：进度上报、卡住检测、多轮续跑
+  ticket.js        工单：一项工作的授权、进展、交付全记在这里，落盘可恢复
+  worker.js        Worker：上下文隔离的执行单元，只干活、不直接对外说话
+  watchdog.js      外部巡检：停滞检测 + 无效循环判定
+  task-runner.js   兼容层：老接口转发到 ticket + worker
   scheduler.js     定时任务：cron 解析、到点执行、结果推群
   skills.js        技能目录加载（skills/*.md 注入系统提示词）
   self-doc.js      把 SELF.md 注入提示词，机器人可以自己改这份能力说明
@@ -188,7 +191,23 @@ QQ 网关 ──WS──▶ index.js
 
 **记忆分层**：短期是最近 `HISTORY_TURNS` 轮原文；超出上下文预算的部分压缩成中期摘要；`remember` 写入的事实长期保存，重启不丢。
 
-**任务与调度**：`start_task` 会起一个独立会话跑子 agent，按 `TASK_REPORT_INTERVAL` 推进度，卡住超过 `TASK_STALL_SECONDS` 判失败，验收不通过会续跑最多 `TASK_MAX_CONTINUATIONS` 轮。`scheduler.js` 自己解析 5 段 cron，到点把结果发回原会话。
+**任务按「工单 + Worker + 巡检」组织**（借鉴 DeepSeek 的 Super-agent 分层）：
+
+```
+Router（index.js）          接消息、判断要不要干、建工单、统一对外说话
+  └─ Ticket（ticket.js）    工单：谁提的、授权依据、做到第几步、交付了什么，落盘可恢复
+       └─ Worker（worker.js）独立上下文执行，只往 Router 的口子丢消息，结果由 Router 交付
+外部 Watchdog（watchdog.js）每 30 秒从外面看一眼：停滞太久 / 连续调同一个工具 → 告警或掐掉
+```
+
+这样做的直接收益：
+
+- Worker 的上下文按工单隔离（`worker:<工单号>`），长任务的中间过程不会污染主对话
+- 工单落盘在 `data/tickets.json`，重启后能说清「上次跑到第几步」，而不是只发一句「被中断了」
+- Worker 不直接对群说话，`say()` 统一经 Router，避免了多个任务抢发言、重复播报
+- 巡检站在外面看，能发现「进程还活着但没有实质进展」这种时间阈值抓不到的情况
+
+`scheduler.js` 自己解析 5 段 cron，到点把结果发回原会话。
 
 **自我进化**：`write_skill` 写进 `skills/`，`add_mcp` 写进 `data/mcp-registry.json`，客户端每轮对话前检查注册表 mtime，变了就重连，所以装完立刻能用。
 
