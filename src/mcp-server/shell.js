@@ -56,7 +56,9 @@ function readLinuxMemory() {
     const availableMB = pick('MemAvailable') ?? pick('MemFree')
     if (!totalMB || !availableMB) return null
 
-    return { totalMB, availableMB }
+    const swapTotalMB = pick('SwapTotal') ?? 0
+
+    return { totalMB, availableMB, swapTotalMB }
   } catch {
     return null
   }
@@ -68,8 +70,19 @@ function assertMemory(command) {
 
   if (MEMORY_RESCUE.test(command)) return
 
+  const video = VIDEO_PROCESS.test(command)
   const heavy = HEAVY_COMMAND.test(command)
-  const needMB = heavy ? 600 : 150
+  const needMB = video ? VIDEO_NEED_MB : heavy ? 600 : 150
+
+  // 小机器没 swap，随便一个重活就能把整机拖死，先拦住
+  if ((video || heavy) && mem.totalMB < 2048 && mem.swapTotalMB < 500) {
+    throw new Error(
+      `这台机器内存 ${mem.totalMB.toFixed(0)}MB、swap ${mem.swapTotalMB.toFixed(0)}MB，` +
+        `跑${video ? '视频处理' : '安装/编译'}类命令很容易把整机 OOM 掉（上次就是 ffmpeg 把宝塔面板带走的）。\n` +
+        '先加 swap 再来：\n' +
+        '  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile',
+    )
+  }
 
   if (mem.availableMB >= needMB) return
 
@@ -86,10 +99,11 @@ function assertMemory(command) {
 
 function wrapRiskyCommand(command) {
   if (!isLinux) return command
-  if (!/\bffmpeg\b/i.test(command)) return command
+  if (!VIDEO_PROCESS.test(command)) return command
   if (/\bulimit\b/i.test(command)) return command
 
-  return `ulimit -v 600000 2>/dev/null; ${command}`
+  // 限制虚拟内存 + 降 CPU 优先级：内存爆了先 OOM 自己，别把整机拖死
+  return `ulimit -v ${VIDEO_ULIMIT_MB * 1000} 2>/dev/null; nice -n 19 ${command}`
 }
 
 function assertSafeCommand(command, { script = false } = {}) {
@@ -219,6 +233,15 @@ async function shell({ command, cwd, timeout_ms: timeoutMs, retries, background 
         .slice(0, -1)
         .map((item, index) => `第${index + 1}次退出码 ${item.code}`)
         .join('，')}`,
+    )
+  }
+
+  if (last.timedOut && VIDEO_PROCESS.test(cmd)) {
+    lines.push(
+      '\n⚠️ 视频处理超时了。**不要换条命令再试一次**——每试一次就多一个 ffmpeg，' +
+        '几个叠起来会把这台 1.5G 的机器直接 OOM（上次就是这么把宝塔面板带走的）。\n' +
+        '正确做法：先用 background:true 放后台，加 `-threads 1` 限制线程，' +
+        '或者先把分辨率/时长降下来（例如 `-vf scale=640:-2 -t 30`）再转。',
     )
   }
 
