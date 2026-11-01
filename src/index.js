@@ -750,6 +750,47 @@ if (env.toolsEnabled) {
   console.log('[启动] 工具已关闭（ENABLE_TOOLS=false）')
 }
 
+// 2C2G 小机器：启动时把内存账算清楚，出问题好对照
+function reportMemory() {
+  try {
+    const raw = fs.readFileSync('/proc/meminfo', 'utf8')
+    const lines = raw.split('\n')
+
+    const pick = (key) => {
+      const line = lines.find((item) => item.startsWith(`${key}:`))
+      if (!line) return 0
+      return Math.round(parseInt(line.split(':')[1], 10) / 1024)
+    }
+
+    const total = pick('MemTotal')
+    const available = pick('MemAvailable')
+    const swap = pick('SwapTotal')
+    if (!total) return
+
+    console.log(
+      `[内存] 总计 ${(total / 1024).toFixed(1)}G｜可用 ${available}MB｜swap ${(swap / 1024).toFixed(1)}G`,
+    )
+    console.log(
+      `[内存] 预算：主进程堆 ${process.env.MAIN_HEAP_MB || 320}MB + MCP ${process.env.MCP_HEAP_MB || 192}MB，` +
+        `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB，同时最多 ${env.taskConcurrency} 个工单`,
+    )
+
+    if (available < 500) {
+      console.warn(`[内存] 可用只剩 ${available}MB，建议先腾出空间再跑重活`)
+    }
+    if (swap < 512) {
+      console.warn(
+        '[内存] 没有 swap，一个大命令就可能把整机 OOM 掉。建议：' +
+          'fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile',
+      )
+    }
+  } catch {
+    // 非 Linux 或读不到，跳过
+  }
+}
+
+reportMemory()
+
 console.log(`[启动] 正在连接 QQ 开放平台（AppID: ${env.appId}）...`)
 
 try {

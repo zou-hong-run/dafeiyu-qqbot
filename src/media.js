@@ -277,6 +277,9 @@ export function videoSenderFor(event) {
 // 密钥、记忆、依赖目录一律不发——群里任何拿不到 shell 的人也能调这个工具
 const FILE_BLOCKED = ['.env', 'data/', 'node_modules/', '.git/', '.ssh/']
 
+// 上传前整个文件要读进内存（SDK 还要再复制一份），2G 内存的机器经不起 200MB
+const MAX_SEND_BYTES = Number(process.env.MAX_SEND_FILE_MB || 50) * 1024 * 1024
+
 export function resolveSendableFile(target) {
   const roots = [path.join(projectRoot, 'downloads'), projectRoot]
   const cleaned = String(target ?? '')
@@ -311,8 +314,12 @@ export function fileSenderFor(event) {
     if (!resolved) throw new Error(mediaMissingHint(downloadDir, path.resolve(downloadDir, target)))
 
     const stat = fs.statSync(resolved)
-    if (stat.size > 200 * 1024 * 1024) {
-      throw new Error(`文件 ${(stat.size / 1048576).toFixed(1)}MB，超过 200MB 硬上限`)
+    if (stat.size > MAX_SEND_BYTES) {
+      throw new Error(
+        `文件 ${(stat.size / 1048576).toFixed(1)}MB，超过 ${MAX_SEND_BYTES / 1048576}MB 上限。` +
+          '这台机器只有 2G 内存，整个文件要读进内存才能上传，再大容易把它搞崩。' +
+          '可以先用 shell 压缩/分割，或者用 download 直接传外链。',
+      )
     }
 
     const isGroup = event.message_type === 'group'

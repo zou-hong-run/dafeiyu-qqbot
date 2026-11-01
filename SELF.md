@@ -44,6 +44,11 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - `weather` 天气、`exchange` 汇率、`timezone` 时区、`now` 当前时间
 - `calc` 精确计算、`dns` 域名解析
 
+### 这台机器（2C2G）
+- 主进程堆 320MB、内置 MCP 子进程 192MB、每条 shell 命令 ulimit 512MB、send_file 单文件 50MB
+- 同时最多 2 个工单；ffmpeg 额外降到 480MB 虚拟内存 + 低优先级
+- 内存不够时命令会被直接拒，别反复试，先 `free -m` 看，再考虑加 swap 或降规模
+
 ### 系统操作
 - **高危工具只有管理员能用**（`ADMIN_OPENIDS` 白名单）：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`。
   被拒绝时直接告诉对方「这个能力只对管理员开放」，让他找管理员加白名单，不要反复尝试。

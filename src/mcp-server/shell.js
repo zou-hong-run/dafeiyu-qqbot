@@ -97,13 +97,18 @@ function assertMemory(command) {
   )
 }
 
+const DEFAULT_ULIMIT_MB = Number(process.env.SHELL_ULIMIT_MB || 512)
+
 function wrapRiskyCommand(command) {
   if (!isLinux) return command
-  if (!VIDEO_PROCESS.test(command)) return command
   if (/\bulimit\b/i.test(command)) return command
 
-  // 限制虚拟内存 + 降 CPU 优先级：内存爆了先 OOM 自己，别把整机拖死
-  return `ulimit -v ${VIDEO_ULIMIT_MB * 1000} 2>/dev/null; nice -n 19 ${command}`
+  const video = VIDEO_PROCESS.test(command)
+  const limitMB = video ? VIDEO_ULIMIT_MB : DEFAULT_ULIMIT_MB
+
+  // 每个命令都设内存上限：子进程撑爆了自己先死，别把整机拖进 OOM
+  const prefix = `ulimit -v ${limitMB * 1000} 2>/dev/null`
+  return video ? `${prefix}; nice -n 19 ${command}` : `${prefix}; ${command}`
 }
 
 function assertSafeCommand(command, { script = false } = {}) {

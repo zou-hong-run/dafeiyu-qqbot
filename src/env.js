@@ -79,7 +79,8 @@ export const env = {
   taskStallMs: positiveNumber('TASK_STALL_SECONDS', 300) * 1000,
   taskReportInterval: positiveNumber('TASK_REPORT_INTERVAL', 60) * 1000,
   taskMaxReports: Math.floor(positiveNumber('TASK_MAX_REPORTS', 5)),
-  taskConcurrency: Math.floor(positiveNumber('TASK_CONCURRENCY', 3)),
+  // 2G 内存：每个 Worker 都是一个跑着 ReAct 循环的会话，同时开太多会直接 OOM
+  taskConcurrency: Math.floor(positiveNumber('TASK_CONCURRENCY', 2)),
   maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 100)),
   maxOutputTokens: Math.floor(positiveNumber('MAX_OUTPUT_TOKENS', 8192)),
   progressInterval: positiveNumber('PROGRESS_INTERVAL', 25) * 1000,

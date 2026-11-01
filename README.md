@@ -27,6 +27,7 @@
 - **自我进化**：`write_skill` 写技能、`add_mcp` 注册新 MCP 服务（热加载，不用重启）、`install_package` 装 npm 包
 - **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；子进程只拿 PATH 和模型 key，**不拿 QQ 密钥**
 - **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` 的每次调用都记到 `data/audit.log`
+- **按 2C2G 小机器做了内存预算**：主进程堆 320MB、MCP 子进程 192MB、每条 shell 命令 `ulimit -v 512MB`、`send_file` 单文件 50MB、pm2 RSS 超 420MB 自动重启；启动时会打印实际内存和这两笔预算
 
 ## 技术栈
 

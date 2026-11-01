@@ -14,7 +14,10 @@ module.exports = {
 
       autorestart: true,
       watch: false,
-      max_memory_restart: '512M',
+
+      // 2C2G 机器：主进程堆压到 320M，整体 RSS 超 420M 就重启，别等系统 OOM
+      node_args: [`--max-old-space-size=${Number(process.env.MAIN_HEAP_MB || 320)}`],
+      max_memory_restart: process.env.MAX_RSS || '420M',
 
       // 防重启抖动：30 秒内挂掉不算启动成功，连续失败用指数退避
       min_uptime: '30s',

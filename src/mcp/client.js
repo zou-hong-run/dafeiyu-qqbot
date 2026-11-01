@@ -99,7 +99,8 @@ export async function startMcp({ apiKey, baseURL }) {
   baseEnv = { DEEP_SEEK_API_KEY: apiKey, DEEPSEEK_BASE_URL: baseURL }
   builtinSpec = {
     command: process.execPath,
-    args: [builtinServerPath],
+    // 内置工具服务是第二个 Node 进程，2G 机器上必须给它设上限，否则会跟主进程抢内存
+    args: [`--max-old-space-size=${Number(process.env.MCP_HEAP_MB || 192)}`, builtinServerPath],
     // 子进程默认只有最小 env，这些开关得显式传
     env: {
       SHELL_UNRESTRICTED: process.env.SHELL_UNRESTRICTED ?? '',
