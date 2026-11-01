@@ -10,7 +10,7 @@ import { startTask as launchTask, busyTasks, taskStatus, describeTool, killTask,
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
-import { filterTools, describePolicy } from './policy.js'
+import { filterTools, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
 import { reset, stats, flush } from './memory.js'
 import * as groupLog from './group-log.js'
@@ -50,10 +50,10 @@ function audit(sessionKey, tool, args, result) {
   })
 }
 
-function toolsForScope(scope) {
+function toolsForScope(scope, actor = '') {
   if (!env.toolsEnabled) return []
   if (scope === 'group' && !env.groupToolsEnabled) return []
-  return toDeepSeekTools(filterTools(getTools(), scope))
+  return toDeepSeekTools(filterTools(getTools(), scope, actor))
 }
 
 function sessionKeyOf(event) {
@@ -654,7 +654,8 @@ async function runScheduledTask(task) {
   return runTaskAgent({
     taskPrompt: task.prompt,
     scope,
-    tools: toolsForScope(scope),
+    actor: 'scheduler',
+    tools: toolsForScope(scope, 'scheduler'),
     callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
     sendImage: async () => {
       throw new Error('定时任务里不能发图片，请把结果写成文字')
@@ -808,6 +809,19 @@ async function handleMessage(event, trigger = 'at') {
   const key = sessionKeyOf(event)
   const scope = event.message_type === 'group' ? 'group' : 'private'
 
+  if (text === '/id' || text === '我的id' || text === '我的ID') {
+    const admin = env.adminOpenIds.includes(String(event.user_id))
+    await sendReply(
+      event,
+      `你的 openid：${event.user_id}\n` +
+        `会话：${key}\n` +
+        `群：${event.group_id ?? '（私聊）'}\n` +
+        `管理员权限：${admin ? '有' : '无'}\n\n` +
+        '要开高危工具（执行命令、写文件、装包、加 MCP）就把上面这串 openid 填进 .env 的 ADMIN_OPENIDS，逗号分隔。',
+    )
+    return
+  }
+
   if (text === '/reset' || text === '重置对话') {
     reset(key)
     await sendReply(event, '记忆已清空，我们重新开始吧。')
@@ -833,13 +847,19 @@ async function handleMessage(event, trigger = 'at') {
       return
     }
 
+    if (!isToolAllowed('start_task', scope, event.user_id ?? '')) {
+      await sendReply(event, '后台任务只对管理员开放，你的 openid 不在白名单里。')
+      return
+    }
+
     try {
       const { id } = launchTask({
         sessionKey: key,
         scope,
+        actor: event.user_id ?? '',
         goal,
         notify: notifierFor(event),
-        tools: toolsForScope(scope),
+        tools: toolsForScope(scope, event.user_id ?? ''),
         sendImage: imageSenderFor(event),
         audioSender: audioSenderFor(event),
         videoSender: videoSenderFor(event),
@@ -919,10 +939,12 @@ async function handleMessage(event, trigger = 'at') {
   }
 
   try {
+    const actor = event.user_id ?? ''
     const answer = await chat(key, text, {
       scope,
+      actor,
       trigger,
-      tools: toolsForScope(scope),
+      tools: toolsForScope(scope, actor),
       sendImage: imageSenderFor(event),
       audioSender: audioSenderFor(event),
       videoSender: videoSenderFor(event),
@@ -935,9 +957,10 @@ async function handleMessage(event, trigger = 'at') {
         launchTask({
           sessionKey: key,
           scope,
+          actor,
           goal,
           notify: notifierFor(event),
-          tools: toolsForScope(scope),
+          tools: toolsForScope(scope, actor),
           sendImage: imageSenderFor(event),
           audioSender: audioSenderFor(event),
           videoSender: videoSenderFor(event),
@@ -1103,6 +1126,7 @@ if (env.toolsEnabled) {
   try {
     await startMcp({ apiKey: env.apiKey, baseURL: env.baseURL })
     console.log(`[启动] 工具: ${describePolicy(getTools().map((tool) => tool.name))}`)
+    console.log(`[启动] 权限: ${describeAdminPolicy()}`)
   } catch (error) {
     console.error('[启动] 工具服务启动失败，降级为纯聊天：', error?.message ?? error)
   }

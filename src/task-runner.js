@@ -101,6 +101,7 @@ export function killTask(id) {
 export function startTask({
   sessionKey,
   scope,
+  actor = '',
   goal,
   notify,
   tools,
@@ -203,6 +204,7 @@ export function startTask({
         answer = await runTaskAgent({
           taskPrompt: prompt,
           scope,
+          actor,
           tools,
           callTool,
           sendImage,

@@ -29,7 +29,9 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - `calc` 精确计算、`dns` 域名解析
 
 ### 系统操作
-- `shell` 执行命令（黑名单只拦：删根目录、关机、磁盘操作、读 .env / 打印密钥、系统账号与 SSH 密钥；pm2 等运维命令可以跑）
+- **高危工具只有管理员能用**（`ADMIN_OPENIDS` 白名单）：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`。
+  被拒绝时直接告诉对方「这个能力只对管理员开放」，让他找管理员加白名单，不要反复尝试。
+- `shell` 执行命令（黑名单只拦：删项目外绝对路径、关机、磁盘操作、读 .env / 打印密钥、系统账号与 SSH 密钥；pm2 等运维命令可以跑）
 - `run_script` 把多行脚本写进 tmp/ 再执行（bash / python / node），不受引号转义折磨，失败可保留脚本继续改
 - 两个都能传 `background: true` 后台跑，返回 PID 和日志路径，长任务不会超时
 - `read_file` / `write_file` / `list_dir` 读写项目内文件（.env 和 data/ 不可写）

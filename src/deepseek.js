@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { env } from './env.js'
-import { isToolAllowed, SCOPE_LABEL } from './policy.js'
+import { isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './policy.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
@@ -347,6 +347,7 @@ async function runTool(
     scope,
     callTool,
     sessionKey,
+    actor = '',
     sendImage,
     audioSender,
     videoSender,
@@ -359,6 +360,15 @@ async function runTool(
   },
 ) {
   const name = call.function?.name ?? ''
+
+  // 高危工具（shell / run_script / write_file / add_mcp / start_task / ...）走白名单
+  if (DANGEROUS_TOOLS.has(name) && !isToolAllowed(name, scope, actor)) {
+    console.warn(`[权限] ${sessionKey} 用户 ${actor || '未知'} 调用 ${name} 被拒（不在 ADMIN_OPENIDS）`)
+    return (
+      `工具 ${name} 只对管理员开放（ADMIN_OPENIDS），你的 openid 不在白名单里，这次调用被拒绝。` +
+      '需要这个能力的话，让管理员把你的 openid 加进 .env 的 ADMIN_OPENIDS。'
+    )
+  }
 
   let args = {}
   try {
@@ -632,6 +642,7 @@ async function summarize(sessionKey, overflow) {
 export async function chat(sessionKey, userText, options = {}) {
   const {
     scope = 'private',
+    actor = '',
     tools = [],
     callTool = null,
     sendImage = null,
@@ -651,9 +662,14 @@ export async function chat(sessionKey, userText, options = {}) {
     { role: 'user', content: userText },
   ]
 
+  // 本地工具也要过权限：start_task / schedule_task 这类高危的，不配白名单就别让模型看见
+  const localTools = LOCAL_TOOLS.filter(
+    (tool) => !DANGEROUS_TOOLS.has(tool.function?.name) || isToolAllowed(tool.function.name, scope, actor),
+  )
+
   const usableTools = callTool
-    ? [...LOCAL_TOOLS, ...tools.filter((tool) => !LOCAL_TOOL_NAMES.has(tool.function?.name))]
-    : LOCAL_TOOLS
+    ? [...localTools, ...tools.filter((tool) => !LOCAL_TOOL_NAMES.has(tool.function?.name))]
+    : localTools
 
   const toolNames = usableTools.map((tool) => tool.function?.name).filter(Boolean)
   if (env.toolDebug) {
@@ -804,6 +820,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
       const result = await runTool(call, {
         scope,
+        actor,
         callTool,
         sessionKey,
         sendImage,
@@ -860,6 +877,7 @@ export async function chat(sessionKey, userText, options = {}) {
 export async function runTaskAgent({
   taskPrompt,
   scope,
+  actor = '',
   tools,
   callTool,
   sendImage,
@@ -879,7 +897,10 @@ export async function runTaskAgent({
 
   const subTools = tools.filter((tool) => !LOCAL_TOOL_NAMES.has(tool.function?.name))
   const baseTools = LOCAL_TOOLS.filter(
-    (tool) => tool.function?.name !== 'start_task' && tool.function?.name !== 'clear_memory',
+    (tool) =>
+      tool.function?.name !== 'start_task' &&
+      tool.function?.name !== 'clear_memory' &&
+      (!DANGEROUS_TOOLS.has(tool.function?.name) || isToolAllowed(tool.function.name, scope, actor)),
   )
   const usableTools = callTool
     ? [...baseTools, TASK_NOTIFY_TOOL, ...subTools]
@@ -919,6 +940,7 @@ export async function runTaskAgent({
 
       const result = await runTool(call, {
         scope,
+        actor,
         callTool,
         sessionKey: 'task',
         sendImage,

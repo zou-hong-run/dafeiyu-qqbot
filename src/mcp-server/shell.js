@@ -17,6 +17,11 @@ const UNRESTRICTED = process.env.SHELL_UNRESTRICTED === 'true'
 const BLOCKED_PATTERNS = [
   { pattern: /rm\s+(-[a-zA-Z]+\s+)*\/(\s|$|\*)/, reason: '禁止删除根目录' },
   { pattern: /rm\s+(-[a-zA-Z]+\s+)*(~|\$HOME)(\/|\s|$)/, reason: '禁止删除用户主目录' },
+  // 只允许删项目内的相对路径和 /tmp，别把宝塔站点、系统目录一起带走
+  {
+    pattern: /rm\s+(-[a-zA-Z]+\s+)*\/(?!tmp\/)[^\s]*/,
+    reason: '禁止删除项目目录以外的绝对路径（只能删项目内相对路径或 /tmp 下的东西）',
+  },
   { pattern: /:\(\)\s*\{.*\};\s*:/, reason: '禁止 fork 炸弹' },
   { pattern: /\b(shutdown|reboot|halt|poweroff|init\s+0)\b/i, reason: '禁止关机或重启' },
   { pattern: /\b(mkfs|fdisk|dd\s+if=|dd\s+of=\/dev)/i, reason: '禁止磁盘操作' },

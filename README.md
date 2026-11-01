@@ -118,8 +118,9 @@ pnpm start
 | `MARKDOWN_REPLY` | 用 Markdown 发回复（false）。平台已开放自定义 Markdown |
 | `QUOTE_REPLY` | 引用气泡：`false` 关（默认）/ `judge` 只在插话时 / `always` 每条都引用 |
 | `TTS_VOICE` | `speak` 工具用的 edge-tts 音色（`zh-CN-XiaoxiaoNeural`） |
-| `SHELL_GROUP_ENABLED` | 设成 `false` 后 shell 只给私聊用 |
-| `SHELL_UNRESTRICTED` | `true` 时彻底放开 shell/run_script，连读 `.env`、打印密钥都不拦（危险） |
+| `ADMIN_OPENIDS` | 高危工具白名单（逗号分隔 openid）。机器人里发 `/id` 查自己的 openid |
+| `SHELL_GROUP_ENABLED` | 没配白名单时，`true` 才允许群里用高危工具（默认关闭） |
+| `SHELL_UNRESTRICTED` | `true` 时彻底放开命令黑名单，连读 `.env`、打印密钥都不拦（危险） |
 
 ## 部署（pm2）
 
@@ -194,8 +195,11 @@ QQ 网关 ──WS──▶ index.js
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 
-- `shell` / `run_script` 默认群聊可用 —— 任何群友都能让机器人执行命令、跑脚本。建议 `.env` 加 `SHELL_GROUP_ENABLED=false`
-- `write_file` / `install_package` / `add_mcp` 同样默认群聊可用，调 `src/policy.js` 里的 `TOOL_POLICY` 可以逐项改
+- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task` 这 8 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
+  没配白名单时：群里一律禁用，私聊放开。**一定要配**——否则任何 QQ 用户私聊机器人都能执行命令。
+  机器人里发 `/id` 就能拿到自己的 openid。
+- `start_task` / `schedule_task` 也算高危，是因为它们能间接调起子 agent 和定时任务去执行命令，不挡住的话白名单就是摆设
+- 命令黑名单只拦真正危险的：删项目外绝对路径、关机、磁盘操作、读 `.env`、导出环境变量、打印密钥、系统账号、SSH 密钥。它挡不住所有绕过写法，真正的边界是白名单
 - shell 子进程的环境变量只透传 `PATH` 等基础变量和模型 key，**QQ_APP_ID / QQ_APP_SECRET 不会进子进程**
 - `.env`、`data/` 对模型的文件写入工具不可写；`.env` 读取被 shell 黑名单拦住
 - 审计日志在 `data/audit.log`，出问题先看它
@@ -211,6 +215,7 @@ QQ 网关 ──WS──▶ index.js
 | `40034127 / 304036 无 Markdown 权限` | 平台已开放自定义 Markdown，若仍报错请检查请求体里不要带废弃的 `template_id` / `custom_template_id` |
 | `speak` 报「没有可用的语音合成后端」 | 服务器装一个：`pip3 install edge-tts`（音质好，需外网）或 `apt-get install espeak-ng`（离线） |
 | 群里只收到 @ 它的消息 | 群里把「机器人可获取的群聊消息范围」设成「获取群内全部消息」 |
+| 机器人说「不在白名单里」 | 发 `/id` 拿到自己的 openid，填进 `.env` 的 `ADMIN_OPENIDS` 后重启 |
 | 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；`GROUP_JUDGE=true` 才会自动插话，关掉就完全不会乱接 |
 
 ## 开发与自检

@@ -62,7 +62,14 @@ export const env = {
 
   toolsEnabled: process.env.ENABLE_TOOLS !== 'false',
   groupToolsEnabled: process.env.GROUP_TOOLS !== 'false',
-  shellGroupEnabled: process.env.SHELL_GROUP_ENABLED !== 'false',
+  // 高危工具（shell / run_script / write_file / install_package / add_mcp）的白名单
+  // 配了就只有这些 openid 能用（私聊和群聊都算）；不配则群里禁用、私聊放开
+  adminOpenIds: (process.env.ADMIN_OPENIDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean),
+  // 兜底开关：白名单为空时，把它设成 true 才会允许群里用高危工具（默认关）
+  shellGroupEnabled: process.env.SHELL_GROUP_ENABLED === 'true',
   toolDebug: process.env.TOOL_DEBUG !== 'false',
 
   taskMaxRounds: Math.floor(positiveNumber('TASK_MAX_ROUNDS', 20)),
