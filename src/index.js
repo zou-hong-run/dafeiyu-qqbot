@@ -76,6 +76,22 @@ function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
 
+// 群里被 @ 的判定：mentions 里出现机器人自己（QQ 号或 AppID）
+function atMe(event) {
+  const list = event?.mentions
+  if (!Array.isArray(list) || list.length === 0) return false
+
+  const selfId = String(bot.self_id ?? process.env.QQ_APP_ID ?? '')
+  const appId = String(env.appId ?? '')
+
+  return list.some((item) => {
+    const candidates = [item?.id, item?.user_openid, item?.member_openid, item?.user_id]
+      .filter(Boolean)
+      .map(String)
+    return candidates.some((value) => value === selfId || value === appId)
+  })
+}
+
 async function runScheduledTask(task) {
   const scope = task.target.type === 'group' ? 'group' : 'private'
 
@@ -438,6 +454,22 @@ async function handleGroupAll(event) {
   recordGroupMessage(event, text)
   if (!text) return
 
+  if (env.toolDebug && Array.isArray(event.mentions) && event.mentions.length > 0) {
+    console.log(
+      `[@诊断] mentions=${JSON.stringify(event.mentions).slice(0, 240)} self_id=${bot.self_id} appId=${env.appId}`,
+    )
+  }
+
+  // 群开了「获取全部消息」时，@ 我的消息可能走普通群消息事件，靠 mentions 认出来
+  if (atMe(event)) {
+    if (hasReplied(event.message_id)) return
+
+    markReplied(event.message_id)
+    console.log(`[群触发] ${event.group_id} 在消息里 @ 了我，开始回复`)
+    await handleMessage(event, 'at')
+    return
+  }
+
   if (SUMMARY_CMD.test(text) && text.length <= 20) {
     if (hasReplied(event.message_id)) return
     markReplied(event.message_id)
@@ -492,6 +524,7 @@ bot.on('message.private.friend', (event) => {
 })
 
 bot.on('message.group.at', (event) => {
+  if (env.toolDebug) console.log(`[事件] group.at mentions=${event.mentions?.length ?? 0}`)
   enqueue(sessionKeyOf(event), () => handleGroupAt(event))
 })
 
