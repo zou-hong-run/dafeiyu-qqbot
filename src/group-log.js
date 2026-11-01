@@ -70,6 +70,17 @@ export function recent(groupId, limit = 200) {
   return load(groupId).slice(-limit)
 }
 
+// 按 msg_idx（REFIDX_xxx）反查被引用的那条消息
+export function findByRef(groupId, refId) {
+  if (!refId) return null
+
+  const entries = load(groupId)
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    if (entries[i].idx === refId) return entries[i]
+  }
+  return null
+}
+
 export function statsOf(groupId) {
   const entries = load(groupId)
   const first = entries[0]?.t

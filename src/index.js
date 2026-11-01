@@ -14,6 +14,7 @@ import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
+import { describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
 import { clip, passiveCountOf, sendReply } from './sender.js'
 import {
@@ -83,6 +84,30 @@ function stripBotAlias(text) {
   }
 
   return value
+}
+
+// 用户引用了某条消息时，把被引用的原文找出来拼进输入
+function referencedContext(event) {
+  const groupId = event?.group_id
+  if (!groupId) return ''
+
+  for (const elem of event?.message ?? []) {
+    if (elem?.type !== 'reply') continue
+
+    const refId = elem.data?.id
+    if (!refId) continue
+
+    const found = groupLog.findByRef(groupId, refId)
+    if (found) {
+      const who = found.n || `用户${String(found.u ?? '').slice(-4)}`
+      const quoted = String(found.c ?? '').slice(0, 120)
+      return '\n\n（这句是在回复 ' + who + ' 的这条消息：「' + quoted + '」）'
+    }
+
+    return '\n\n（这句引用了某条消息，但那条不在我的本地记录里，可能是我加入之前的）'
+  }
+
+  return ''
 }
 
 // 给模型读当前群聊记录用：只读本群，不跨群
@@ -230,7 +255,8 @@ function notifierFor(event) {
 
 async function handleMessage(event, trigger = 'at') {
   let text = (event.content ?? '').trim()
-  if (!text) return
+  const inbound = extractInbound(event)
+  if (!text && inbound.length === 0) return
 
   // 「大肥鱼 /reset」这种带名字的命令也要认：只有剥掉别名后确实以 / 开头才替换
   const stripped = stripBotAlias(text).replace(/[@＠]\S+$/, '').trim()
@@ -485,7 +511,21 @@ async function handleMessage(event, trigger = 'at') {
 
   try {
     const actor = event.user_id ?? ''
-    const answer = await chat(key, text, {
+
+    // 语音/图片/文件：下载后在输入里附一段说明，别让模型对附件一无所知
+    let input = `${text}${referencedContext(event)}`
+    if (inbound.length > 0) {
+      try {
+        input = `${text}${await describeInbound(inbound)}`.trim()
+      } catch (error) {
+        console.warn('[附件] 处理失败：', error?.message ?? error)
+        input = `${text}
+
+（对方发了 ${inbound.length} 个附件，但下载失败了：${error?.message ?? error}）`
+      }
+    }
+
+    const answer = await chat(key, input || '（只发了附件，没有文字）', {
       scope,
       actor,
       trigger,
@@ -565,7 +605,7 @@ async function handleSummary(event) {
 
 async function handleGroupAll(event) {
   const text = (event.content ?? '').trim()
-  recordGroupMessage(event, text)
+  recordGroupMessage(event, text || '[附件]')
   if (!text) return
 
   if (env.toolDebug && Array.isArray(event.mentions) && event.mentions.length > 0) {
@@ -614,8 +654,8 @@ async function handleGroupAll(event) {
 
 async function handleGroupAt(event) {
   const text = (event.content ?? '').trim()
-  recordGroupMessage(event, text)
-  if (!text) return
+  recordGroupMessage(event, text || '[附件]')
+  if (!text && extractInbound(event).length === 0) return
 
   if (hasReplied(event.message_id)) return
   markReplied(event.message_id)

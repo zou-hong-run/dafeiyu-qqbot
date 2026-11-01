@@ -2,6 +2,7 @@ import { env } from './env.js'
 import { judgeRelevance } from './deepseek.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
+import { extractMsgIdx } from './sender.js'
 
 // 触发层：两级过滤（程序规则 → 语义判断）、插话预算、去重、观察模式
 // 真正要接话时通过 onJudge 回调交给 Router，避免和 index.js 循环依赖
@@ -176,6 +177,8 @@ export function recordGroupMessage(event, text) {
     n: event.sender?.user_name,
     c: text.slice(0, 500),
     id: event.message_id,
+    // 本条的 msg_idx，别人引用时要靠它反查原文
+    idx: extractMsgIdx(event),
   })
 }
 export function hasReplied(msgId) {

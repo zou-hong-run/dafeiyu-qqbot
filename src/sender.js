@@ -63,11 +63,10 @@ function shouldQuote(event) {
   return quotedMessages.has(event?.message_id)
 }
 
-function quoteRefOf(event) {
-  if (!shouldQuote(event)) return null
-
+// 从 message_scene.ext 里取本条消息的 msg_idx（形如 REFIDX_xxx），引用索引靠它对齐
+export function extractMsgIdx(event) {
   const ext = event?.message_scene?.ext
-  if (!ext) return null
+  if (!ext) return ''
 
   for (const item of Array.isArray(ext) ? ext : [ext]) {
     if (typeof item === 'string') {
@@ -78,7 +77,12 @@ function quoteRefOf(event) {
     }
   }
 
-  return null
+  return ''
+}
+
+function quoteRefOf(event) {
+  if (!shouldQuote(event)) return null
+  return extractMsgIdx(event) || null
 }
 
 const passiveUsed = new Map()
