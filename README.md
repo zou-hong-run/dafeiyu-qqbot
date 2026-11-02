@@ -165,6 +165,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `speak` | 文字转语音，可传 `voice` 换音色（晓晓/晓伊/云希/云健/东北话/粤语等 9 种，见 `media.js` 的 `TTS_VOICES`）；后端按 edge-tts → python edge_tts → espeak-ng 依次探测 |
 | `remember` / `clear_memory` | 写长期记忆 / 清空当前会话全部记忆 |
 | `read_group_history` | 读当前群最近 N 条聊天记录（只限本群，跨群不可见） |
+| `list_groups` / `send_to_group` | 列出待过的群 / 主动往指定群发消息（不需要有人 @，管理员限定） |
 | `start_task` | 把复杂任务丢给后台子助手，边做边汇报 |
 | `schedule_task` / `list_schedules` / `remove_schedule` | 定时任务增删查 |
 | `goal` | 跨轮目标跟踪：目标没完成就继续推进 |

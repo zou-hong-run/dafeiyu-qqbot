@@ -110,6 +110,55 @@ function referencedContext(event) {
   return ''
 }
 
+// 主动往别的群发消息：私聊里也能把话送到指定的群
+function groupSenderFor(event) {
+  const currentGroup = event?.group_id
+
+  return async (input) => {
+    const target = String(input?.groupId ?? '').trim()
+    const text = String(input?.text ?? '').trim()
+
+    if (!text) throw new Error('缺少要发送的内容')
+    if (text.length > 2000) throw new Error(`内容 ${text.length} 字，太长了，压到 2000 字以内`)
+
+    const groupId = !target || target === 'current' ? currentGroup : target
+    if (!groupId) throw new Error('没指定群，也没法确定当前群：私聊里要传 groupId')
+
+    const result = await bot.group(groupId).send(clip(text))
+    console.log(`[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字）`)
+
+    return { groupId, chars: text.length, messageId: result?.id ?? '' }
+  }
+}
+
+// 列出机器人待过的群，模型用它找 groupId
+function groupsReaderFor() {
+  return async () => {
+    let ids = []
+    try {
+      ids = fs
+        .readdirSync(path.join(dataDir, 'groups'))
+        .filter((name) => name.endsWith('.jsonl'))
+        .map((name) => name.slice(0, -6))
+    } catch {
+      ids = []
+    }
+
+    if (ids.length === 0) return '还没有群聊记录，等群里有消息进来才有。'
+
+    const lines = ids.map((groupId) => {
+      const info = groupLog.statsOf(groupId)
+      const last = info.to ?? '-'
+      return `${groupId}｜${info.count} 条｜最近 ${last}`
+    })
+
+    return (
+      `待过的群（${ids.length} 个）：\n${lines.join('\n')}\n\n` +
+      '发消息用 send_to_group，groupId 传上面那串。'
+    )
+  }
+}
+
 // 给模型读当前群聊记录用：只读本群，不跨群
 function historyReaderFor(event) {
   const groupId = event.group_id
@@ -153,17 +202,26 @@ function sessionKeyOf(event) {
 }
 
 // 群里被 @ 的判定：mentions 里出现机器人自己（QQ 号或 AppID）
+// 群里被 @ 的判定。QQ 给过来的 mentions 有两种形态：
+//   数组 [{ id, user_openid, ... }]，或对象 { bot: true, is_you: true, username }
+// 只看 openid 比对会漏掉后一种，导致「@ 了但被当闲聊丢掉」
 function atMe(event) {
-  const list = event?.mentions
-  if (!Array.isArray(list) || list.length === 0) return false
+  const raw = event?.mentions
+  if (!raw) return false
 
+  const items = Array.isArray(raw) ? raw : [raw]
   const selfId = String(bot.self_id ?? process.env.QQ_APP_ID ?? '')
   const appId = String(env.appId ?? '')
 
-  return list.some((item) => {
-    const candidates = [item?.id, item?.user_openid, item?.member_openid, item?.user_id]
+  return items.some((item) => {
+    if (!item || typeof item !== 'object') return false
+    if (item.is_you === true) return true
+    if (item.bot === true) return true
+
+    const candidates = [item.id, item.user_openid, item.member_openid, item.user_id]
       .filter(Boolean)
       .map(String)
+
     return candidates.some((value) => value === selfId || value === appId)
   })
 }
@@ -542,6 +600,8 @@ async function handleMessage(event, trigger = 'at') {
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
       historyReader: historyReaderFor(event),
+      groupSender: groupSenderFor(event),
+      groupsReader: groupsReaderFor(),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>

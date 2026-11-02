@@ -30,6 +30,8 @@ const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'goal',
   'read_group_history',
+  'list_groups',
+  'send_to_group',
   'send_image',
   'send_audio',
   'send_video',
@@ -267,6 +269,35 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'list_groups',
+      description:
+        '列出机器人待过的群（群 openid + 消息条数 + 最近活跃时间）。' +
+        '要在别的群发言前先用它拿 groupId，别自己编。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_to_group',
+      description:
+        '主动往指定的群发一条消息，不需要那个群有人 @ 我。' +
+        '私聊里也能用——这就是「把话带到群里」的办法，别说自己做不到。' +
+        'groupId 传 list_groups 查到的群 openid，当前群可以传 current。' +
+        '主动消息有频控：同一个群别连发太多条。',
+      parameters: {
+        type: 'object',
+        properties: {
+          groupId: { type: 'string', description: '目标群 openid，或 current 表示当前群' },
+          text: { type: 'string', description: '要发的正文，2000 字以内' },
+        },
+        required: ['groupId', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'goal',
       description:
         '管理当前会话的长期目标，让多轮对话里的长任务不会说完就断片。' +
@@ -390,6 +421,8 @@ async function runTool(
     cardSender,
     speakSender,
     historyReader,
+    groupSender,
+    groupsReader,
     startTask,
     scheduler,
     notifyUser,
@@ -526,6 +559,28 @@ async function runTool(
     }
     resetMemory(sessionKey)
     return '当前会话的记忆已清空，从现在开始是全新的对话。'
+  }
+
+  if (name === 'list_groups') {
+    if (typeof groupsReader !== 'function') return '当前场景读不到群列表。'
+    try {
+      return await groupsReader()
+    } catch (error) {
+      return `列群失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'send_to_group') {
+    if (!isToolAllowed('send_to_group', scope, actor)) {
+      return `${denyReason('send_to_group', scope, actor)}。`
+    }
+    if (typeof groupSender !== 'function') return '当前场景不能主动发消息。'
+    try {
+      const sent = await groupSender({ groupId: args.groupId, text: args.text })
+      return `已发往群 ${sent.groupId}（${sent.chars} 字）`
+    } catch (error) {
+      return `发群失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'read_group_history') {
@@ -741,6 +796,8 @@ export async function chat(sessionKey, userText, options = {}) {
     cardSender = null,
     speakSender = null,
     historyReader = null,
+    groupSender = null,
+    groupsReader = null,
     startTask = null,
     scheduler = null,
     onStep = null,
