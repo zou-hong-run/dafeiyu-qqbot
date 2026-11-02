@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url'
 // 入站附件：SDK 会把 attachments 解析成 event.message 里的 image / voice / video / file 元素
 // 我们之前完全忽略它们，用户发语音、发图，机器人等于什么都收不到
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const incomingDir = path.join(projectRoot, 'downloads', 'incoming')
+const incomingRoot = path.join(projectRoot, 'downloads', 'incoming')
+
+// 群和私聊、不同群之间必须分开存：不然 A 群的图能被 B 群捞出来发
+function scopeDirOf(scopeKey) {
+  const safe = String(scopeKey ?? '').replace(/[^a-zA-Z0-9_-]/g, '') || 'unknown'
+  return path.join(incomingRoot, safe)
+}
 
 const MAX_ITEMS = 4
 const MAX_BYTES = 20 * 1024 * 1024
@@ -50,13 +56,13 @@ function safeName(item, index) {
   return `${Date.now()}-${index}-${base || item.type}${ext || ''}`
 }
 
-async function downloadOne(item, index) {
+async function downloadOne(item, index, dir) {
   if (item.size > MAX_BYTES) {
     return { ...item, error: `超过 ${MAX_BYTES / 1048576}MB，没有下载` }
   }
 
   try {
-    fs.mkdirSync(incomingDir, { recursive: true })
+    fs.mkdirSync(dir, { recursive: true })
 
     const response = await fetch(item.url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
     if (!response.ok) return { ...item, error: `下载失败 HTTP ${response.status}` }
@@ -64,7 +70,7 @@ async function downloadOne(item, index) {
     const buffer = Buffer.from(await response.arrayBuffer())
     if (buffer.length > MAX_BYTES) return { ...item, error: '下载后超过大小上限' }
 
-    const file = path.join(incomingDir, safeName(item, index))
+    const file = path.join(dir, safeName(item, index))
     fs.writeFileSync(file, buffer)
 
     return { ...item, file: path.relative(projectRoot, file).split(path.sep).join('/') }
@@ -74,10 +80,11 @@ async function downloadOne(item, index) {
 }
 
 // 把附件整理成一段给模型看的说明，拼在用户输入后面
-export async function describeInbound(items) {
+export async function describeInbound(items, scopeKey = '') {
   if (items.length === 0) return { text: '', images: [], voice: 0 }
 
-  const downloaded = await Promise.all(items.map((item, index) => downloadOne(item, index)))
+  const dir = scopeDirOf(scopeKey)
+  const downloaded = await Promise.all(items.map((item, index) => downloadOne(item, index, dir)))
   const lines = []
   const images = []
 
@@ -110,36 +117,45 @@ export async function describeInbound(items) {
 export async function cleanupIncoming(ttlHours = 24) {
   if (!(ttlHours > 0)) return 0
 
-  let names = []
-  try {
-    names = fs.readdirSync(incomingDir)
-  } catch {
-    return 0
-  }
-
   const ttlMs = ttlHours * 3600 * 1000
   const now = Date.now()
   let removed = 0
 
-  for (const name of names) {
-    const full = path.join(incomingDir, name)
+  const walk = (dir, depth = 0) => {
+    if (depth > 2) return
+
+    let entries = []
     try {
-      const info = fs.statSync(full)
-      if (!info.isFile()) continue
-      if (now - info.mtimeMs <= ttlMs) continue
-      fs.rmSync(full, { force: true })
-      removed += 1
+      entries = fs.readdirSync(dir, { withFileTypes: true })
     } catch {
-      // 单个文件删不掉不影响其他
+      return
+    }
+
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full, depth + 1)
+        continue
+      }
+
+      try {
+        const info = fs.statSync(full)
+        if (now - info.mtimeMs <= ttlMs) continue
+        fs.rmSync(full, { force: true })
+        removed += 1
+      } catch {
+        // 单个文件删不掉不影响其他
+      }
     }
   }
 
+  walk(incomingRoot)
   return removed
 }
 
 export function clearIncoming() {
   try {
-    fs.rmSync(incomingDir, { recursive: true, force: true })
+    fs.rmSync(incomingRoot, { recursive: true, force: true })
   } catch {
     // 目录不存在或删不掉都不影响
   }

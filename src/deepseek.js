@@ -782,6 +782,40 @@ function toImagePart(file) {
   }
 }
 
+// 视觉自检：拿一张本地图走一遍 toImagePart + 模型调用，把真实结果暴露出来
+export async function testVision(imagePath) {
+  const part = toImagePart(imagePath)
+  if (!part) {
+    return { ok: false, stage: 'read', reason: '图片读不出来（路径不存在、格式不支持、或超过 5MB）' }
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: env.model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '这张图的主要颜色是什么？只回答颜色名，两个字以内。' },
+            part,
+          ],
+        },
+      ],
+      max_tokens: 20,
+    })
+
+    const answer = completion.choices?.[0]?.message?.content?.trim() ?? ''
+    return { ok: true, stage: 'model', model: env.model, answer }
+  } catch (error) {
+    return {
+      ok: false,
+      stage: 'model',
+      model: env.model,
+      reason: String(error?.message ?? error).slice(0, 200),
+    }
+  }
+}
+
 export async function chat(sessionKey, userText, options = {}) {
   const {
     scope = 'private',

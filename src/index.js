@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
-import { chat, summarizeGroup, runTaskAgent } from './deepseek.js'
+import { chat, summarizeGroup, runTaskAgent, testVision } from './deepseek.js'
 import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
@@ -339,6 +339,61 @@ async function handleMessage(event, trigger = 'at') {
     return
   }
 
+  if (text === '/diag vision') {
+    if (!isAdmin(scope, event.user_id ?? '')) {
+      await sendReply(event, `视觉自检只对管理员开放。你的 openid：${event.user_id ?? '未知'}。`)
+      return
+    }
+
+    // 现场画一张纯红方块，用它测「能不能真的读到图」
+    const probe = path.join(projectRoot, 'downloads', 'vision-probe.png')
+    try {
+      const { DRAW_HANDLERS } = await import('./mcp-server/draw-pixel.js')
+      await DRAW_HANDLERS.draw_pixel({
+        pattern: ['######', '######', '######', '######'],
+        colors: ['#e53935'],
+        scale: 16,
+      })
+      const latest = fs
+        .readdirSync(path.join(projectRoot, 'downloads'))
+        .filter((name) => name.startsWith('draw-'))
+        .sort()
+        .pop()
+
+      if (!latest) throw new Error('生成测试图失败')
+      fs.copyFileSync(path.join(projectRoot, 'downloads', latest), probe)
+      fs.rmSync(path.join(projectRoot, 'downloads', latest), { force: true })
+    } catch (error) {
+      await sendReply(event, `视觉自检失败：生成测试图出错 ${error?.message ?? error}`)
+      return
+    }
+
+    const result = await testVision('downloads/vision-probe.png')
+
+    if (result.ok) {
+      await sendReply(
+        event,
+        `视觉通道正常。
+模型：${result.model}
+读图结果：「${result.answer}」（测试图是纯红色）
+` +
+          '如果你发图我还是看不见，那就是入站附件那一步没拿到图，把 pm2 日志里带 [附件] 的行发我。',
+      )
+    } else if (result.stage === 'read') {
+      await sendReply(event, `视觉自检失败在「读图」这一步：${result.reason}`)
+    } else {
+      await sendReply(
+        event,
+        `视觉自检失败在「模型调用」这一步（模型 ${result.model}）：
+${result.reason}
+
+` +
+          '大概率是这个账号还没开通 deepseek-flash 的图片输入，或者模型名要用你控制台里能看到的那个。',
+      )
+    }
+    return
+  }
+
   if (text === '/diag' || text === '/diag send') {
     if (!isAdmin(scope, event.user_id ?? '')) {
       await sendReply(
@@ -576,7 +631,7 @@ async function handleMessage(event, trigger = 'at') {
 
     if (inbound.length > 0) {
       try {
-        const described = await describeInbound(inbound)
+        const described = await describeInbound(inbound, key)
         input = `${input}${described.text}`.trim()
         images = described.images
       } catch (error) {

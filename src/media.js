@@ -61,6 +61,7 @@ export function imageSenderFor(event) {
     if (!resolved.startsWith(downloadDir + path.sep)) {
       throw new Error('只能发送 downloads 目录下的文件')
     }
+    assertSameScope(resolved, event)
     if (!/\.(jpe?g|png|gif|webp|bmp)$/i.test(resolved)) {
       throw new Error('只能发送图片（jpg/png/gif/webp/bmp），其他文件类型 QQ 平台不支持')
     }
@@ -94,6 +95,7 @@ export function audioSenderFor(event) {
     if (!resolved.startsWith(downloadDir + path.sep)) {
       throw new Error('只能发送 downloads 目录下的文件')
     }
+    assertSameScope(resolved, event)
     if (!/\.(silk|mp3|wav|ogg|flac)$/i.test(resolved)) {
       throw new Error('只接受 QQ 支持的语音格式（silk/mp3/wav/ogg/flac）')
     }
@@ -254,6 +256,7 @@ export function videoSenderFor(event) {
     if (!resolved.startsWith(downloadDir + path.sep)) {
       throw new Error('只能发送 downloads 目录下的文件')
     }
+    assertSameScope(resolved, event)
     if (!/\.mp4$/i.test(resolved)) {
       throw new Error('只接受 mp4 格式，QQ 视频消息不支持其他容器')
     }
@@ -279,6 +282,25 @@ const FILE_BLOCKED = ['.env', 'data/', 'node_modules/', '.git/', '.ssh/']
 
 // 上传前整个文件要读进内存（SDK 还要再复制一份），2G 内存的机器经不起 200MB
 const MAX_SEND_BYTES = Number(process.env.MAX_SEND_FILE_MB || 50) * 1024 * 1024
+const incomingRoot = path.join(projectRoot, 'downloads', 'incoming')
+
+// 入站附件按会话分目录存放，发送时也要守住这个边界：
+// A 群收到的图，B 群不能靠 send_image 捞出路径发出去
+function scopeTagOf(event) {
+  const raw = event?.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
+  return String(raw ?? '').replace(/[^a-zA-Z0-9_-]/g, '') || 'unknown'
+}
+
+function assertSameScope(resolved, event) {
+  const rel = path.relative(incomingRoot, resolved)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return // 不在 incoming 下，与附件无关
+  if (rel.split(path.sep)[0] === scopeTagOf(event)) return
+
+  throw new Error(
+    '这是别的会话收到的附件，不能从这里发出去。' +
+      '要转发给当前会话，得让对方把文件发到当前会话里，或者用 send_to_group 单独发。',
+  )
+}
 
 export function resolveSendableFile(target) {
   const roots = [path.join(projectRoot, 'downloads'), projectRoot]
@@ -312,6 +334,7 @@ export function fileSenderFor(event) {
 
     const resolved = resolveSendableFile(target)
     if (!resolved) throw new Error(mediaMissingHint(downloadDir, path.resolve(downloadDir, target)))
+    assertSameScope(resolved, event)
 
     const stat = fs.statSync(resolved)
     if (stat.size > MAX_SEND_BYTES) {
