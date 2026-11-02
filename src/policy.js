@@ -74,6 +74,7 @@ export const TOOL_POLICY = {
   speak: OPEN,
   clear_memory: OPEN,
   download: OPEN,
+  read_document: READ_ONLY,
 
   shell: SHELL,
   run_script: SHELL,

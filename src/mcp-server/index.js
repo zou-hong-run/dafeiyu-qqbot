@@ -402,6 +402,10 @@ const { SHELL_TOOLS, SHELL_HANDLERS } = await import('./shell.js')
 TOOLS.push(...SHELL_TOOLS)
 Object.assign(HANDLERS, SHELL_HANDLERS)
 
+const { DOC_TOOLS, DOC_HANDLERS } = await import('./doc-tools.js')
+TOOLS.push(...DOC_TOOLS)
+Object.assign(HANDLERS, DOC_HANDLERS)
+
 const { FS_TOOLS, FS_HANDLERS } = await import('./fs-tools.js')
 TOOLS.push(...FS_TOOLS)
 Object.assign(HANDLERS, FS_HANDLERS)

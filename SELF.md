@@ -28,6 +28,11 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - 引用气泡默认**关闭**（群里回复不再盖引用）；要开在 `.env` 设 `QUOTE_REPLY=judge`（只在冷场后插话时引用）
   或 `always`（每条都引用），`QUOTE_WINDOW_SECONDS` 控制 judge 模式的「冷场」窗口
 
+### 读文档
+- `read_document` 读 PDF / Word(.docx) / Excel(.xlsx/.xls/.csv) 和常见文本，提取文字
+- 文件放 downloads/ 或项目根，20MB 以内，正文截断 8000 字；扫描版 PDF 会明确告诉你提取不到
+- 被丢一个 PDF 说「总结一下」时用它，别只回「我读不了文档」
+
 ### 收消息
 - 对方发的**图片**会直接喂给模型（V4.1-Flash 原生视觉），能看图说话、看截图找错、读文档照片
 - 附件按会话隔离：`downloads/incoming/<会话>/`，A 群收到的图 B 群发不出去

@@ -42,6 +42,9 @@
 | [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | 内置工具服务用 MCP 协议跑在子进程里 |
 | [cron-parser](https://www.npmjs.com/package/cron-parser) | 定时任务的 cron 解析与上下次时刻计算 |
 | [pngjs](https://www.npmjs.com/package/pngjs) | `draw_pixel` 的 PNG 编码（纯 JS，无原生依赖） |
+| [unpdf](https://www.npmjs.com/package/unpdf) | PDF 文字提取（纯 JS，不依赖 canvas） |
+| [mammoth](https://www.npmjs.com/package/mammoth) | Word(.docx) 文字提取 |
+| [xlsx](https://www.npmjs.com/package/xlsx) | Excel / CSV 读取 |
 | pm2 | 常驻、崩溃自重启、开机自启 |
 
 ## 目录结构
@@ -205,6 +208,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `restart_self` | 重启自己：延迟几秒后 `pm2 restart <应用名>`，留时间把话说完再重启（应用名自动取 pm2 注入的 `name`） |
 | `read_file` / `write_file` / `list_dir` | 项目内文件读写（`.env`、`data/` 不可写） |
 | `download` | 下载网络文件到 `downloads/` |
+| `read_document` | 读 PDF / Word / Excel / CSV / 文本，提取正文给模型（20MB 内，8000 字截断） |
 | `draw_pixel` | 画像素风 PNG（heart/star/fish/camera 预设，或自定义字符网格），PNG 编码用 pngjs（纯 JS，无原生依赖），所有人可用 |
 | `write_skill` / `list_skills` | 写技能 Markdown 到 `skills/`，后续对话自动注入 |
 | `add_mcp` / `list_mcp` | 注册新的 MCP 服务（热加载）/ 查看已注册服务 |
