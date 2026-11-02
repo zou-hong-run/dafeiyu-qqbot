@@ -204,7 +204,9 @@ QQ 网关 ──WS──▶ index.js
                   └─ 发送：被动回复优先（每条消息最多 4 次），超时/超次自动降级主动消息
 ```
 
-**代码自同步**：机器人在服务器上改完源码后，进程退出（`restart_self` / `pm2 restart`）时会自动 `git commit` + `push` 回仓库，改动不会因为一次部署覆盖而丢失。手动控制用 `git_sync` 工具（`status` / `push` / `pull`）。提交前会拦截 `.env`、`data/`、`logs/`、`downloads/`、`tmp/` 和疑似密钥内容。
+**代码自同步**：机器人在服务器上改完源码后，**每 30 分钟**（`AUTO_SYNC_INTERVAL_MINUTES` 可调，0 关闭）自动 `git commit` + `push` 一次，进程退出（`restart_self` / `pm2 restart`）时再兜底提交一次，改动不会因为一次部署覆盖而丢失。手动控制用 `git_sync` 工具（`status` / `push` / `pull`）。提交前会拦截 `.env`、`data/`、`logs/`、`downloads/`、`tmp/` 和疑似密钥内容。
+
+> 同步走异步执行：`git push` 卡几秒不会阻塞机器人回复消息。
 
 > **前提**：部署目录必须是 git 仓库且能推送到远端。只在文件系统层面 `scp` 同步的话，`isRepo()` 会判定为「不是仓库」，自动提交会被静默跳过（改动仍在服务器上，但不会进仓库）。服务器初始化见下文「在服务器上初始化 git 仓库」。
 
