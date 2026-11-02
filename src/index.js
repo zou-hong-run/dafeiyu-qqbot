@@ -43,7 +43,16 @@ import {
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
-const AUDITED_TOOLS = new Set(['write_skill', 'add_mcp', 'install_package', 'shell', 'run_script', 'restart_self'])
+const AUDITED_TOOLS = new Set([
+  'write_skill',
+  'add_mcp',
+  'install_package',
+  'shell',
+  'run_script',
+  'restart_self',
+  'broadcast',
+  'send_to_group',
+])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 
 // 让内置 MCP 子进程知道自己在 pm2 里、应用叫什么，restart_self 要用
@@ -54,6 +63,11 @@ fs.mkdirSync(dataDir, { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'downloads'), { recursive: true })
 fs.mkdirSync(path.join(projectRoot, 'tmp'), { recursive: true })
+
+function auditKeyOf(event) {
+  if (!event) return 'scheduler'
+  return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
+}
 
 function audit(sessionKey, tool, args, result) {
   const line = [
@@ -155,6 +169,8 @@ function groupSenderFor(event) {
     const result = await bot.group(groupId).send(clip(text))
     console.log(`[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字）`)
 
+    audit(auditKeyOf(event), 'send_to_group', { groupId, chars: text.length }, `已发送 ${text.length} 字`)
+
     return { groupId, chars: text.length, messageId: result?.id ?? '' }
   }
 }
@@ -210,6 +226,14 @@ function broadcastSenderFor(event) {
     }
 
     console.log(`[全服通报] 成功 ${sent.length}/${ids.length} 个群，每个 ${parts.length} 段`)
+
+    audit(
+      auditKeyOf(event),
+      'broadcast',
+      { targets: ids.length, chars: text.length, parts: parts.length },
+      `成功 ${sent.length}/${ids.length}${failed.length ? `，失败 ${failed.length}` : ''}`,
+    )
+
     return { total: ids.length, sent, failed, parts: parts.length }
   }
 }
