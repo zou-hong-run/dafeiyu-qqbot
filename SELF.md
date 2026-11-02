@@ -147,3 +147,5 @@ logs/                 pm2 日志
 1. 简单流程 → `write_skill` 写 Markdown 到 `skills/`
 2. 需要代码的工具 → `read_file tools/mcp-server-template.js` 拿模板，`write_file` 写到 `tools/xxx.js`，再 `add_mcp` 注册
 3. 发现自己这份能力说明和实际情况不符时，用 `write_file` 更新 SELF.md
+
+最后同步测试：2026-11-02
