@@ -9,7 +9,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 // ── 1. 工具清单 ──────────────────────────────────────────────
 const TOOLS = [
   {
-    name: 'search',
+    // 不能叫 search：内置的联网搜索已经占了这个名字，撞名会被跳过
+    name: 'song',
     description:
       '点歌/搜歌：输入歌名，或「歌名 歌手」，返回候选歌曲的歌名、歌手、专辑、可点击播放链接、30 秒试听链接(previewUrl)和封面图(artworkUrl 300x300)。结果里会给出前几条候选，可以再把封面/试听用 send_card 或 send_audio 发到群里。',
     inputSchema: {
