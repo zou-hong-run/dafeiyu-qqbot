@@ -96,7 +96,8 @@ export const env = {
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
   markdownReply: process.env.MARKDOWN_REPLY === 'true',
-  streamReply: process.env.STREAM_REPLY !== 'false',
+  // 私聊流式默认关：QQ 的 /stream_messages 要单独申请权限，没开通时每次都会失败一次
+  streamReply: process.env.STREAM_REPLY === 'true',
   // false=从不引用（默认）；judge=只在真正插话时引用；always=每条都引用
   quoteReply: (() => {
     const raw = (process.env.QUOTE_REPLY ?? '').trim().toLowerCase()

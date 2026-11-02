@@ -305,11 +305,17 @@ export async function sendLongReply(event, text, { maxParts = 6, gapMs = 600 } =
 }
 
 // 私聊流式：调 QQ 的单聊流式接口，内容一截一截下发，界面上是逐段长出来的
-// 群里不用——一群人看着字一个个蹦出来很吵。失败就返回 false，由调用方回落成普通发送
+// QQ 的 /stream_messages 需要单独申请权限，没开通时每次都会失败一次，
+// 所以默认关，而且只要失败过一次就整个进程内不再尝试。
+let streamState = null // null = 还没试过，false = 已知平台不支持
+
+const STREAM_UNAVAILABLE = /stream_messages|404|not found|无权限|权限不足|不支持|not support|3040/i
+
 export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 80 } = {}) {
   const body = String(text ?? '').trim()
   if (event?.message_type !== 'private' || !event?.user_id) return false
-  if (env.streamReply === false) return false
+  if (!env.streamReply) return false
+  if (streamState === false) return false
   if (body.length < 120) return false
 
   let stream
@@ -320,20 +326,39 @@ export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 80 
     return false
   }
 
+  let sent = 0
   try {
     for (let i = 0; i < body.length; i += chunkSize) {
       const chunk = body.slice(i, i + chunkSize)
       if (i + chunkSize >= body.length) {
         await stream.end(chunk)
+        sent += 1
       } else {
         await stream.write(chunk)
+        sent += 1
         if (gapMs > 0) await new Promise((resolve) => setTimeout(resolve, gapMs))
       }
     }
     return true
   } catch (error) {
-    console.warn('[流式] 发送中断（前面几段已发出）：', String(error?.message ?? error).slice(0, 80))
-    return true // 已经发出去一部分了，别再整条重发造成重复
+    const message = String(error?.message ?? error)
+
+    // 一段都没发出去：这条消息还没到用户手里，必须让调用方回落成普通发送
+    if (sent === 0) {
+      if (STREAM_UNAVAILABLE.test(message)) {
+        streamState = false
+        console.warn(
+          `[流式] 平台没开通这个接口，本次进程内不再尝试流式（要用去开放平台申请权限，再设 STREAM_REPLY=true）：${message.slice(0, 60)}`,
+        )
+      } else {
+        console.warn('[流式] 第一段就没发出去，改普通发送：', message.slice(0, 80))
+      }
+      return false
+    }
+
+    // 已经发出去一部分了，别再整条重发，否则用户看到两遍开头
+    console.warn(`[流式] 发到第 ${sent} 段中断，后半截没发出去：`, message.slice(0, 80))
+    return true
   }
 }
 
