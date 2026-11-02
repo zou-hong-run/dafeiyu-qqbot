@@ -11,7 +11,7 @@ export function clip(text) {
   return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
 }
 
-function isStaleMessage(event, ttlMs = 4 * 60_000) {
+export function isStaleMessage(event, ttlMs = 4 * 60_000) {
   const ts = Number(event?.timestamp) * 1000
   if (!Number.isFinite(ts) || ts <= 0) return false
   return Date.now() - ts > ttlMs
@@ -91,6 +91,13 @@ const MAX_PASSIVE_PER_MESSAGE = 4
 
 export function passiveCountOf(event) {
   return passiveUsed.get(event?.message_id) ?? 0
+}
+
+// 同一条消息还能被动回复几条。QQ 官方限制一条消息最多回 4 条，
+// 超了就只能发主动消息，而群里主动消息基本发不出去——所以长回复要按这个余量切
+export function passiveRemaining(event) {
+  if (!event?.message_id || isStaleMessage(event)) return 0
+  return Math.max(0, MAX_PASSIVE_PER_MESSAGE - passiveCountOf(event))
 }
 
 function canUsePassive(event) {
@@ -238,12 +245,20 @@ export async function sendLongReply(event, text, { maxParts = 6, gapMs = 600 } =
     return
   }
 
+  // 一条消息最多被动回复 4 次，前面进度提示已经用掉一些；留 1 条余量给「还有 N 段」那句
+  const budget = passiveRemaining(event)
+  const limit = Math.max(1, Math.min(maxParts, budget > 0 ? budget - 1 : 1))
+
+  if (budget === 0) {
+    console.warn('[发送] 这条消息的被动回复额度已经用尽，只发第一段，剩下的存起来等「接着发」')
+  }
+
   let list = parts
-  if (parts.length > maxParts) {
-    list = parts.slice(0, maxParts)
-    const rest = parts.slice(maxParts)
+  if (parts.length > limit) {
+    list = parts.slice(0, limit)
+    const rest = parts.slice(limit)
     addPending(event, rest)
-    list[maxParts - 1] += `\n\n（还有 ${rest.length} 段，说「接着发」我继续）`
+    list[limit - 1] += `\n\n（还有 ${rest.length} 段，说「接着发」我继续）`
   }
 
   for (let i = 0; i < list.length; i += 1) {
@@ -251,7 +266,14 @@ export async function sendLongReply(event, text, { maxParts = 6, gapMs = 600 } =
     try {
       await sendReply(event, list[i])
     } catch (error) {
-      console.warn(`[发送] 第 ${i + 1}/${list.length} 段失败：`, error?.message ?? error)
+      // 这一段没发出去：后面的段也别硬发了，存起来让用户自己取
+      const left = list.slice(i)
+      addPending(event, left)
+      console.warn(
+        `[发送] 第 ${i + 1}/${list.length} 段失败，剩余 ${left.length} 段已存起：`,
+        error?.message ?? error,
+      )
+      return
     }
   }
 }

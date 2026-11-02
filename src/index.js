@@ -24,7 +24,7 @@ import { generateHotTake } from './hot-takes.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { putChoice, resolveChoice, choiceText } from './choices.js'
 import { bot } from './bot.js'
-import { chunkText, clip, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
+import { chunkText, clip, isStaleMessage, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
 import { pendingCount, takePending } from './pending.js'
 import {
   audioSenderFor,
@@ -35,6 +35,7 @@ import {
   videoSenderFor,
 } from './media.js'
 import {
+  claim,
   coolingDown,
   enqueue,
   hasReplied,
@@ -618,10 +619,19 @@ function notifierFor(event) {
   }
 }
 
-async function handleMessage(event, trigger = 'at') {
-  let text = (event.content ?? '').trim()
+async function handleMessage(event, trigger = 'at', overrideText = '') {
+  let text = (overrideText || event.content || '').trim()
   const inbound = extractInbound(event)
   if (!text && inbound.length === 0) return
+
+  // 消息太老就别答了：被动回复窗口过了，主动消息在群里基本发不出去，
+  // 硬发只会「用户看到一半突然没声」，不如记一行日志，让人能查
+  if (isStaleMessage(event)) {
+    console.warn(
+      `[过期] ${sessionKeyOf(event)} 消息已超过 4 分钟才轮到处理，跳过（队列积压或进程刚重启）`,
+    )
+    return
+  }
 
   // 「大肥鱼 /reset」这种带名字的命令也要认：只有剥掉别名后确实以 / 开头才替换
   const stripped = stripBotAlias(text).replace(/[@＠]\S+$/, '').trim()
@@ -947,9 +957,11 @@ async function handleMessage(event, trigger = 'at') {
     return
   }
 
+  // 太长的消息不拒收：截断后照样回答，只是告诉模型前面被砍了一截
+  let truncated = ''
   if (text.length > env.maxInputChars) {
-    await sendReply(event, `消息太长了，请压缩到 ${env.maxInputChars} 字以内再发给我。`)
-    return
+    truncated = `\n\n（对方这条消息 ${text.length} 字，超过 ${env.maxInputChars} 字上限，只送进了前 ${env.maxInputChars} 字）`
+    text = text.slice(0, env.maxInputChars)
   }
 
   // 订阅直通：这个会话已经有工单在跑，新消息直接投给那个 Worker，不再另开一轮对话
@@ -982,7 +994,7 @@ async function handleMessage(event, trigger = 'at') {
     }
 
     // 语音/图片/文件：下载后在输入里附一段说明，图片还会直接喂给多模态模型
-    let input = `${text}${referencedContext(event)}`
+    let input = `${text}${truncated}${referencedContext(event)}`
     let images = []
 
     if (inbound.length > 0) {
@@ -1099,6 +1111,20 @@ async function handleGroupAll(event) {
   recordGroupMessage(event, text || '[附件]')
   if (!text) return
 
+  // 之前发过选择题，这条回了个数字：当成选中，直接走对话（群里不容易被 @ 到时尤其需要）
+  const picked = resolveChoice(`group:${event.group_id}`, text)
+  if (picked) {
+    if (hasReplied(event.message_id)) return
+    markReplied(event.message_id)
+    console.log(`[选择题] ${event.group_id} 选了「${picked.choice}」`)
+    await handleMessage(
+      event,
+      'at',
+      `${picked.choice}\n（对方刚在「${picked.question}」这道选择题里选了这一项）`,
+    )
+    return
+  }
+
   if (env.toolDebug && Array.isArray(event.mentions) && event.mentions.length > 0) {
     console.log(
       `[@诊断] mentions=${JSON.stringify(event.mentions).slice(0, 240)} self_id=${bot.self_id} appId=${env.appId}`,
@@ -1146,7 +1172,16 @@ async function handleGroupAll(event) {
 async function handleGroupAt(event) {
   const text = (event.content ?? '').trim()
   recordGroupMessage(event, text || '[附件]')
-  if (!text && extractInbound(event).length === 0) return
+
+  // 只 @ 不说话、也没带附件：以前是静默丢，用户会以为坏了，这里给一句引导（每群 60 秒最多一次）
+  if (!text && extractInbound(event).length === 0) {
+    const key = `empty-at:${event.group_id}`
+    if (!coolingDown(key, 60_000)) {
+      touch(key)
+      await sendReply(event, '在。说吧，要查什么、要干什么。').catch(() => {})
+    }
+    return
+  }
 
   if (hasReplied(event.message_id)) return
   markReplied(event.message_id)
@@ -1165,6 +1200,8 @@ initTrigger({
 })
 
 bot.on('message.private.friend', (event) => {
+  // 平台偶尔会重推同一条，没这道去重会回两遍
+  if (!claim(event.message_id, 'private')) return
   enqueue(sessionKeyOf(event), () => handleMessage(event, 'private'))
 })
 
