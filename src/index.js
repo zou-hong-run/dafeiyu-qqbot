@@ -134,18 +134,19 @@ function gitSyncFor() {
     if (action === 'status') return describeStatus()
 
     if (action === 'push') {
-      const result = commitAndPush(reason ? `auto sync: ${String(reason).slice(0, 60)}` : 'auto sync: 手动推送')
+      const result = await commitAndPush(
+        reason ? `auto sync: ${String(reason).slice(0, 60)}` : 'auto sync: 手动推送',
+      )
       if (result.skipped) return `没有需要同步的改动（${result.reason}）`
       if (result.pushed) return `已提交并推送 ${result.files} 个文件到 ${result.branch}`
       return `已本地提交 ${result.files} 个文件，但推送失败：${result.reason}`
     }
 
     if (action === 'pull') {
-      const result = pullLatest()
+      const result = await pullLatest()
       if (!result.ok) throw new Error(result.reason)
-      return `已拉取 ${result.branch} 的最新代码${result.output ? `：
-${result.output}` : ''}
-改完记得重启才生效`
+      const detail = result.output ? `：\n${result.output}` : ''
+      return `已拉取 ${result.branch} 的最新代码${detail}\n改完记得重启才生效`
     }
 
     throw new Error(`不认识的 mode：${mode}，只能是 status / push / pull`)
@@ -995,7 +996,7 @@ async function shutdown(signal) {
   // 机器人自己改了源码时，退出前把它提交回仓库，实现「自己进化」
   if (process.env.AUTO_SYNC_ON_EXIT !== 'false') {
     try {
-      const synced = commitAndPush('auto sync: 退出前自动提交')
+      const synced = await commitAndPush('auto sync: 退出前自动提交')
       if (synced.skipped) {
         console.log(`[同步] 跳过：${synced.reason}`)
       } else if (synced.pushed) {
@@ -1091,7 +1092,7 @@ function reportMemory() {
 reportMemory()
 
 try {
-  const repoLine = describeStatus().split('\n')[0]
+  const repoLine = (await describeStatus()).split('\n')[0]
   console.log(`[同步] ${repoLine}`)
 } catch (error) {
   console.error('[同步] 读仓库状态失败：', error?.message ?? error)
@@ -1241,6 +1242,32 @@ try {
       }
     },
   })
+
+  // 定时把代码改动提交回仓库：不依赖「重启才提交」，改一点就留一点
+  const syncMinutes = Number(process.env.AUTO_SYNC_INTERVAL_MINUTES ?? 30)
+  if (syncMinutes > 0) {
+    const syncTimer = setInterval(async () => {
+      try {
+        const result = await commitAndPush('auto sync: 定时同步')
+
+        if (result.skipped) {
+          if (env.toolDebug) console.log(`[同步] 定时检查：${result.reason}`)
+          return
+        }
+        if (result.pushed) {
+          console.log(`[同步] 定时提交并推送 ${result.files} 个文件`)
+          return
+        }
+        console.warn(`[同步] 定时提交 ${result.files} 个文件，推送失败：${result.reason}`)
+      } catch (error) {
+        // 同步失败不能影响机器人本身
+        console.warn('[同步] 定时同步出错：', error?.message ?? error)
+      }
+    }, syncMinutes * 60_000)
+
+    syncTimer.unref?.()
+    console.log(`[同步] 每 ${syncMinutes} 分钟自动提交一次（AUTO_SYNC_INTERVAL_MINUTES 可调，0 关闭）`)
+  }
 
   const mediaTtlHours = Number(process.env.MEDIA_TTL_HOURS || 24)
   const cleaner = setInterval(async () => {
