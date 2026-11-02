@@ -168,7 +168,10 @@ node --check src/index.js
 
 ## 配置
 
-只列常用项，全部可选项见 `.env.example`（括号里是默认值）。
+**只有三行是必填的**（`DEEP_SEEK_API_KEY`、`QQ_APP_ID`、`QQ_APP_SECRET`），其余不写就用默认值，不配也能跑。
+启动时日志里会有两行 `[配置] ...`，把当时生效的开关一次列出来 —— 不确定某个功能开没开，看那里最快。
+
+常用项如下，完整清单和默认值见 `.env.example`（括号里是默认值）。
 
 | 变量 | 说明 |
 | --- | --- |
@@ -179,10 +182,11 @@ node --check src/index.js
 | `BOT_ALIASES` | 群里提到这些词必回（`大肥鱼,鱼鱼,万能大肥鱼`） |
 | `GROUP_AUTO_REPLY` | 关掉关键字触发 |
 | `JUDGE_MODE` | 插话判断：`off` 不判断（默认）/ `observe` 只记录不回复 / `auto` 真的接话 |
-| `MAX_TOOL_ROUNDS` | 单次对话最多几轮工具调用（100） |
+| `JUDGE_COOLDOWN` | `auto` 模式下两次插话的最小间隔（0，觉得吵设 90~300） |
+| `MAX_TOOL_ROUNDS` | 单次对话最多几轮工具调用（12，别设太大，2G 机器扛不住） |
 | `TOOL_TIMEOUT_SECONDS` | 单个工具调用超时（60） |
 | `TASK_MAX_ROUNDS` | 子助手最多执行几步（20） |
-| `CONTEXT_WINDOW_TOKENS` | 上下文预算（1000000），超出后早期内容压成摘要 |
+| `CONTEXT_WINDOW_TOKENS` | 模型上下文窗口（128000），超出预算的早期内容压成摘要 |
 | `MARKDOWN_REPLY` | 用 Markdown 发回复（false）。平台已开放自定义 Markdown |
 | `QUOTE_REPLY` | 引用气泡：`false` 关（默认）/ `judge` 只在插话时 / `always` 每条都引用 |
 | `TTS_VOICE` | `speak` 工具用的 edge-tts 音色（`zh-CN-XiaoxiaoNeural`） |
@@ -194,6 +198,13 @@ node --check src/index.js
 | `MEDIA_TTL_HOURS` | `downloads/incoming/` 附件保留时长（24 小时） |
 | `MAX_SEND_FILE_MB` | `send_file` 单文件上限（50MB，要整个读进内存才能上传） |
 | `TASK_CONCURRENCY` | 同时最多几个工单（2，2G 内存别超过 2） |
+| `PROACTIVE_ENABLED` | 主动接话：自己翻群记录找没人答的问题（默认开） |
+| `FOLLOWUP_ENABLED` | 情绪回访：隔几小时问一句「那个事后来咋样了」（默认开） |
+| `HOT_TAKE_ENABLED` | 热点吐槽：搜当天新闻在群里损两句（默认关） |
+| `MERGE_WINDOW_MS` | 连发合并窗口（1200），0 = 逐条处理 |
+| `STREAM_REPLY` | 私聊长回复走流式（默认开） |
+| `PROGRESS_MAX` | 私聊一轮最多报几次进度（3），群里固定 1 次 |
+| `TOOL_DEBUG` | 打每轮请求和工具调用的详细日志（默认关，排查时开） |
 
 ## 部署（pm2）
 

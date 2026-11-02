@@ -1,3 +1,4 @@
+import { env } from './env.js'
 import * as groupLog from './group-log.js'
 
 // 主动接话：定时扫描活跃群，找出「有人在问但没人答」的问题，判断值不值得插一句
@@ -55,10 +56,10 @@ export function findCandidates(groupId, { window = 20, maxAgeMs = 30 * 60_000 } 
  */
 export function shouldProactive(groupId, candidates, options = {}) {
   const {
-    maxPerHour = Number(process.env.PROACTIVE_MAX_PER_HOUR || 2),
-    cooldownMs = Number(process.env.PROACTIVE_COOLDOWN_MINUTES || 20) * 60_000,
-    quietStart = Number(process.env.PROACTIVE_QUIET_START || 23),
-    quietEnd = Number(process.env.PROACTIVE_QUIET_END || 8),
+    maxPerHour = env.proactive.maxPerHour,
+    cooldownMs = env.proactive.cooldownMinutes * 60_000,
+    quietStart = env.proactive.quietStart,
+    quietEnd = env.proactive.quietEnd,
   } = options
 
   if (candidates.length === 0) return { ok: false, reason: '没有待答的问题' }

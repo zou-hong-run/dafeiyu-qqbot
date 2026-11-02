@@ -71,24 +71,27 @@ export const env = {
     .filter(Boolean),
   // 兜底开关：白名单为空时，把它设成 true 才会允许群里用高危工具（默认关）
   shellGroupEnabled: process.env.SHELL_GROUP_ENABLED === 'true',
-  toolDebug: process.env.TOOL_DEBUG !== 'false',
+  // 详细日志默认关：每一轮工具调用都会打参数和返回，长期开日志会长得很快
+  toolDebug: process.env.TOOL_DEBUG === 'true',
 
   taskMaxRounds: Math.floor(positiveNumber('TASK_MAX_ROUNDS', 20)),
   // 允许设成 0：关掉验收不过时的自动续跑
   taskMaxContinuations: Math.floor(nonNegativeNumber('TASK_MAX_CONTINUATIONS', 3)),
   taskStallMs: positiveNumber('TASK_STALL_SECONDS', 300) * 1000,
   taskReportInterval: positiveNumber('TASK_REPORT_INTERVAL', 60) * 1000,
-  taskMaxReports: Math.floor(positiveNumber('TASK_MAX_REPORTS', 5)),
+  taskMaxReports: Math.floor(positiveNumber('TASK_MAX_REPORTS', 3)),
   // 2G 内存：每个 Worker 都是一个跑着 ReAct 循环的会话，同时开太多会直接 OOM
   taskConcurrency: Math.floor(positiveNumber('TASK_CONCURRENCY', 2)),
-  maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 100)),
+  // 一轮对话最多调几轮工具。默认 12 够用；设太大在 2G 机器上会把内存和额度一起吃穿
+  maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 12)),
   maxOutputTokens: Math.floor(positiveNumber('MAX_OUTPUT_TOKENS', 8192)),
   progressInterval: positiveNumber('PROGRESS_INTERVAL', 25) * 1000,
-  progressMax: Math.floor(positiveNumber('PROGRESS_MAX', 8)),
+  progressMax: Math.floor(positiveNumber('PROGRESS_MAX', 3)),
   toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 60) * 1000,
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),
-  contextWindowTokens: Math.floor(positiveNumber('CONTEXT_WINDOW_TOKENS', 1000000)),
+  // DeepSeek 的上下文窗口是 128K，默认按它算预算；换模型时改这里
+  contextWindowTokens: Math.floor(positiveNumber('CONTEXT_WINDOW_TOKENS', 128000)),
   contextBudgetRatio: positiveNumber('CONTEXT_BUDGET_RATIO', 0.6),
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
@@ -133,9 +136,38 @@ export const env = {
   // 连发合并窗口：同一个人连着发的几句合成一次理解，0 = 关闭（逐条处理）
   mergeWindowMs: nonNegativeNumber('MERGE_WINDOW_MS', 1200),
 
+  // 退出前自动把改过的代码提交回仓库（「自己进化」靠它）；间隔 0 = 只靠退出时提交
+  autoSyncOnExit: process.env.AUTO_SYNC_ON_EXIT !== 'false',
+  autoSyncIntervalMinutes: nonNegativeNumber('AUTO_SYNC_INTERVAL_MINUTES', 30),
+  // 收到的图片/语音/文件留多久（小时），到点自动删
+  mediaTtlHours: positiveNumber('MEDIA_TTL_HOURS', 24),
+
   groupLogLimit: Math.floor(positiveNumber('GROUP_LOG_LIMIT', 600)),
   summaryLimit: Math.floor(positiveNumber('SUMMARY_LIMIT', 200)),
   summaryCooldown: nonNegativeNumber('SUMMARY_COOLDOWN', 0) * 1000,
+
+  // 下面几组原来散在各个文件里读 process.env，默认值也散着写。
+  // 收到这里统一给默认，启动时打一份摘要，不配也知道自己在跑什么。
+  proactive: {
+    enabled: process.env.PROACTIVE_ENABLED !== 'false',
+    intervalMinutes: positiveNumber('PROACTIVE_INTERVAL_MINUTES', 5),
+    maxPerHour: Math.floor(positiveNumber('PROACTIVE_MAX_PER_HOUR', 2)),
+    cooldownMinutes: nonNegativeNumber('PROACTIVE_COOLDOWN_MINUTES', 20),
+    quietStart: Math.floor(nonNegativeNumber('PROACTIVE_QUIET_START', 23)),
+    quietEnd: Math.floor(nonNegativeNumber('PROACTIVE_QUIET_END', 8)),
+  },
+  followup: {
+    enabled: process.env.FOLLOWUP_ENABLED !== 'false',
+    intervalMinutes: positiveNumber('FOLLOWUP_INTERVAL_MINUTES', 60),
+    minAgeHours: positiveNumber('FOLLOWUP_MIN_AGE_HOURS', 6),
+    quietStart: Math.floor(nonNegativeNumber('FOLLOWUP_QUIET_START', 23)),
+    quietEnd: Math.floor(nonNegativeNumber('FOLLOWUP_QUIET_END', 8)),
+  },
+  hotTake: {
+    enabled: process.env.HOT_TAKE_ENABLED === 'true',
+    cron: process.env.HOT_TAKE_CRON?.trim() || '0 12,20 * * *',
+    target: process.env.HOT_TAKE_TARGET?.trim() || '',
+  },
 
   logLevel: process.env.LOG_LEVEL?.trim() || 'info',
 }

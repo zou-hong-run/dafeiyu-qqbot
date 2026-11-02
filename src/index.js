@@ -432,7 +432,7 @@ function progressReporter(event) {
 
 // 主动扫描：没人叫它的时候，自己去翻群记录，看有没有值得接的问题
 async function runProactiveScan() {
-  if (process.env.PROACTIVE_ENABLED === 'false') return
+  if (!env.proactive.enabled) return
 
   let ids = []
   try {
@@ -481,14 +481,14 @@ async function runProactiveScan() {
 
 // 回访：之前记下的「还在进行中的事」，隔几小时主动问一句
 async function runFollowUps() {
-  if (process.env.FOLLOWUP_ENABLED === 'false') return
+  if (!env.followup.enabled) return
 
   const hour = new Date().getHours()
-  const quietStart = Number(process.env.FOLLOWUP_QUIET_START || 23)
-  const quietEnd = Number(process.env.FOLLOWUP_QUIET_END || 8)
+  const quietStart = env.followup.quietStart
+  const quietEnd = env.followup.quietEnd
   if (quietStart > quietEnd ? hour >= quietStart || hour < quietEnd : hour >= quietStart && hour < quietEnd) return
 
-  const minAgeHours = Number(process.env.FOLLOWUP_MIN_AGE_HOURS || 6)
+  const minAgeHours = env.followup.minAgeHours
   const due = dueFollowUps({ minAgeMs: minAgeHours * 3600_000, limit: 1 })
   if (due.length === 0) return
 
@@ -551,7 +551,7 @@ function choiceSenderFor(event) {
 
 // 热点吐槽：自己去搜当天新闻，挑一条在群里说两句
 function pickActiveGroup() {
-  if (process.env.HOT_TAKE_TARGET) return String(process.env.HOT_TAKE_TARGET).trim()
+  if (env.hotTake.target) return env.hotTake.target
 
   try {
     const dir = path.join(dataDir, 'groups')
@@ -571,7 +571,7 @@ function pickActiveGroup() {
 }
 
 async function runHotTake() {
-  if (process.env.HOT_TAKE_ENABLED !== 'true') return
+  if (!env.hotTake.enabled) return
 
   const groupId = pickActiveGroup()
   if (!groupId) {
@@ -1358,7 +1358,7 @@ async function shutdown(signal) {
   }
 
   // 机器人自己改了源码时，退出前把它提交回仓库，实现「自己进化」
-  if (process.env.AUTO_SYNC_ON_EXIT !== 'false') {
+  if (env.autoSyncOnExit) {
     try {
       const synced = await commitAndPush('auto sync: 退出前自动提交')
       if (synced.skipped) {
@@ -1478,6 +1478,22 @@ try {
             : '自动判断已关'
       }；` +
       `「/总结」复盘最近 ${env.summaryLimit} 条`,
+  )
+
+  // 没配的项都用了什么默认，一次列出来，省得猜「为什么它不回/为什么这么吵」
+  console.log(
+    `[配置] 主动接话=${env.proactive.enabled ? `开（${env.proactive.intervalMinutes} 分钟一轮，每群每小时≤${env.proactive.maxPerHour} 次）` : '关'}｜` +
+      `回访=${env.followup.enabled ? `开（≥${env.followup.minAgeHours} 小时）` : '关'}｜` +
+      `热点吐槽=${env.hotTake.enabled ? `开（${env.hotTake.cron}）` : '关'}｜` +
+      `连发合并=${env.mergeWindowMs > 0 ? `${env.mergeWindowMs}ms` : '关'}｜` +
+      `私聊流式=${env.streamReply ? '开' : '关'}｜` +
+      `引用=${env.quoteReply || '关'}`,
+  )
+  console.log(
+    `[配置] 工具=${env.toolsEnabled ? '开' : '关'}｜群聊工具=${env.groupToolsEnabled ? '开' : '关'}｜` +
+      `高危工具=${env.adminOpenIds.length > 0 ? `白名单 ${env.adminOpenIds.length} 人` : `私聊放开/群里${env.shellGroupEnabled ? '放开' : '禁用'}`}｜` +
+      `详细日志=${env.toolDebug ? '开' : '关（排查时设 TOOL_DEBUG=true）'}｜` +
+      `工具轮数上限=${env.maxToolRounds}｜单条输入上限=${env.maxInputChars} 字｜回复上限 ${env.replyMaxChars} 字/条`,
   )
 
   initScheduler({
@@ -1627,7 +1643,7 @@ try {
   })
 
   // 定时把代码改动提交回仓库：不依赖「重启才提交」，改一点就留一点
-  const syncMinutes = Number(process.env.AUTO_SYNC_INTERVAL_MINUTES ?? 30)
+  const syncMinutes = env.autoSyncIntervalMinutes
   if (syncMinutes > 0) {
     const syncTimer = setInterval(async () => {
       try {
@@ -1653,8 +1669,8 @@ try {
   }
 
   // 主动扫描：每 N 分钟翻一遍群记录，看有没有「有人问但没人答」的问题
-  const proactiveMinutes = Number(process.env.PROACTIVE_INTERVAL_MINUTES ?? 5)
-  if (process.env.PROACTIVE_ENABLED !== 'false' && proactiveMinutes > 0) {
+  const proactiveMinutes = env.proactive.intervalMinutes
+  if (env.proactive.enabled && proactiveMinutes > 0) {
     const proactiveTimer = setInterval(() => {
       runProactiveScan().catch((error) => console.warn('[主动] 扫描异常：', error?.message ?? error))
     }, proactiveMinutes * 60_000)
@@ -1662,14 +1678,14 @@ try {
 
     console.log(
       `[主动] 每 ${proactiveMinutes} 分钟扫一遍群记录` +
-        `（每小时最多 ${process.env.PROACTIVE_MAX_PER_HOUR || 2} 次，` +
-        `${process.env.PROACTIVE_QUIET_START || 23}-${process.env.PROACTIVE_QUIET_END || 8} 点静默）`,
+        `（每群每小时最多 ${env.proactive.maxPerHour} 次，` +
+        `${env.proactive.quietStart}-${env.proactive.quietEnd} 点静默）`,
     )
   }
 
   // 回访：隔一段时间把「还在进行中的事」拎出来问一句
-  const followupMinutes = Number(process.env.FOLLOWUP_INTERVAL_MINUTES ?? 60)
-  if (process.env.FOLLOWUP_ENABLED !== 'false' && followupMinutes > 0) {
+  const followupMinutes = env.followup.intervalMinutes
+  if (env.followup.enabled && followupMinutes > 0) {
     const followupTimer = setInterval(() => {
       runFollowUps().catch((error) => console.warn('[回访] 扫描异常：', error?.message ?? error))
     }, followupMinutes * 60_000)
@@ -1677,14 +1693,14 @@ try {
 
     console.log(
       `[回访] 每 ${followupMinutes} 分钟看一次手头没结的事` +
-        `（至少隔 ${process.env.FOLLOWUP_MIN_AGE_HOURS || 6} 小时才提，` +
-        `${process.env.FOLLOWUP_QUIET_START || 23}-${process.env.FOLLOWUP_QUIET_END || 8} 点静默）`,
+        `（至少隔 ${env.followup.minAgeHours} 小时才提，` +
+        `${env.followup.quietStart}-${env.followup.quietEnd} 点静默）`,
     )
   }
 
   // 热点吐槽：到点自己去搜新闻，挑一条在群里说两句
-  const hotTakeCron = process.env.HOT_TAKE_CRON || '0 12,20 * * *'
-  if (process.env.HOT_TAKE_ENABLED === 'true') {
+  const hotTakeCron = env.hotTake.cron
+  if (env.hotTake.enabled) {
     let lastHotKey = ''
     const hotTakeTimer = setInterval(() => {
       const now = new Date()
@@ -1699,7 +1715,7 @@ try {
     console.log(`[热点] 已开启，按 cron「${hotTakeCron}」去搜当天热点自己聊`)
   }
 
-  const mediaTtlHours = Number(process.env.MEDIA_TTL_HOURS || 24)
+  const mediaTtlHours = env.mediaTtlHours
   const cleaner = setInterval(async () => {
     try {
       const groups = rebuildAll()
