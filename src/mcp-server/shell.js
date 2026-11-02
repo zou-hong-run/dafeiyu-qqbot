@@ -418,6 +418,16 @@ async function restartSelf({ delay_seconds: delaySeconds = 6, reason = '' }) {
 
   const delay = Math.min(Math.max(Number(delaySeconds) || 6, 2), 60)
   const note = String(reason ?? '').trim().slice(0, 120)
+
+  // 留个标记，重启后新进程会读它，用来告诉用户「为什么重启」
+  try {
+    const pending = path.join(projectRoot, 'data', 'restart-pending.json')
+    fs.mkdirSync(path.dirname(pending), { recursive: true })
+    fs.writeFileSync(pending, JSON.stringify({ at: Date.now(), reason: note, app: PM2_APP }))
+  } catch {
+    // 写不进去就算了，播报会退回默认文案
+  }
+
   const { pid, logFile } = runInBackground(`sleep ${delay} && pm2 restart ${PM2_APP}`, projectRoot)
 
   return [

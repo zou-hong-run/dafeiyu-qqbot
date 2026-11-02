@@ -9,7 +9,7 @@ import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
-import { evictIdleSessions, reset, stats, flush } from './memory.js'
+import { evictIdleSessions, recentSessions, reset, stats, flush } from './memory.js'
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './sync.js'
@@ -1016,6 +1016,86 @@ try {
     },
     runTask: runScheduledTask,
   })
+
+  // 复活播报：重启后主动说话，别让用户猜「它到底起没起来」
+  const announce = async (interruptedList) => {
+    const pendingFile = path.join(dataDir, 'restart-pending.json')
+    const bootFile = path.join(dataDir, 'last-boot.json')
+
+    let pending = null
+    try {
+      pending = JSON.parse(fs.readFileSync(pendingFile, 'utf8'))
+    } catch {
+      pending = null
+    }
+    try {
+      fs.rmSync(pendingFile, { force: true })
+    } catch {
+      // 没有就算了
+    }
+
+    let last = null
+    try {
+      last = JSON.parse(fs.readFileSync(bootFile, 'utf8'))
+    } catch {
+      last = null
+    }
+
+    const now = Date.now()
+    // 10 分钟内刚播报过就别再刷一遍（避免震荡重启时反复打扰）
+    if (last?.announcedAt && now - last.announcedAt < 10 * 60_000) return
+
+    const recent = recentSessions(30 * 60_000)
+    const targets = new Map()
+
+    for (const session of recent) {
+      const [type, ...rest] = session.key.split(':')
+      const id = rest.join(':')
+      if ((type === 'group' || type === 'user') && id) targets.set(session.key, { type, id })
+    }
+
+    for (const task of interruptedList) {
+      if (task.target?.id) {
+        targets.set(`${task.target.type}:${task.target.id}`, {
+          type: task.target.type,
+          id: task.target.id,
+        })
+      }
+    }
+
+    if (targets.size === 0) return
+
+    const reasonText = pending?.reason ? `（${pending.reason}）` : ''
+    const lines = [`我回来了，刚重启完${reasonText}。`]
+
+    if (interruptedList.length > 0) {
+      lines.push(`上次有 ${interruptedList.length} 个工单没跑完：`)
+      for (const task of interruptedList.slice(0, 3)) {
+        lines.push(`- ${task.id}：${String(task.goal ?? '').slice(0, 40)}`)
+      }
+      lines.push('要接着跑就说一声，我重新发起。')
+    } else {
+      lines.push('刚才的对话接着来就行。')
+    }
+
+    const text = clip(lines.join('\n'))
+
+    for (const [key, target] of targets) {
+      try {
+        if (target.type === 'group') await bot.group(target.id).send(text)
+        else await bot.user(target.id).send(text)
+        console.log(`[启动] 已向 ${key} 播报复活`)
+      } catch (error) {
+        console.warn(`[启动] 向 ${key} 播报失败：`, error?.message ?? error)
+      }
+    }
+
+    try {
+      fs.writeFileSync(bootFile, JSON.stringify({ at: now, announcedAt: now, to: [...targets.keys()] }))
+    } catch {
+      // 写不进去就下次再播
+    }
+  }
 
   const interrupted = takeInterruptedTasks()
   for (const task of interrupted) {

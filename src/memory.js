@@ -244,6 +244,20 @@ export function evictIdleSessions(ttlMs) {
   return { cleared, removed }
 }
 
+// 列出最近有活动的会话，重启播报要用
+export function recentSessions(withinMs = 30 * 60_000) {
+  const now = Date.now()
+  return Object.entries(state.sessions)
+    .filter(([, session]) => now - (session.updatedAt ?? 0) <= withinMs)
+    .map(([key, session]) => ({
+      key,
+      updatedAt: session.updatedAt ?? 0,
+      shortTerm: session.shortTerm.length / 2,
+      longTerm: Array.isArray(session.longTerm) ? session.longTerm.length : 0,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 export function reset(key) {
   state.sessions[key] = blank()
   scheduleSave()
