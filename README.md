@@ -324,6 +324,7 @@ cd /qq && git ls-remote origin main
 ```bash
 pnpm start                   # 前台跑，直接看日志
 pnpm dev                     # --watch 热重载
+pnpm check                   # 静态引用检查：未定义的调用、import 了不存在的导出
 pnpm diagnose                # 逐层体检：配置 → MCP 工具 → 裸 API 调用
 ```
 

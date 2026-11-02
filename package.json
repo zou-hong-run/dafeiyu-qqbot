@@ -14,6 +14,7 @@
     "pm2:delete": "pm2 delete dafeiyu",
     "pm2:logs": "pm2 logs dafeiyu",
     "pm2:status": "pm2 status dafeiyu",
+    "check": "node scripts/check-refs.js",
     "diagnose": "node scripts/diagnose.js",
     "version:tag": "node scripts/release.js"
   },
