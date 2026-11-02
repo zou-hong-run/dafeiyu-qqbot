@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import OpenAI from 'openai'
 import { env } from '../src/env.js'
 import { startMcp, getTools, toDeepSeekTools, callTool, stopMcp } from '../src/mcp/client.js'
@@ -18,6 +19,23 @@ console.log('toolsEnabled:', env.toolsEnabled)
 console.log('groupTools  :', env.groupToolsEnabled)
 console.log('toolDebug   :', env.toolDebug)
 console.log('maxToolRound:', env.maxToolRounds)
+
+// 依赖自检：拉完代码忘了装包，最先炸的往往是 MCP 子进程，日志里不直观
+line('1.5 依赖')
+const projectRoot = new URL('../', import.meta.url)
+const pkg = JSON.parse(fs.readFileSync(new URL('package.json', projectRoot), 'utf8'))
+const missingDeps = []
+for (const name of Object.keys(pkg.dependencies ?? {})) {
+  // 直接看目录，不走模块解析：@scope/name 这类包的 exports 可能不允许从根 import
+  const installed = fs.existsSync(new URL(`node_modules/${name}/package.json`, projectRoot))
+  if (!installed) missingDeps.push(name)
+}
+if (missingDeps.length === 0) {
+  console.log('全部依赖都在:', Object.keys(pkg.dependencies ?? {}).join(', '))
+} else {
+  console.error('缺依赖:', missingDeps.join('、'))
+  console.error('修复：在项目目录跑一次 pnpm install --prod 然后 pm2 restart dafeiyu')
+}
 
 line('2. MCP 工具服务')
 let mcpTools = []

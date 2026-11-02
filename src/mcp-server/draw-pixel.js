@@ -1,10 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PNG } from 'pngjs'
 
 // 像素画工具：只按预设图形或字符网格画 PNG，不执行任何命令
-// PNG 编码用 pngjs（纯 JS，无原生依赖），比手写 CRC32 + IHDR 靠谱
+// PNG 编码用 pngjs（纯 JS，无原生依赖），比手写 CRC32 + IHDR 靠谱。
+// pngjs 按需加载：没装就只让 draw_pixel 报错，别拖垮整个内置工具服务
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const outDir = path.join(projectRoot, 'downloads')
 
@@ -14,7 +14,24 @@ const MAX_SCALE = 20
 const MAX_OUTPUT_PIXELS = 4_000_000
 const MAX_COLORS = 12
 
-function encodePng(width, height, rgba) {
+let pngLib = null
+let pngTried = false
+
+async function loadPng() {
+  if (pngTried) return pngLib
+  pngTried = true
+  try {
+    pngLib = await import('pngjs')
+  } catch {
+    pngLib = null
+  }
+  return pngLib
+}
+
+async function encodePng(width, height, rgba) {
+  const lib = await loadPng()
+  if (!lib) throw new Error('服务器上没装 pngjs，画不了图。在项目目录跑一次 pnpm install 再试')
+  const PNG = lib.PNG ?? lib.default?.PNG
   const png = new PNG({ width, height })
   rgba.copy(png.data)
   return PNG.sync.write(png, { deflateLevel: 9 })
@@ -220,7 +237,7 @@ async function drawPixel(args = {}) {
 
   fs.mkdirSync(outDir, { recursive: true })
   const file = path.join(outDir, `draw-${Date.now()}.png`)
-  fs.writeFileSync(file, encodePng(outW, outH, rgba))
+  fs.writeFileSync(file, await encodePng(outW, outH, rgba))
 
   const relative = path.relative(projectRoot, file).split(path.sep).join('/')
 

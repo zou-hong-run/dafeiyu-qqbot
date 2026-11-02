@@ -224,8 +224,18 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 
 注意：
 
+- **拉代码之后先装依赖再重启**：`package.json` 变了（新增了 PDF/Excel 解析之类的库）而没装包，最先炸的是 MCP 子进程，日志里只看到 `Cannot find package 'xxx'`，然后连搜索、shell 一起没了。标准流程：
+
+  ```bash
+  cd /qq && git pull --rebase origin main
+  pnpm install --prod            # 有 lockfile 时几秒，幂等，每次都跑不亏
+  pm2 restart dafeiyu
+  ```
+
+  不确定缺没缺依赖，跑 `pnpm diagnose`，第 1.5 节会直接列出缺哪些包。
+
 - **同一个 AppID 只能有一个连接**，多开会互相踢下线，所以 `instances: 1`
-- 机器人会往 `data/`、`logs/`、`downloads/`、`tmp/` 写东西，这些目录已在 `.gitignore` 里
+- 机器人会往 `data/`、`logs/`、`downloads/`、`tmp/`、`backups/` 写东西，这些目录已在 `.gitignore` 里
 - 小内存机器（1.5G 左右）跑视频转码要小心：`ffmpeg` 一个进程能吃掉 700M，建议加 2G swap；`max_memory_restart` 默认 420M，让它在系统 OOM 之前自己重启
 
 ## 工具清单

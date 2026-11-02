@@ -1,12 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { extractText, getDocumentProxy } from 'unpdf'
-import mammoth from 'mammoth'
-import * as XLSX from 'xlsx'
 
 // 文档解析：把 PDF / Word / Excel 里的文字读出来喂给模型
 // 用 unpdf（纯 JS，不依赖 canvas）而不是 pdf-parse，后者会拖进 15MB 原生库
+//
+// 下面三个库都按需加载：服务器上少装一个，read_document 报错就行，
+// 不能让整个内置工具服务跟着崩 —— 那样连搜索、shell、天气全都没了
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const MAX_BYTES = 20 * 1024 * 1024
 const MAX_TEXT = 8000
@@ -33,19 +33,48 @@ function resolvePath(input) {
   return full
 }
 
+// 可选依赖：加载失败就记下来，工具被调用时再明确报「缺哪个包」
+const optionalLibs = new Map()
+
+async function loadLib(name) {
+  if (optionalLibs.has(name)) return optionalLibs.get(name)
+
+  try {
+    const lib = await import(name)
+    optionalLibs.set(name, lib)
+    return lib
+  } catch {
+    optionalLibs.set(name, null)
+    return null
+  }
+}
+
+async function requireLib(name, what) {
+  const lib = await loadLib(name)
+  if (!lib) {
+    throw new Error(`服务器上没装 ${name}，${what}读不了。在项目目录跑一次 pnpm install 再试`)
+  }
+  return lib
+}
+
 async function readPdf(buffer) {
-  const pdf = await getDocumentProxy(new Uint8Array(buffer))
-  const { text, totalPages } = await extractText(pdf, { mergePages: true })
+  const unpdf = await requireLib('unpdf', 'PDF')
+  const pdf = await unpdf.getDocumentProxy(new Uint8Array(buffer))
+  const { text, totalPages } = await unpdf.extractText(pdf, { mergePages: true })
   const value = Array.isArray(text) ? text.join('\n') : String(text ?? '')
   return { text: value, pages: totalPages, format: 'PDF' }
 }
 
 async function readDocx(buffer) {
+  const lib = await requireLib('mammoth', 'Word')
+  const mammoth = lib.default ?? lib
   const { value } = await mammoth.extractRawText({ buffer })
   return { text: String(value ?? ''), format: 'Word' }
 }
 
-function readSpreadsheet(buffer, ext) {
+async function readSpreadsheet(buffer, ext) {
+  const lib = await requireLib('xlsx', 'Excel')
+  const XLSX = lib.default ?? lib
   const workbook = XLSX.read(buffer, { type: 'buffer' })
   const parts = []
 
@@ -76,7 +105,7 @@ export async function readDocument(input) {
   let result
   if (ext === '.pdf') result = await readPdf(buffer)
   else if (ext === '.docx') result = await readDocx(buffer)
-  else if (ext === '.xlsx' || ext === '.xls' || ext === '.csv') result = readSpreadsheet(buffer, ext)
+  else if (ext === '.xlsx' || ext === '.xls' || ext === '.csv') result = await readSpreadsheet(buffer, ext)
   else if (['.txt', '.md', '.json', '.log', '.js', '.py', '.html', '.xml', '.yml', '.yaml'].includes(ext)) {
     result = await readPlain(buffer)
   } else if (ext === '.doc') {

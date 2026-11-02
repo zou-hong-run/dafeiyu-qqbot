@@ -438,4 +438,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
+
+// 可选依赖自检：缺哪个就报哪个，服务照常起（只让对应用具报错，不搞成整块崩）
+const OPTIONAL_LIBS = ['unpdf', 'mammoth', 'xlsx', 'pngjs']
+const missingLibs = []
+for (const name of OPTIONAL_LIBS) {
+  try {
+    await import(name)
+  } catch {
+    missingLibs.push(name)
+  }
+}
+if (missingLibs.length > 0) {
+  console.error(
+    `[依赖] 缺 ${missingLibs.join('、')}：读文档/画图会报错。在项目目录跑一次 pnpm install 就能修`,
+  )
+}
+
 console.error(`[mcp] 工具服务已就绪：${TOOLS.map((tool) => tool.name).join(' / ')}`)
