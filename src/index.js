@@ -13,6 +13,7 @@ import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, 
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './sync.js'
+import { recallMessages } from './recall.js'
 import { flushUsage, formatUsage } from './usage.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
@@ -1198,6 +1199,7 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
       groupsReader: groupsReaderFor(),
       gitSync: gitSyncFor(),
       scheduler: schedulerFor(event),
+      recallMessages: (options) => recallMessages({ event, ...(options ?? {}) }),
       broadcastSender: broadcastSenderFor(event),
 
       onStep: progressReporter(event),

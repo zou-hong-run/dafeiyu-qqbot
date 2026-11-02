@@ -65,6 +65,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'send_card',
   'speak',
   'clear_memory',
+  'recall_message',
   'start_task',
   'schedule_task',
   'list_schedules',
@@ -72,6 +73,28 @@ const LOCAL_TOOL_NAMES = new Set([
 ])
 
 const LOCAL_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'recall_message',
+      description:
+        '撤回我自己发出去的消息。QQ 官方限制：只能撤我发的，而且有时效（超过大约 2 分钟基本撤不掉）。' +
+        '不传 message_id 就撤本会话里我最近发的 count 条。',
+      parameters: {
+        type: 'object',
+        properties: {
+          message_id: {
+            type: 'string',
+            description: '要撤回的消息 id；不填就撤最近的',
+          },
+          count: {
+            type: 'integer',
+            description: '不填 message_id 时撤最近几条，默认 1，最多 5',
+          },
+        },
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -573,6 +596,7 @@ async function runTool(
     scheduler,
     notifyUser,
     broadcastSender,
+    recallMessages,
   },
 
 ) {
@@ -735,6 +759,15 @@ async function runTool(
       return `语音已发送：${result.chars} 字，音色 ${result.voice}，合成后端 ${result.backend}`
     } catch (error) {
       return `转语音失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'recall_message') {
+    if (typeof recallMessages !== 'function') return '当前场景不能撤回消息。'
+    try {
+      return await recallMessages({ messageId: args.message_id, count: args.count })
+    } catch (error) {
+      return `撤回失败：${error?.message ?? error}`
     }
   }
 
@@ -1267,6 +1300,7 @@ export async function chat(sessionKey, userText, options = {}) {
     gitSync = null,
     startTask = null,
     scheduler = null,
+    recallMessages = null,
     onStep = null,
   } = options
 
@@ -1468,6 +1502,7 @@ export async function chat(sessionKey, userText, options = {}) {
         gitSync,
         startTask,
         scheduler,
+        recallMessages,
       })
 
       if (env.toolDebug) {
@@ -1625,6 +1660,7 @@ export async function runTaskAgent({
         groupsReader,
         gitSync,
         scheduler,
+        recallMessages,
         startTask: null,
         notifyUser,
       })

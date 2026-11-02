@@ -1,10 +1,51 @@
 import { env } from './env.js'
 import { bot } from './bot.js'
 import { addPending } from './pending.js'
+import { noteSent } from './recall.js'
 
 // 发送层：被动回复配额、引用气泡、Markdown 降级都收在这里
 // 对外只暴露 clip / sendReply / deliver / postMessage
 let markdownState = null
+
+// 撤回要 message_id，而发送接口的返回值以前被直接丢掉了，这里统一捞一次。
+// 不同接口返回结构不完全一致：可能是 { id }、{ data: { id } }，取不到就返回空串，不影响发送。
+function pickMessageId(result) {
+  const candidates = [
+    result?.id,
+    result?.data?.id,
+    result?.message_id,
+    result?.data?.message_id,
+  ]
+  for (const item of candidates) {
+    const id = String(item ?? '').trim()
+    if (id) return id
+  }
+  return ''
+}
+
+function textOf(payload) {
+  if (typeof payload === 'string') return payload
+  const raw = payload?.content ?? payload?.markdown?.content ?? payload?.text ?? ''
+  return typeof raw === 'string' ? raw : ''
+}
+
+function kindOf(payload) {
+  if (typeof payload === 'string') return 'text'
+  if (payload?.image) return 'image'
+  if (payload?.voice) return 'audio'
+  if (payload?.video) return 'video'
+  if (payload?.file) return 'file'
+  return 'text'
+}
+
+function rememberSent(event, result, payload) {
+  const id = pickMessageId(result)
+  if (!id) {
+    if (env.toolDebug) console.log('[撤回] 这条没拿到 message_id，未记录')
+    return
+  }
+  noteSent(event, id, textOf(payload), kindOf(payload))
+}
 
 export function clip(text) {
   if (text.length <= env.replyMaxChars) return text
@@ -143,8 +184,9 @@ export async function withSendRetry(task, label = '发送') {
 export async function deliver(event, payload) {
   if (canUsePassive(event)) {
     try {
-      await withSendRetry(() => event.reply.call(event, payload), '被动回复')
+      const result = await withSendRetry(() => event.reply.call(event, payload), '被动回复')
       notePassive(event)
+      rememberSent(event, result, payload)
       return
     } catch (error) {
       const message = String(error?.message ?? error)
@@ -154,9 +196,11 @@ export async function deliver(event, payload) {
   }
 
   if (event.message_type === 'group') {
-    await withSendRetry(() => bot.group(event.group_id).send(payload), '群消息')
+    const result = await withSendRetry(() => bot.group(event.group_id).send(payload), '群消息')
+    rememberSent(event, result, payload)
   } else {
-    await withSendRetry(() => bot.user(event.user_id).send(payload), '私聊消息')
+    const result = await withSendRetry(() => bot.user(event.user_id).send(payload), '私聊消息')
+    rememberSent(event, result, payload)
   }
 }
 
@@ -180,7 +224,8 @@ export async function postMessage(event, body, { reference = true } = {}) {
   }
 
   try {
-    await withSendRetry(() => bot.request.post(apiPath, body), '接口发送')
+    const result = await withSendRetry(() => bot.request.post(apiPath, body), '接口发送')
+    rememberSent(event, result, body)
     if (usePassive) notePassive(event)
   } catch (error) {
     const message = String(error?.message ?? error)
@@ -190,7 +235,8 @@ export async function postMessage(event, body, { reference = true } = {}) {
     delete body.msg_id
     delete body.msg_seq
     delete body.message_reference
-    await withSendRetry(() => bot.request.post(apiPath, body), '主动发送')
+    const fallback = await withSendRetry(() => bot.request.post(apiPath, body), '主动发送')
+    rememberSent(event, fallback, body)
   }
 }
 
