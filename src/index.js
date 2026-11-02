@@ -17,7 +17,7 @@ import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
-import { chunkText, clip, passiveCountOf, sendLongReply, sendReply } from './sender.js'
+import { chunkText, clip, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
 import { pendingCount, takePending } from './pending.js'
 import {
   audioSenderFor,
@@ -230,11 +230,15 @@ function sendToTarget(target, payload) {
   return bot.user(target.id).send(payload)
 }
 
+// 主对话用：从 event 取群 id
+function historyReaderFor(event) {
+  return historyReaderForGroup(event?.group_id)
+}
+
 function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
 
-// 群里被 @ 的判定：mentions 里出现机器人自己（QQ 号或 AppID）
 // 群里被 @ 的判定。QQ 给过来的 mentions 有两种形态：
 //   数组 [{ id, user_openid, ... }]，或对象 { bot: true, is_you: true, username }
 // 只看 openid 比对会漏掉后一种，导致「@ 了但被当闲聊丢掉」

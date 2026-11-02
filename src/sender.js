@@ -36,7 +36,7 @@ function groupKeyOf(event) {
   return event?.group_id ?? 'private'
 }
 
-function markQuote(event) {
+export function markQuote(event) {
   const id = event?.message_id
   if (!id) return
 
