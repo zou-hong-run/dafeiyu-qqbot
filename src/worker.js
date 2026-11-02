@@ -116,6 +116,9 @@ export function startTask({
   fileSender,
   cardSender,
   speakSender,
+  groupSender,
+  groupsReader,
+  gitSync,
   runAgent = runTaskAgent,
 }) {
   if (busyTasks(sessionKey).length > 0) {
@@ -208,6 +211,9 @@ export function startTask({
           fileSender,
           cardSender,
           speakSender,
+          groupSender,
+          groupsReader,
+          gitSync,
           onStep,
           notifyUser: sendUserMessage,
           pullInput,

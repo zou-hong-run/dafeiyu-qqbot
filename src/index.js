@@ -583,6 +583,9 @@ ${result.reason}
         sendImage: imageSenderFor(event),
         audioSender: audioSenderFor(event),
         videoSender: videoSenderFor(event),
+        groupSender: groupSenderFor(event),
+        groupsReader: groupsReaderFor(),
+        gitSync: gitSyncFor(),
         callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
       })
       await sendReply(event, `已建工单 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
