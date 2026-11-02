@@ -24,6 +24,17 @@ import { generateHotTake } from './hot-takes.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { putChoice, resolveChoice, choiceText } from './choices.js'
 import { mergeMessage } from './merge.js'
+import {
+  QUIET_MS,
+  flushQuiet,
+  isMuted,
+  isUnmuteCommand,
+  muteGroup,
+  muteRemainingMinutes,
+  oncePer,
+  parseMuteCommand,
+  unmuteGroup,
+} from './quiet.js'
 import { bot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
 import { pendingCount, takePending } from './pending.js'
@@ -397,17 +408,25 @@ async function runScheduledTask(task) {
 
 function progressReporter(event) {
   const notify = notifierFor(event)
+  const isGroup = event.message_type === 'group'
+  const groupId = event.group_id
   let lastAt = Date.now()
   let count = 0
 
   return async ({ round, tool }) => {
     if (round < 1) return
-    if (count >= env.progressMax) return
+
+    // 群里「还在处理」最招人烦：一轮最多一条，而且是卡了 45 秒才说一句
+    const max = isGroup ? 1 : env.progressMax
+    if (count >= max) return
+    if (isGroup && !oncePer(`progress:${groupId}`, QUIET_MS.progress)) return
     if (Date.now() - lastAt < env.progressInterval) return
 
     lastAt = Date.now()
     count += 1
-    await notify(`还在处理｜第 ${round + 1} 步：${describeTool(tool)}`)
+    await notify(
+      isGroup ? `还在弄，稍等（正在${describeTool(tool)}）` : `还在处理｜第 ${round + 1} 步：${describeTool(tool)}`,
+    )
   }
 }
 
@@ -427,6 +446,9 @@ async function runProactiveScan() {
 
   for (const groupId of ids) {
     try {
+      if (isMuted(groupId)) continue
+      if (!oncePer(`proactive:${groupId}`, QUIET_MS.proactive)) continue
+
       const candidates = findCandidates(groupId)
       const decision = shouldProactive(groupId, candidates)
       if (!decision.ok) continue
@@ -472,6 +494,16 @@ async function runFollowUps() {
 
   for (const item of due) {
     try {
+      const [type, ...rest] = item.sessionKey.split(':')
+      const id = rest.join(':')
+      if (!id) continue
+
+      // 被喊安静了的群，回访也先停：人家不想被打扰
+      if (type === 'group' && isMuted(id)) {
+        markFollowedUp(item.sessionKey, item.id)
+        continue
+      }
+
       const text = await followUpMessage({
         person: item.person,
         topic: item.topic,
@@ -483,10 +515,6 @@ async function runFollowUps() {
       // 生成了空串就是判断不该提，标记掉别每次都重算
       markFollowedUp(item.sessionKey, item.id)
       if (!text) continue
-
-      const [type, ...rest] = item.sessionKey.split(':')
-      const id = rest.join(':')
-      if (!id) continue
 
       await sendToTarget({ type: type === 'group' ? 'group' : 'user', id }, text)
 
@@ -550,6 +578,12 @@ async function runHotTake() {
     console.log('[热点] 找不到活跃的群，跳过')
     return
   }
+
+  if (isMuted(groupId)) {
+    console.log('[热点] 那个群被喊安静了，跳过')
+    return
+  }
+  if (!oncePer(`hot-take:${groupId}`, QUIET_MS.hotTake)) return
 
   const take = await generateHotTake({ personaName: env.personaName })
   if (!take) return
@@ -1072,7 +1106,10 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
     }
   } catch (error) {
     console.error(`[模型调用失败] ${key}:`, error?.message ?? error)
-    await sendReply(event, '抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
+    // 兜底话术别连着刷：同一个群/同一个私聊 10 分钟最多一次
+    if (trigger === 'private' || oncePer(`apology:${key}`, QUIET_MS.apology)) {
+      await sendReply(event, '抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
+    }
   }
 }
 
@@ -1107,10 +1144,34 @@ async function handleSummary(event) {
   }
 }
 
+// 「安静 / 别吵」这类群内自治指令：任何人说一句就能让它闭嘴，@ 它仍然有反应
+async function handleQuietCommand(event, text) {
+  const minutes = parseMuteCommand(text)
+  if (minutes > 0) {
+    const info = muteGroup(event.group_id, minutes)
+    await sendReply(
+      event,
+      `好，我安静 ${info.minutes >= 60 ? `${Math.round(info.minutes / 60)} 小时` : `${info.minutes} 分钟`}。` +
+        '有事 @ 我，或者发「可以说话了」。',
+    ).catch(() => {})
+    return true
+  }
+
+  if (isUnmuteCommand(text)) {
+    const was = unmuteGroup(event.group_id)
+    await sendReply(event, was ? '行，我接着说了。' : '我本来就没在静音。').catch(() => {})
+    return true
+  }
+
+  return false
+}
+
 async function handleGroupAll(event) {
   const text = (event.content ?? '').trim()
   recordGroupMessage(event, text || '[附件]')
   if (!text) return
+
+  if (await handleQuietCommand(event, text)) return
 
   // 之前发过选择题，这条回了个数字：当成选中，直接走对话（群里不容易被 @ 到时尤其需要）
   const picked = resolveChoice(`group:${event.group_id}`, text)
@@ -1149,6 +1210,9 @@ async function handleGroupAll(event) {
     return
   }
 
+  // 名字触发和自动判断：被喊安静之后都不做，只保留 @ 和 /总结
+  if (isMuted(event.group_id)) return
+
   if (env.groupAutoReply && mentionsBot(text)) {
     if (hasReplied(event.message_id)) return
 
@@ -1174,6 +1238,8 @@ async function handleGroupAt(event, overrideText = '') {
   const raw = (event.content ?? '').trim()
   const text = (overrideText || raw).trim()
   recordGroupMessage(event, raw || '[附件]')
+
+  if (await handleQuietCommand(event, text)) return
 
   // 只 @ 不说话、也没带附件：以前是静默丢，用户会以为坏了，这里给一句引导（每群 60 秒最多一次）
   if (!text && extractInbound(event).length === 0) {
@@ -1286,6 +1352,7 @@ async function shutdown(signal) {
     flushUsage()
     flushKnowledge()
     flushSituations()
+    flushQuiet()
   } catch (error) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
@@ -1415,6 +1482,12 @@ try {
 
   initScheduler({
     sendMessage: async (target, text) => {
+      // 群里被喊安静了就先别推：定时早报也是打扰
+      if (target.type === 'group' && isMuted(target.id)) {
+        console.log(`[定时] ${target.id.slice(0, 12)}… 静音中，本次推送跳过`)
+        return
+      }
+
       // 定时任务的日报可能很长：分段发，别用 clip 截断
       const parts = chunkText(text)
       for (let i = 0; i < parts.length && i < 6; i += 1) {
@@ -1498,6 +1571,12 @@ try {
 
     for (const [key, target] of targets) {
       try {
+        // 群里播报要克制：被喊过安静的不发，同一个群 12 小时最多一条
+        if (target.type === 'group') {
+          if (isMuted(target.id)) continue
+          if (!oncePer(`announce:${target.id}`, QUIET_MS.announce)) continue
+        }
+
         if (target.type === 'group') await bot.group(target.id).send(text)
         else await bot.user(target.id).send(text)
         console.log(`[启动] 已向 ${key} 播报复活`)

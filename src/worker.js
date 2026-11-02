@@ -158,7 +158,9 @@ export function startTask({
     if (!current) return
 
     if (tool === 'notify_user') return
-    if (current.reports >= env.taskMaxReports) return
+    // 群里进度汇报要克制：最多两条，免得一个任务刷满屏
+    const reportLimit = scope === 'group' ? 2 : env.taskMaxReports
+    if (current.reports >= reportLimit) return
     if (current.step <= 1) return
     if (Date.now() - lastReportAt < env.taskReportInterval) return
 
@@ -175,7 +177,9 @@ export function startTask({
 
   const sendUserMessage = async (text) => {
     const current = getTicket(ticket.id)
-    if (!current || current.deliveries.length >= 10) {
+    // 群里最多插 3 条，私聊给 10 条；超了就留到最终汇报
+    const limit = scope === 'group' ? 3 : 10
+    if (!current || current.deliveries.length >= limit) {
       return '这个工单已经主动发了不少条了，剩下的留到最终汇报。'
     }
     await say(text)
