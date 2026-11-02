@@ -44,6 +44,15 @@ export function isRepo() {
   return probe.ok && probe.out === 'true'
 }
 
+// 提交信息里用本地时间，别用 toISOString（那是 UTC，差 8 小时）
+function localStamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0')
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  )
+}
+
 export function repoStatus() {
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true }).out || 'unknown'
   const dirty = git(['status', '--porcelain'], { allowFail: true }).out
@@ -105,11 +114,20 @@ export function commitAndPush(reason = 'auto sync') {
 
   if (files.length === 0) return { ok: true, skipped: true, reason: '过滤后没有可提交的文件' }
 
-  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
-  const message = `${reason}（${stamp}）\n\n改动 ${files.length} 个文件：\n${files
-    .slice(0, 20)
-    .map((file) => `- ${file}`)
-    .join('\n')}${files.length > 20 ? `\n- …还有 ${files.length - 20} 个` : ''}`
+  const stamp = localStamp()
+  const statLine = git(['diff', '--cached', '--stat'], { allowFail: true }).out.split('\n').pop()?.trim() ?? ''
+
+  const subject = `${reason}（${stamp}）`
+  const body = [
+    statLine,
+    `改动 ${files.length} 个文件：`,
+    ...files.slice(0, 20).map((file) => `- ${file}`),
+    files.length > 20 ? `- …还有 ${files.length - 20} 个` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const message = `${subject}\n\n${body}`
 
   git(['commit', '-m', message])
 
