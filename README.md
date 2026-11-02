@@ -1,6 +1,6 @@
 # 万能大肥鱼 · 会自己长大的 QQ 机器人
 
-基于 **QQ 官方开放平台 API** + **DeepSeek** 的群聊机器人：有三层记忆、30+ 个工具、可以自己给自己装技能和新 MCP 服务，还能把耗时任务丢给后台子助手边做边汇报。
+基于 **QQ 官方开放平台 API** + **DeepSeek** 的群聊机器人：有三层记忆、近 40 个工具、可以自己给自己装技能和新 MCP 服务，还能把耗时任务丢给后台子助手边做边汇报。
 
 不是聊天壳子，是一个能动手的 agent：能搜网页、跑 shell、装包、生成图片和视频、发语音、定时爬起来干活。
 
@@ -17,17 +17,20 @@
 
 - **人格化对话**：人格写在 `src/persona.js`（默认「万能大肥鱼，技术女宅」），也可用 `SYSTEM_PROMPT` 一行覆盖
 - **三层记忆**：短期（最近 N 轮原文）→ 中期（溢出的对话自动压成摘要）→ 长期（跨重启保存的事实，靠 `remember` 工具写入）
-- **30+ 工具**：联网搜索/抓网页、shell、文件读写、图片/语音/视频/文件/图文卡片发送、文字转语音、定时任务、技能与 MCP 自我扩展
+- **近 40 个工具**：18 个本地工具 + 21 个内置 MCP 工具；联网搜索、shell、文件读写、图片/语音/视频/文件/图文卡片、文字转语音、像素画、定时任务、跨群发言、全服通报、技能与 MCP 自我扩展
 - **后台子助手**：复杂任务用 `start_task` 交给子 agent，最多 20 步，期间往群里推进度，做完自动汇报
 - **定时任务**：cron 五段表达式，到点执行并把结果推到群里（`schedule_task`）
 - **能看图**：对方发的图片直接喂给 V4.1-Flash（`deepseek-flash`）做多模态理解，能看截图、读文档照片
 - **附件按会话隔离**：存到 `downloads/incoming/<会话>/`，不同群和私聊互不可见，发送时也会校验，A 群的图没法在 B 群发出去
 - **引用上下文**：引用某条消息时能拿到被引用的原文
 - **只在被叫时说**：群里 @ 我、或者提到「大肥鱼」等别名才接话；插话判断默认关闭，不会没事接话茬
+- **跨群发言与全服通报**：`send_to_group` 往指定群发话、`broadcast` 一次推给所有待过的群（群多时强制 `confirm` 防误发）
+- **代码自同步**：它改完源码后每 30 分钟自动 `git commit` + `push`，重启前再兜底一次——真正的「自己进化、改动能落到仓库」
+- **重启播报**：重启后主动向最近活跃的会话说一句「我回来了」，有未完成工单会一并列出
 - **观察模式**：`JUDGE_MODE=observe` 时它会评估「这句我本来会接」，但只记一笔不回复，`/observe` 能看到它想插手哪些消息
 - **自我进化**：`write_skill` 写技能、`add_mcp` 注册新 MCP 服务（热加载，不用重启）、`install_package` 装 npm 包
 - **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；子进程只拿 PATH 和模型 key，**不拿 QQ 密钥**
-- **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` / `run_script` / `restart_self` / `broadcast` / `send_to_group` 每次调用都记到 `data/audit.log`（tab 分隔：时间、会话、工具、参数、结果）
+- **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` / `run_script` / `restart_self` / `broadcast` / `send_to_group` / `git_sync` 每次调用都记到 `data/audit.log`（tab 分隔：时间、会话、工具、参数、结果）
 - **按 1.6G 实测内存做了内存预算**：主进程堆 320MB、MCP 子进程 160MB、每条 shell 命令 `ulimit -v 512MB`、`send_file` 单文件 50MB、pm2 RSS 超 420MB 自动重启；命令预估超过「可用 × 75%」直接拒绝，可用低于 300MB 时全部停摆只留救援命令
 
 ## 技术栈
@@ -35,7 +38,7 @@
 | 组件 | 用途 |
 | --- | --- |
 | [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) | QQ 官方 API v2 的 WebSocket 接收 + 发送封装 |
-| [DeepSeek API](https://platform.deepseek.com/) | `deepseek-chat`，OpenAI 兼容协议 |
+| [DeepSeek API](https://platform.deepseek.com/) | `deepseek-flash`（V4.1-Flash），OpenAI 兼容协议，原生支持图片输入 |
 | [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | 内置工具服务用 MCP 协议跑在子进程里 |
 | [cron-parser](https://www.npmjs.com/package/cron-parser) | 定时任务的 cron 解析与上下次时刻计算 |
 | [pngjs](https://www.npmjs.com/package/pngjs) | `draw_pixel` 的 PNG 编码（纯 JS，无原生依赖） |
@@ -49,7 +52,10 @@ src/
   bot.js           QQ 网关单例，各层共用
   sender.js        发送层：被动回复配额、引用气泡、Markdown 降级
   media.js         媒体发送器：图片 / 语音 / 视频 / 文件 / 卡片 / 文字转语音
-  incoming.js      入站附件：语音 / 图片 / 文件的下载与说明
+  incoming.js      入站附件：语音 / 图片 / 文件的下载与说明（按会话分目录）
+  pending.js       长回复分段后的尾巴暂存，等用户说「接着发」
+  sync.js          代码自同步：git add/commit/push（异步，带密钥拦截）
+  observe.js       观察模式的记录（JUDGE_MODE=observe 时写这里）
   trigger.js       触发层：两级过滤（程序规则 → 语义判断）、插话预算、观察模式
   deepseek.js      模型调用、工具定义与执行、记忆注入、后台子 agent
   env.js           环境变量解析与校验（缺失直接退出）
@@ -114,6 +120,13 @@ pnpm start
 
 看到 `[启动] 已连接` 就说明连上网关了，私聊直接发消息，群里 @ 它。
 
+改完代码想自检：
+
+```bash
+pnpm check     # 静态引用检查：未定义的调用、import 了不存在的导出
+node --check src/index.js
+```
+
 ## 配置
 
 只列常用项，全部可选项见 `.env.example`（括号里是默认值）。
@@ -129,7 +142,7 @@ pnpm start
 | `JUDGE_MODE` | 插话判断：`off` 不判断（默认）/ `observe` 只记录不回复 / `auto` 真的接话 |
 | `MAX_TOOL_ROUNDS` | 单次对话最多几轮工具调用（100） |
 | `TOOL_TIMEOUT_SECONDS` | 单个工具调用超时（60） |
-| `TASK_MAX_ROUNDS` / `TASK_CONCURRENCY` | 子助手最多几步（20）/ 并发任务数（3） |
+| `TASK_MAX_ROUNDS` | 子助手最多执行几步（20） |
 | `CONTEXT_WINDOW_TOKENS` | 上下文预算（1000000），超出后早期内容压成摘要 |
 | `MARKDOWN_REPLY` | 用 Markdown 发回复（false）。平台已开放自定义 Markdown |
 | `QUOTE_REPLY` | 引用气泡：`false` 关（默认）/ `judge` 只在插话时 / `always` 每条都引用 |
@@ -137,6 +150,11 @@ pnpm start
 | `ADMIN_OPENIDS` | 高危工具白名单（逗号分隔 openid）。机器人里发 `/id` 查自己的 openid |
 | `SHELL_GROUP_ENABLED` | 没配白名单时，`true` 才允许群里用高危工具（默认关闭） |
 | `SHELL_UNRESTRICTED` | `true` 时彻底放开命令黑名单，连读 `.env`、打印密钥都不拦（危险） |
+| `AUTO_SYNC_INTERVAL_MINUTES` | 代码自动提交间隔（30 分钟），`0` = 只靠退出时提交 |
+| `AUTO_SYNC_ON_EXIT` | 设 `false` 关掉「退出前自动提交」 |
+| `MEDIA_TTL_HOURS` | `downloads/incoming/` 附件保留时长（24 小时） |
+| `MAX_SEND_FILE_MB` | `send_file` 单文件上限（50MB，要整个读进内存才能上传） |
+| `TASK_CONCURRENCY` | 同时最多几个工单（2，2G 内存别超过 2） |
 
 ## 部署（pm2）
 
@@ -155,7 +173,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 
 - **同一个 AppID 只能有一个连接**，多开会互相踢下线，所以 `instances: 1`
 - 机器人会往 `data/`、`logs/`、`downloads/`、`tmp/` 写东西，这些目录已在 `.gitignore` 里
-- 小内存机器（1.5G 左右）跑视频转码要小心：`ffmpeg` 一个进程能吃掉 700M，建议加 2G swap，并把 `max_memory_restart` 留在 512M
+- 小内存机器（1.5G 左右）跑视频转码要小心：`ffmpeg` 一个进程能吃掉 700M，建议加 2G swap；`max_memory_restart` 默认 420M，让它在系统 OOM 之前自己重启
 
 ## 工具清单
 
@@ -165,7 +183,6 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | --- | --- |
 | `send_image` / `send_audio` / `send_video` / `send_file` | 发图片 / 语音 / 视频 / 任意文件（文件走 `msg_type=7`，群里显示成可下载卡片）。文件可发 `downloads/` 和项目根下的文件，`.env`、`data/`、`node_modules/` 不开放 |
 | `send_card` | 图文卡片：标题 + 描述 + 链接 + 封面图外链 |
-| `draw_pixel` | 画像素风 PNG（heart/star/fish/camera 预设，或自定义字符网格），手写 PNG 编码不依赖图形库 |
 | `speak` | 文字转语音，可传 `voice` 换音色（晓晓/晓伊/云希/云健/东北话/粤语等 9 种，见 `media.js` 的 `TTS_VOICES`）；后端按 edge-tts → python edge_tts → espeak-ng 依次探测 |
 | `remember` / `clear_memory` | 写长期记忆 / 清空当前会话全部记忆 |
 | `read_group_history` | 读当前群最近 N 条聊天记录（只限本群，跨群不可见） |
@@ -173,6 +190,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `broadcast` | 全服通报：同一段话推给所有待过的群，默认跳过当前群；群数超 3 个必须传 `confirm:true` 才真发，正文超长自动分段 |
 | `start_task` | 把复杂任务丢给后台子助手，边做边汇报 |
 | `schedule_task` / `list_schedules` / `remove_schedule` | 定时任务增删查 |
+| `git_sync` | 代码仓库操作：`status` 看状态 / `push` 提交推送 / `pull` 拉最新（管理员） |
 | `goal` | 跨轮目标跟踪：目标没完成就继续推进 |
 
 **内置 MCP 工具**（跑在子进程里，通过 MCP 协议调用）
@@ -186,6 +204,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `restart_self` | 重启自己：延迟几秒后 `pm2 restart <应用名>`，留时间把话说完再重启（应用名自动取 pm2 注入的 `name`） |
 | `read_file` / `write_file` / `list_dir` | 项目内文件读写（`.env`、`data/` 不可写） |
 | `download` | 下载网络文件到 `downloads/` |
+| `draw_pixel` | 画像素风 PNG（heart/star/fish/camera 预设，或自定义字符网格），PNG 编码用 pngjs（纯 JS，无原生依赖），所有人可用 |
 | `write_skill` / `list_skills` | 写技能 Markdown 到 `skills/`，后续对话自动注入 |
 | `add_mcp` / `list_mcp` | 注册新的 MCP 服务（热加载）/ 查看已注册服务 |
 | `install_package` | 装 npm 包 |
@@ -244,7 +263,7 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 - Worker 不直接对群说话，`say()` 统一经 Router，避免了多个任务抢发言、重复播报
 - 巡检站在外面看，能发现「进程还活着但没有实质进展」这种时间阈值抓不到的情况
 
-`scheduler.js` 自己解析 5 段 cron，到点把结果发回原会话。
+`scheduler.js` 用 `cron-parser` 解析 5 段 cron（手写实现容易在 `*/n`、范围和日期有效性上翻车），到点把结果发回原会话。
 
 **自我进化**：`write_skill` 写进 `skills/`，`add_mcp` 写进 `data/mcp-registry.json`，客户端每轮对话前检查注册表 mtime，变了就重连，所以装完立刻能用。
 
@@ -252,7 +271,7 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 
-- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task` 这 8 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
+- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`、`restart_self`、`send_to_group`、`broadcast`、`git_sync` 这 12 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
   没配白名单时：群里一律禁用，私聊放开。**一定要配**——否则任何 QQ 用户私聊机器人都能执行命令。
   机器人里发 `/id` 就能拿到自己的 openid。
 - `start_task` / `schedule_task` / `restart_self` 也算高危：前两个能间接调起子 agent 和定时任务去执行命令，后一个能重启服务，不挡住白名单就是摆设
@@ -319,10 +338,12 @@ cd /qq && git ls-remote origin main
 | `speak` 报「没有可用的语音合成后端」 | 服务器装一个：`pip3 install edge-tts`（音质好，需外网）或 `apt-get install espeak-ng`（离线） |
 | 群里只收到 @ 它的消息 | 群里把「机器人可获取的群聊消息范围」设成「获取群内全部消息」 |
 | 发了文件但对方没收到 | 让机器人发 `/diag`（管理员），它会实测 `send_image` 和 `send_file` 并把真实错误贴出来 |
+| 发了图它看不见 | 发 `/diag vision`：返回颜色就说明视觉正常，返回空内容会带上 `finish_reason` 和用量，据此判断是 token 不够还是账号不支持图片 |
+| 定时任务到点没跑 | 看日志里 `[定时] 触发` 有没有。启动补跑只覆盖最近 6 小时；`running` 卡死会在启动时自动清零 |
 | 日志里只有 `[同步] 服务器上不是 git 仓库` | 部署目录没初始化成仓库，按上面「在服务器上初始化 git 仓库」做 |
 | 自动提交报 `Permission denied (publickey)` | 服务器没配 GitHub SSH key，或者 Deploy Key 没勾 write access |
 | 机器人说「不在白名单里」 | 发 `/id` 拿到自己的 openid，填进 `.env` 的 `ADMIN_OPENIDS` 后重启 |
-| 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；`GROUP_JUDGE=true` 才会自动插话，关掉就完全不会乱接 |
+| 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；想要自动插话设 `JUDGE_MODE=auto`，只想先观察设 `observe`（用 `/observe` 看记录） |
 
 ## 开发与自检
 
