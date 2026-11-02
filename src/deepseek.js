@@ -49,6 +49,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'goal',
   'read_group_history',
+  'read_profile',
   'list_groups',
   'send_to_group',
   'broadcast',
@@ -305,6 +306,22 @@ const LOCAL_TOOLS = [
           reason: { type: 'string', description: '这次改动做了什么，会写进 commit message' },
         },
         required: ['mode'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_profile',
+      description:
+        '看群成员画像。不传 member 就列出本群活跃成员排行（发言数、活跃天数、时段）；' +
+        '传 member（昵称或 openid，支持部分匹配）看某个人的细节和最近说过的话。' +
+        '数据来自本群聊天记录，只能看当前群；想了解「群里都有谁」「这人是什么来路」用它。',
+      parameters: {
+        type: 'object',
+        properties: {
+          member: { type: 'string', description: '昵称或 openid，可不传' },
+        },
       },
     },
   },
@@ -648,6 +665,18 @@ async function runTool(
     }
   }
 
+  if (name === 'read_profile') {
+    if (!isToolAllowed('read_profile', scope, actor)) {
+      return `${denyReason('read_profile', scope, actor)}。群成员画像只能在群里看。`
+    }
+    if (typeof profileReader !== 'function') return '当前场景读不到群成员画像。'
+    try {
+      return await profileReader(args.member)
+    } catch (error) {
+      return `读画像失败：${error?.message ?? error}`
+    }
+  }
+
   if (name === 'list_groups') {
     if (typeof groupsReader !== 'function') return '当前场景读不到群列表。'
     try {
@@ -982,7 +1011,7 @@ export async function chat(sessionKey, userText, options = {}) {
     groupSender = null,
     groupsReader = null,
     broadcastSender = null,
-
+    profileReader = null,
     gitSync = null,
     startTask = null,
     scheduler = null,
@@ -1179,6 +1208,7 @@ export async function chat(sessionKey, userText, options = {}) {
         cardSender,
         speakSender,
         historyReader,
+        profileReader,
         groupSender,
         broadcastSender,
         groupsReader,
@@ -1244,6 +1274,7 @@ export async function runTaskAgent({
   speakSender,
   groupSender,
   broadcastSender,
+  profileReader,
   groupsReader,
   gitSync,
   scheduler,
@@ -1337,6 +1368,7 @@ export async function runTaskAgent({
         speakSender,
         groupSender,
         broadcastSender,
+        profileReader,
         groupsReader,
         gitSync,
         scheduler,

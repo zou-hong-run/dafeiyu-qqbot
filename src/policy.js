@@ -56,6 +56,7 @@ export const TOOL_POLICY = {
 
   remember: OPEN,
   read_group_history: GROUP_ONLY,
+  read_profile: GROUP_ONLY,
   list_groups: READ_ONLY,
   send_to_group: OPEN,
   broadcast: OPEN,

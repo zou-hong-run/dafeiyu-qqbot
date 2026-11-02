@@ -16,6 +16,7 @@ import { commitAndPush, describeStatus, pullLatest } from './sync.js'
 import { flushUsage, formatUsage } from './usage.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
+import { formatProfile } from './profiles.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
 import { chunkText, clip, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
@@ -307,6 +308,14 @@ function historyReaderForGroup(groupId) {
   }
 }
 
+// 群成员画像：只能看当前群
+function profileReaderFor(event) {
+  const groupId = event?.group_id ?? event?.target?.id ?? ''
+  if (!groupId) return null
+
+  return async (member) => formatProfile(String(groupId), member ?? '')
+}
+
 // 按 target 主动发消息（定时任务、跨群播报都用它，不依赖 event）
 function sendToTarget(target, payload) {
   if (target?.type === 'group') return bot.group(target.id).send(payload)
@@ -371,6 +380,7 @@ async function runScheduledTask(task) {
     speakSender: speakSenderFor(null, send),
     scheduler: schedulerForTarget(sessionKey, task.target),
     historyReader: historyReaderForGroup(task.target.type === 'group' ? task.target.id : ''),
+    profileReader: profileReaderFor({ target: task.target }),
     groupSender: groupSenderFor(null),
     broadcastSender: broadcastSenderFor(null),
     groupsReader: groupsReaderFor(),
@@ -830,6 +840,7 @@ async function handleMessage(event, trigger = 'at') {
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
       historyReader: historyReaderFor(event),
+      profileReader: profileReaderFor(event),
       groupSender: groupSenderFor(event),
       groupsReader: groupsReaderFor(),
       gitSync: gitSyncFor(),
