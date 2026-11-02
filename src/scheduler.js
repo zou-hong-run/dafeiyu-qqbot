@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { CronExpressionParser } from 'cron-parser'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
@@ -38,92 +39,49 @@ function persist() {
   }
 }
 
-function matchField(field, value) {
-  if (field === '*' || field === '?') return true
-
-  for (const part of String(field).split(',')) {
-    if (part.includes('/')) {
-      const [base, stepRaw] = part.split('/')
-      const step = Number(stepRaw)
-      const start = base === '*' ? 0 : Number(base)
-      if (!Number.isFinite(step) || step <= 0) continue
-      if (value >= start && (value - start) % step === 0) return true
-      continue
-    }
-
-    if (part.includes('-')) {
-      const [a, b] = part.split('-').map(Number)
-      if (Number.isFinite(a) && Number.isFinite(b) && value >= a && value <= b) return true
-      continue
-    }
-
-    if (Number(part) === value) return true
-  }
-
-  return false
-}
-
+// cron 解析交给 cron-parser：手写实现容易在 */n、范围、跨月这些地方翻车
 export function cronMatches(expr, date = new Date()) {
-  const fields = String(expr ?? '').trim().split(/\s+/)
-  if (fields.length !== 5) return false
+  const raw = String(expr ?? '').trim()
+  if (raw.split(/\s+/).length !== 5) return false
 
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields
-  return (
-    matchField(minute, date.getMinutes()) &&
-    matchField(hour, date.getHours()) &&
-    matchField(dayOfMonth, date.getDate()) &&
-    matchField(month, date.getMonth() + 1) &&
-    matchField(dayOfWeek, date.getDay())
-  )
+  try {
+    // 以「前一分钟」为基准取 next()，落在当前这一分钟就算命中
+    const from = new Date(date.getTime() - 60_000)
+    const next = CronExpressionParser.parse(raw, { currentDate: from }).next().toDate()
+    return Math.floor(next.getTime() / 60_000) === Math.floor(date.getTime() / 60_000)
+  } catch {
+    return false
+  }
 }
 
-// 从 from 往前找最近一次命中 cron 的分钟，找不到返回 null
-export function previousMatch(cronExpr, from = new Date(), maxMinutes = 60 * 24 * 8) {
-  const cursor = new Date(from)
-  cursor.setSeconds(0, 0)
-  for (let i = 0; i <= maxMinutes; i += 1) {
-    if (cronMatches(cronExpr, cursor)) return cursor.getTime()
-    cursor.setMinutes(cursor.getMinutes() - 1)
+// 上一次命中 cron 的时刻，找不到返回 null
+export function previousMatch(cronExpr, from = new Date()) {
+  const raw = String(cronExpr ?? '').trim()
+  if (raw.split(/\s+/).length !== 5) return null
+
+  try {
+    return CronExpressionParser.parse(raw, { currentDate: from }).prev().toDate().getTime()
+  } catch {
+    return null
   }
-  return null
 }
 
 export function validateCron(expr) {
-  const fields = String(expr ?? '').trim().split(/\s+/)
-  if (fields.length !== 5) {
+  const raw = String(expr ?? '').trim()
+  if (!raw) return 'cron 不能为空'
+
+  if (raw.split(/\s+/).length !== 5) {
     return 'cron 必须是 5 段：分 时 日 月 周，例如 30 8 * * * 表示每天 8:30'
   }
 
-  const ranges = [
-    [0, 59, '分钟'],
-    [0, 23, '小时'],
-    [1, 31, '日'],
-    [1, 12, '月'],
-    [0, 6, '星期'],
-  ]
-
-  for (let i = 0; i < 5; i += 1) {
-    const [min, max, label] = ranges[i]
-    const field = fields[i]
-    if (field === '*' || field === '?') continue
-
-    for (const part of field.split(',')) {
-      const numbers = part
-        .replace(/\//g, '-')
-        .split('-')
-        .filter((item) => item !== '' && item !== '*')
-        .map(Number)
-
-      for (const value of numbers) {
-        if (!Number.isFinite(value) || value < min || value > max) {
-          return `${label}字段「${part}」超出范围（${min}-${max}）`
-        }
-      }
-    }
+  try {
+    CronExpressionParser.parse(raw)
+    return null
+  } catch (error) {
+    return `cron 表达式不合法：${String(error?.message ?? error).slice(0, 80)}`
   }
-
-  return null
 }
+
 
 function describeCron(expr) {
   const [minute, hour, dom, month, dow] = String(expr).trim().split(/\s+/)

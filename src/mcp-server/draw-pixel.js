@@ -1,10 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
+import { PNG } from 'pngjs'
 
 // 像素画工具：只按预设图形或字符网格画 PNG，不执行任何命令
-// 手写 PNG 编码是为了不依赖原生图形库——2G 内存的机器装 canvas 太重，也省得编译
+// PNG 编码用 pngjs（纯 JS，无原生依赖），比手写 CRC32 + IHDR 靠谱
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const outDir = path.join(projectRoot, 'downloads')
 
@@ -14,58 +14,10 @@ const MAX_SCALE = 20
 const MAX_OUTPUT_PIXELS = 4_000_000
 const MAX_COLORS = 12
 
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256)
-  for (let n = 0; n < 256; n += 1) {
-    let c = n
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    table[n] = c
-  }
-  return table
-})()
-
-function crc32(buffer) {
-  let c = -1
-  for (let i = 0; i < buffer.length; i += 1) c = CRC_TABLE[(c ^ buffer[i]) & 0xff] ^ (c >>> 8)
-  return (c ^ -1) >>> 0
-}
-
-function pngChunk(type, data) {
-  const length = Buffer.alloc(4)
-  length.writeUInt32BE(data.length, 0)
-
-  const typeBuf = Buffer.from(type, 'ascii')
-  const crcBuf = Buffer.alloc(4)
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0)
-
-  return Buffer.concat([length, typeBuf, data, crcBuf])
-}
-
 function encodePng(width, height, rgba) {
-  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(width, 0)
-  ihdr.writeUInt32BE(height, 4)
-  ihdr[8] = 8 // 位深
-  ihdr[9] = 6 // RGBA
-  ihdr[10] = 0
-  ihdr[11] = 0
-  ihdr[12] = 0
-
-  const stride = width * 4
-  const raw = Buffer.alloc((stride + 1) * height)
-  for (let y = 0; y < height; y += 1) {
-    raw[y * (stride + 1)] = 0 // filter: none
-    rgba.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride)
-  }
-
-  return Buffer.concat([
-    signature,
-    pngChunk('IHDR', ihdr),
-    pngChunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
-    pngChunk('IEND', Buffer.alloc(0)),
-  ])
+  const png = new PNG({ width, height })
+  rgba.copy(png.data)
+  return PNG.sync.write(png, { deflateLevel: 9 })
 }
 
 const NAMED_COLORS = {

@@ -37,6 +37,8 @@
 | [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) | QQ 官方 API v2 的 WebSocket 接收 + 发送封装 |
 | [DeepSeek API](https://platform.deepseek.com/) | `deepseek-chat`，OpenAI 兼容协议 |
 | [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | 内置工具服务用 MCP 协议跑在子进程里 |
+| [cron-parser](https://www.npmjs.com/package/cron-parser) | 定时任务的 cron 解析与上下次时刻计算 |
+| [pngjs](https://www.npmjs.com/package/pngjs) | `draw_pixel` 的 PNG 编码（纯 JS，无原生依赖） |
 | pm2 | 常驻、崩溃自重启、开机自启 |
 
 ## 目录结构
