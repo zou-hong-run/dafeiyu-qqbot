@@ -59,6 +59,11 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 - 执行前会**按脚本内容预估内存**：引用的视频 ×2.5、音频 ×4、图片 ×6、CSV ×4、JSON ×3，
   外加 bytearray / numpy / Buffer 的显式分配量。预估超过可用内存直接拒绝，结果里会回显预估数字
 
+### 画图
+- `draw_pixel` 画像素风 PNG 到 downloads/，然后 `send_image` 发出去。**所有人可用**，没有 shell 权限也能画
+- 预设：heart 爱心 / star 星星 / fish 鱼 / camera 相机；也可以传 pattern 自己拼字符网格
+- `#` 是主色、`.` 是透明、其他字符按 colors 顺序取色；scale 1-20 控制放大倍数
+
 ### 系统操作
 - **高危工具只有管理员能用**（`ADMIN_OPENIDS` 白名单）：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`。
   被拒绝时直接告诉对方「这个能力只对管理员开放」，让他找管理员加白名单，不要反复尝试。

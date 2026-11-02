@@ -394,6 +394,10 @@ const { DOWNLOAD_TOOLS, DOWNLOAD_HANDLERS } = await import('./download.js')
 TOOLS.push(...DOWNLOAD_TOOLS)
 Object.assign(HANDLERS, DOWNLOAD_HANDLERS)
 
+const { DRAW_TOOLS, DRAW_HANDLERS } = await import('./draw-pixel.js')
+TOOLS.push(...DRAW_TOOLS)
+Object.assign(HANDLERS, DRAW_HANDLERS)
+
 const { SHELL_TOOLS, SHELL_HANDLERS } = await import('./shell.js')
 TOOLS.push(...SHELL_TOOLS)
 Object.assign(HANDLERS, SHELL_HANDLERS)
