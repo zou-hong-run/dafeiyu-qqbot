@@ -55,6 +55,7 @@ export const TOOL_POLICY = {
   dns: READ_ONLY,
 
   remember: OPEN,
+  note_situation: OPEN,
   read_group_history: GROUP_ONLY,
   read_profile: GROUP_ONLY,
   list_groups: READ_ONLY,

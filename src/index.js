@@ -2,9 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
-import { chat, proactiveReply, summarizeGroup, runTaskAgent, testVision } from './deepseek.js'
+import { chat, proactiveReply, summarizeGroup, runTaskAgent, testVision, followUpMessage } from './deepseek.js'
 import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
-import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
+import { initScheduler, addSchedule, listSchedules, removeSchedule, cronMatches } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
@@ -19,6 +19,8 @@ import * as observe from './observe.js'
 import { formatProfile } from './profiles.js'
 import { flushKnowledge, knowledgePrompt, rebuildAll } from './knowledge.js'
 import { findCandidates, formatCandidates, noteProactive, shouldProactive } from './proactive.js'
+import { dueFollowUps, flushSituations, markFollowedUp } from './situations.js'
+import { generateHotTake } from './hot-takes.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
 import { chunkText, clip, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
@@ -449,6 +451,106 @@ async function runProactiveScan() {
     } catch (error) {
       console.warn(`[主动] ${groupId.slice(0, 12)}… 失败：`, error?.message ?? error)
     }
+  }
+}
+
+// 回访：之前记下的「还在进行中的事」，隔几小时主动问一句
+async function runFollowUps() {
+  if (process.env.FOLLOWUP_ENABLED === 'false') return
+
+  const hour = new Date().getHours()
+  const quietStart = Number(process.env.FOLLOWUP_QUIET_START || 23)
+  const quietEnd = Number(process.env.FOLLOWUP_QUIET_END || 8)
+  if (quietStart > quietEnd ? hour >= quietStart || hour < quietEnd : hour >= quietStart && hour < quietEnd) return
+
+  const minAgeHours = Number(process.env.FOLLOWUP_MIN_AGE_HOURS || 6)
+  const due = dueFollowUps({ minAgeMs: minAgeHours * 3600_000, limit: 1 })
+  if (due.length === 0) return
+
+  for (const item of due) {
+    try {
+      const text = await followUpMessage({
+        person: item.person,
+        topic: item.topic,
+        mood: item.mood,
+        since: `${Math.round((Date.now() - item.at) / 3600_000)} 小时前`,
+        personaName: env.personaName,
+      })
+
+      // 生成了空串就是判断不该提，标记掉别每次都重算
+      markFollowedUp(item.sessionKey, item.id)
+      if (!text) continue
+
+      const [type, ...rest] = item.sessionKey.split(':')
+      const id = rest.join(':')
+      if (!id) continue
+
+      await sendToTarget({ type: type === 'group' ? 'group' : 'user', id }, text)
+
+      if (type === 'group') {
+        groupLog.record(id, {
+          t: Date.now(),
+          u: 'bot',
+          n: env.personaName,
+          c: text.replace(/\s+/g, ' ').slice(0, 200),
+          id: `bot-${Date.now()}`,
+        })
+      }
+
+      console.log(`[回访] ${item.sessionKey.slice(0, 16)}… 提起「${item.topic.slice(0, 20)}」：${text.slice(0, 40)}`)
+    } catch (error) {
+      console.warn('[回访] 失败：', error?.message ?? error)
+    }
+  }
+}
+
+// 热点吐槽：自己去搜当天新闻，挑一条在群里说两句
+function pickActiveGroup() {
+  if (process.env.HOT_TAKE_TARGET) return String(process.env.HOT_TAKE_TARGET).trim()
+
+  try {
+    const dir = path.join(dataDir, 'groups')
+    const files = fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith('.jsonl'))
+      .map((name) => ({ id: name.slice(0, -6), mtime: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+
+    // 太久的群不提，说明没人说话了
+    if (files.length === 0) return ''
+    if (Date.now() - files[0].mtime > 7 * 86400_000) return ''
+    return files[0].id
+  } catch {
+    return ''
+  }
+}
+
+async function runHotTake() {
+  if (process.env.HOT_TAKE_ENABLED !== 'true') return
+
+  const groupId = pickActiveGroup()
+  if (!groupId) {
+    console.log('[热点] 找不到活跃的群，跳过')
+    return
+  }
+
+  const take = await generateHotTake({ personaName: env.personaName })
+  if (!take) return
+
+  try {
+    await sendToTarget({ type: 'group', id: groupId }, take.text)
+
+    groupLog.record(groupId, {
+      t: Date.now(),
+      u: 'bot',
+      n: env.personaName,
+      c: take.text.replace(/\s+/g, ' ').slice(0, 200),
+      id: `bot-${Date.now()}`,
+    })
+
+    console.log(`[热点] ${groupId.slice(0, 12)}… 吐槽「${take.topic}」：${take.text.slice(0, 40)}`)
+  } catch (error) {
+    console.warn('[热点] 发送失败：', error?.message ?? error)
   }
 }
 
@@ -1072,6 +1174,7 @@ async function shutdown(signal) {
     flushTickets()
     flushUsage()
     flushKnowledge()
+    flushSituations()
   } catch (error) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
@@ -1372,6 +1475,38 @@ try {
         `（每小时最多 ${process.env.PROACTIVE_MAX_PER_HOUR || 2} 次，` +
         `${process.env.PROACTIVE_QUIET_START || 23}-${process.env.PROACTIVE_QUIET_END || 8} 点静默）`,
     )
+  }
+
+  // 回访：隔一段时间把「还在进行中的事」拎出来问一句
+  const followupMinutes = Number(process.env.FOLLOWUP_INTERVAL_MINUTES ?? 60)
+  if (process.env.FOLLOWUP_ENABLED !== 'false' && followupMinutes > 0) {
+    const followupTimer = setInterval(() => {
+      runFollowUps().catch((error) => console.warn('[回访] 扫描异常：', error?.message ?? error))
+    }, followupMinutes * 60_000)
+    followupTimer.unref?.()
+
+    console.log(
+      `[回访] 每 ${followupMinutes} 分钟看一次手头没结的事` +
+        `（至少隔 ${process.env.FOLLOWUP_MIN_AGE_HOURS || 6} 小时才提，` +
+        `${process.env.FOLLOWUP_QUIET_START || 23}-${process.env.FOLLOWUP_QUIET_END || 8} 点静默）`,
+    )
+  }
+
+  // 热点吐槽：到点自己去搜新闻，挑一条在群里说两句
+  const hotTakeCron = process.env.HOT_TAKE_CRON || '0 12,20 * * *'
+  if (process.env.HOT_TAKE_ENABLED === 'true') {
+    let lastHotKey = ''
+    const hotTakeTimer = setInterval(() => {
+      const now = new Date()
+      const key = `${now.getFullYear()}${now.getMonth()}${now.getDate()}${now.getHours()}${now.getMinutes()}`
+      if (key === lastHotKey) return
+      if (!cronMatches(hotTakeCron, now)) return
+      lastHotKey = key
+      runHotTake().catch((error) => console.warn('[热点] 执行异常：', error?.message ?? error))
+    }, 30_000)
+    hotTakeTimer.unref?.()
+
+    console.log(`[热点] 已开启，按 cron「${hotTakeCron}」去搜当天热点自己聊`)
   }
 
   const mediaTtlHours = Number(process.env.MEDIA_TTL_HOURS || 24)

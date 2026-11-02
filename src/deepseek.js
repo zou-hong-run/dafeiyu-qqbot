@@ -7,6 +7,7 @@ import { denyReason, isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './polic
 import { recordUsage } from './usage.js'
 import { noteToolResult } from './pitfalls.js'
 import { knowledgePrompt } from './knowledge.js'
+import { noteSituation, resolveSituation, situationPrompt } from './situations.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
@@ -33,7 +34,7 @@ let usageKey = 'unknown'
 
 // 所有模型调用统一走这里：原样返回结果，顺手记一笔用量
 async function createCompletion(payload) {
-  const completion = await createCompletion(payload)
+  const completion = await client.chat.completions.create(payload)
   const usage = completion?.usage
   if (usage) {
     recordUsage({
@@ -48,6 +49,7 @@ async function createCompletion(payload) {
 const summarizing = new Set()
 const LOCAL_TOOL_NAMES = new Set([
   'remember',
+  'note_situation',
   'goal',
   'read_group_history',
   'read_profile',
@@ -82,6 +84,27 @@ const LOCAL_TOOLS = [
           text: { type: 'string', description: '一句话事实，如「用户是做前端的，主要在写 React」' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'note_situation',
+      description:
+        '记下一件「正在进行中、还没了结」的具体事情：谁在为什么事发愁、期待、卡住。' +
+        '和 remember 的区别是 remember 记不变的事实（叫什么、做什么），这里记有始有终的事' +
+        '（在等审批、接口一直报错、明天要考试）。记下来之后，隔一段时间你可以主动回访一句。' +
+        '对方说这件事解决了、或者你确认已经过去，就用 resolved=true 标记为已完成。',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: '一句话说清这件事，如「接口一直报 500 调不通」' },
+          person: { type: 'string', description: '当事人的名字或昵称，不知道就留空' },
+          mood: { type: 'string', description: '情绪，两个字以内：烦、急、期待、担心、累' },
+          resolved: { type: 'boolean', description: 'true 表示这件事已经了结，不需要再回访' },
+        },
+        required: ['topic'],
       },
     },
   },
@@ -441,6 +464,10 @@ function buildSystemPrompt(sessionKey, userText) {
     if (knowledge) parts.push(knowledge)
   }
 
+  // 手头还没了结的事：谁说自己在等什么、卡在哪，聊到相关话题顺手接一句
+  const ongoing = situationPrompt(sessionKey)
+  if (ongoing) parts.push(ongoing)
+
   if (env.markdownReply) {
     parts.push(
       '【输出格式（优先于上文的格式要求）】当前环境支持 Markdown 渲染：可以用 **粗体**、- 列表、' +
@@ -554,6 +581,28 @@ async function runTool(
     }
     const saved = addLongTerm(sessionKey, args.text)
     return saved ? `已记住：${args.text}` : '这条已经记过了。'
+  }
+
+  if (name === 'note_situation') {
+    if (!isToolAllowed('note_situation', scope, actor)) {
+      return `${denyReason('note_situation', scope, actor)}。`
+    }
+    if (args.resolved) {
+      const done = resolveSituation(sessionKey, args.id)
+      return done ? `已标记解决：${done.topic}` : '没找到对应的事，可能已经标记过了。'
+    }
+    try {
+      const result = noteSituation(sessionKey, {
+        person: args.person,
+        topic: args.topic,
+        mood: args.mood,
+      })
+      return result.duplicated
+        ? `这件事之前记过了，已更新时间：${result.item.topic}`
+        : `记下了：${result.item.topic}（id ${result.item.id}）`
+    } catch (error) {
+      return `记录失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'send_image') {
@@ -1038,6 +1087,88 @@ ${text}`
   }
 }
 
+// 回访：把之前记下的「还在进行中的事」拎出来，主动问一句
+export async function followUpMessage({ person = '', topic = '', mood = '', since = '', personaName = '' } = {}) {
+  const text = String(topic ?? '').trim()
+  if (!text) return ''
+
+  const systemPrompt = `你是「${personaName || env.personaName}」，一个技术女宅，住在 QQ 里的程序员搭子。
+现在你要主动跟对方提一件之前记下的事，不是回答，是你自己想起来问的。
+
+规则：
+- 1 到 2 句，60 字以内，像随手发的一条消息，不要开场白
+- 只说事本身，不用「我记下了」「根据记录」「上次你说过」这种腔调，可以说「那个 xxx 后来咋样了」
+- 别追问细节，别说教，别给解决方案清单；想帮忙就一句「要看看吗」
+- 如果这件事已经不适合再提（涉及隐私细节、明显是小事一桩、或事情本身敏感），只输出四个字母：SKIP`
+
+  const parts = [`对方：${person || '这个群里的某个人'}`, `当时的事：${text}`]
+  if (mood) parts.push(`当时的情绪：${mood}`)
+  if (since) parts.push(`距今：${since}`)
+
+  try {
+    const completion = await createCompletion({
+      model: env.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: parts.join('\n') },
+      ],
+      max_tokens: 200,
+    })
+
+    const answer = String(completion.choices?.[0]?.message?.content ?? '').trim()
+    if (!answer || answer.toUpperCase().startsWith('SKIP') || answer.length < 4) return ''
+    return answer
+  } catch (error) {
+    console.error('[回访] 生成失败：', error?.message ?? error)
+    return ''
+  }
+}
+
+// 热点吐槽：搜一条当天热点，用群友的语气损两句
+export async function hotTakeReply({ headlines = '', recent = [], personaName = '' } = {}) {
+  const text = String(headlines ?? '').trim()
+  if (!text) return null
+
+  const avoid = recent.length > 0 ? `\n最近已经吐槽过这些，别重复：${recent.join('；')}` : ''
+
+  const systemPrompt = `你是「${personaName || env.personaName}」，一个技术女宅，正在群里潜水。
+你刚刷到几条今天的新闻，想挑一条吐槽两句，没人问你，是你自己想说的。
+
+规则：
+- 只挑一条最值得说的，别罗列新闻，别用「据报道」「值得关注」这种播报腔
+- 一句到两句，80 字以内，口语，可以损、可以自嘲，但别装专家
+- 不讲大道理，不写行业分析，不给结论，不喊口号
+- 你自己不熟的领域别装懂，宁可换一条说
+- 政治、地域、性别对立、灾难伤亡、明星私生活一律不碰；没有合适的就只输出四个字母：SKIP
+- 输出两行：第一行是话题（10 字以内，不带标点），第二行是吐槽正文${avoid}`
+
+  try {
+    const completion = await createCompletion({
+      model: env.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `今天的新闻：\n${text}` },
+      ],
+      max_tokens: 300,
+    })
+
+    const raw = String(completion.choices?.[0]?.message?.content ?? '').trim()
+    if (!raw || raw.toUpperCase().startsWith('SKIP')) return null
+
+    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean)
+    if (lines.length === 0) return null
+
+    const topic = lines[0].replace(/[「」【】:：]/g, '').slice(0, 20)
+    const body = (lines.length > 1 ? lines.slice(1).join('\n') : lines[0]).trim()
+    if (body.length < 6) return null
+
+    return { topic, text: body }
+  } catch (error) {
+    console.error('[热点] 生成失败：', error?.message ?? error)
+    return null
+  }
+}
+
 export async function chat(sessionKey, userText, options = {}) {
   usageKey = sessionKey
 
@@ -1494,7 +1625,8 @@ export async function verifyCompletion(goal, transcript) {
   }
 }
 
-export async function summarizeGroup(transcript, label = '') {  const completion = await createCompletion({
+export async function summarizeGroup(transcript, label = '') {
+  const completion = await createCompletion({
     model: env.model,
     messages: [
       {
