@@ -9,7 +9,7 @@ import { cleanWorkspace, workspaceStats } from './workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
 import { ensureSkillsDir } from './skills.js'
-import { evictIdleSessions, recentSessions, reset, stats, flush } from './memory.js'
+import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, flush } from './memory.js'
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './sync.js'
@@ -21,6 +21,7 @@ import { flushKnowledge, knowledgePrompt, rebuildAll } from './knowledge.js'
 import { findCandidates, formatCandidates, noteProactive, shouldProactive } from './proactive.js'
 import { dueFollowUps, flushSituations, markFollowedUp } from './situations.js'
 import { generateHotTake } from './hot-takes.js'
+import { listBackups, runBackup } from './backup.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { putChoice, resolveChoice, choiceText } from './choices.js'
 import { mergeMessage } from './merge.js'
@@ -36,7 +37,16 @@ import {
   unmuteGroup,
 } from './quiet.js'
 import { bot } from './bot.js'
-import { chunkText, clip, isStaleMessage, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
+import {
+  chunkText,
+  clip,
+  isStaleMessage,
+  markQuote,
+  passiveCountOf,
+  sendLongReply,
+  sendReply,
+  withSendRetry,
+} from './sender.js'
 import { pendingCount, takePending } from './pending.js'
 import {
   audioSenderFor,
@@ -336,8 +346,10 @@ function profileReaderFor(event) {
 
 // 按 target 主动发消息（定时任务、跨群播报都用它，不依赖 event）
 function sendToTarget(target, payload) {
-  if (target?.type === 'group') return bot.group(target.id).send(payload)
-  return bot.user(target.id).send(payload)
+  if (target?.type === 'group') {
+    return withSendRetry(() => bot.group(target.id).send(payload), '主动群消息')
+  }
+  return withSendRetry(() => bot.user(target.id).send(payload), '主动私聊消息')
 }
 
 // 主对话用：从 event 取群 id
@@ -654,6 +666,75 @@ function notifierFor(event) {
   }
 }
 
+// /config：把当前生效的配置列出来，不配 .env 时也能看清自己在跑什么
+function configSummary() {
+  const tools = getTools()
+  const mem = (() => {
+    try {
+      const lines = fs.readFileSync('/proc/meminfo', 'utf8')
+      const total = Number(lines.match(/MemTotal:\s+(\d+)/)?.[1] ?? 0) / 1024
+      const available = Number(lines.match(/MemAvailable:\s+(\d+)/)?.[1] ?? 0) / 1024
+      return `总 ${Math.round(total)}MB / 可用 ${Math.round(available)}MB`
+    } catch {
+      return '读不到（非 Linux）'
+    }
+  })()
+
+  const backups = listBackups(3)
+  const backupText =
+    backups.length === 0 ? '还没备份' : backups.map((item) => `${item.name}(${(item.size / 1024).toFixed(0)}KB)`).join(' ')
+
+  return [
+    `模型：${env.model}｜上下文 ${Math.round(env.contextWindowTokens / 1000)}K（预算 ${Math.round(env.contextBudgetRatio * 100)}%）`,
+    `记忆：短期 ${env.historyTurns} 轮｜会话闲置 ${Math.round(env.sessionTtlMs / 60000)} 分钟清空`,
+    `工具：${env.toolsEnabled ? '开' : '关'}（已加载 ${tools.length} 个）｜最多 ${env.maxToolRounds} 轮｜单次超时 ${Math.round(env.toolTimeoutMs / 1000)}s`,
+    `高危工具：${env.adminOpenIds.length > 0 ? `白名单 ${env.adminOpenIds.length} 人` : `私聊放开、群里${env.shellGroupEnabled ? '放开' : '禁用'}`}`,
+    `群聊：名字触发${env.groupAutoReply ? '开' : '关'}（冷却 ${env.groupTriggerCooldown / 1000}s）｜自动判断 ${env.judgeMode}（冷却 ${env.judgeCooldown / 1000}s，每群每小时≤${env.judgeHourlyLimit}）`,
+    `主动：接话${env.proactive.enabled ? `开 ${env.proactive.intervalMinutes} 分钟` : '关'}｜回访${env.followup.enabled ? `开 ≥${env.followup.minAgeHours}h` : '关'}｜热点${env.hotTake.enabled ? `开 ${env.hotTake.cron}` : '关'}`,
+    `输出：单条输入 ≤${env.maxInputChars} 字｜回复 ≤${env.replyMaxChars} 字/条｜连发合并 ${env.mergeWindowMs}ms｜流式${env.streamReply ? '开' : '关'}｜Markdown${env.markdownReply ? '开' : '关'}｜引用 ${env.quoteReply || '关'}`,
+    `日志：详细${env.toolDebug ? '开' : '关'}｜级别 ${env.logLevel}`,
+    `内存：${mem}｜主进程堆 ${process.env.MAIN_HEAP_MB || 320}MB｜MCP ${process.env.MCP_HEAP_MB || 160}MB`,
+    `备份：${backupText}`,
+  ].join('\n')
+}
+
+// 命令清单：群友只需要知道常用的，管理员再多一段
+function helpText(scope, admin) {
+  const common = [
+    '记忆',
+    '  /reset 清空当前会话（长期事实也清）',
+    '  /memory 看记忆用量',
+    '  /memory list 看长期记忆都记了什么',
+    '  /forget 关键词 只删含这个词的那几条',
+    '  /id 查自己的 openid',
+  ]
+
+  const chat = ['日常', '  接着发 把上一条没发完的长内容补出来', '  /help 就是这份清单']
+
+  const group = ['群聊', '  /总结 复盘最近一段聊天', '  安静 30 让我闭嘴 30 分钟（这段时间只有 @ 才回）', '  可以说话了 恢复']
+
+  const adminPart = [
+    '管理员',
+    '  /task 目标 建工单交给后台跑',
+    '  /tasks 看正在跑的工单，/kill 工单号 终止',
+    '  /cost [天数] 看 token 花销',
+    '  /diag 发送自检（/diag vision 测读图）',
+    '  /observe 看插话判断记录',
+    '  /clean [all] 清临时文件，加 all 连下载目录一起清',
+  ]
+
+  if (scope === 'group') {
+    const lines = [...group, ...chat]
+    if (admin) lines.push('', ...adminPart, '', '记忆那几个命令（/reset /memory /forget）在群里只给管理员用。')
+    else lines.push('', '记忆管理和高危操作（跑命令、改文件、建后台任务）只有管理员能用。')
+    return lines.join('\n')
+  }
+
+  const lines = [...common, '', ...chat]
+  if (admin) lines.push('', ...adminPart)
+  return lines.join('\n')
+}
+
 async function handleMessage(event, trigger = 'at', overrideText = '') {
   let text = (overrideText || event.content || '').trim()
   const inbound = extractInbound(event)
@@ -878,13 +959,22 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
     return
   }
 
+  // 记忆类命令在群里只给管理员：群友不该能清掉整个群的上下文
+  const denyNonAdmin = async () => {
+    if (isAdmin(scope, event.user_id ?? '')) return false
+    await sendReply(event, '这个命令只有管理员能用（openid 要写进 .env 的 ADMIN_OPENIDS）。')
+    return true
+  }
+
   if (text === '/reset' || text === '重置对话' || text === '清空记忆' || text === '重新开始') {
+    if (await denyNonAdmin()) return
     reset(key)
     await sendReply(event, '记忆已清空，我们重新开始吧。')
     return
   }
 
   if (text === '/memory' || text === '记忆状态') {
+    if (await denyNonAdmin()) return
     const current = stats(key)
     await sendReply(event, 
       `短期记忆：${current.shortTerm} 轮对话（约 ${current.historyTokens} tokens）\n` +
@@ -892,6 +982,50 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
         `长期记忆：${current.longTerm} 条事实\n` +
         `上下文预算：${Math.floor((env.contextWindowTokens * env.contextBudgetRatio) / 1000)}K tokens（窗口 ${Math.floor(env.contextWindowTokens / 1000)}K）`,
     )
+    return
+  }
+
+  if (text === '/memory list' || text === '/记忆列表') {
+    if (await denyNonAdmin()) return
+    const items = listLongTerm(key, 20)
+    if (items.length === 0) {
+      await sendReply(event, '长期记忆还是空的，聊到值得记的事我会自己记。')
+      return
+    }
+    await sendReply(
+      event,
+      `长期记忆（最近 ${items.length} 条）：\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n')}\n\n` +
+        '要删某一条就发 /forget 关键词',
+    )
+    return
+  }
+
+  if (text.startsWith('/forget ') || text.startsWith('忘掉 ')) {
+    if (await denyNonAdmin()) return
+    const keyword = text.replace(/^(\/forget\s+|忘掉\s+)/, '').trim()
+    if (!keyword) {
+      await sendReply(event, '用法：/forget 关键词，会把长期记忆里含这个词的条目删掉')
+      return
+    }
+
+    const removed = forget(key, keyword)
+    await sendReply(
+      event,
+      removed.length === 0
+        ? `长期记忆里没有含「${keyword}」的条目。发 /memory list 看现在都记了什么。`
+        : `已忘掉 ${removed.length} 条：\n${removed.map((item) => `- ${item}`).join('\n')}`,
+    )
+    return
+  }
+
+  if (text === '/help' || text === '/帮助' || text === '帮助') {
+    await sendReply(event, helpText(scope, isAdmin(scope, event.user_id ?? '')))
+    return
+  }
+
+  if (text === '/config' || text === '/配置') {
+    if (await denyNonAdmin()) return
+    await sendReply(event, configSummary())
     return
   }
 
@@ -1388,6 +1522,13 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   })
 }
 
+// 未处理的 Promise 拒绝：Node 22 默认会直接把进程干掉，这里只记日志，别让一条后台任务拖死整机
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? `${reason.message}
+${reason.stack ?? ''}` : String(reason)
+  console.error('[未处理的拒绝]', message.slice(0, 800))
+})
+
 process.on('uncaughtException', (error) => {
   console.error('[未捕获异常]', error)
   shutdown('uncaughtException')
@@ -1713,6 +1854,26 @@ try {
     hotTakeTimer.unref?.()
 
     console.log(`[热点] 已开启，按 cron「${hotTakeCron}」去搜当天热点自己聊`)
+  }
+
+  // 每天把记忆和群记录备一份，机器重装不至于全丢
+  const backupTimer = setInterval(() => {
+    try {
+      const result = runBackup()
+      if (!result.skipped) {
+        console.log(`[备份] ${result.stamp}：${result.files} 个文件，${(result.bytes / 1024).toFixed(1)} KB`)
+      }
+    } catch (error) {
+      console.warn('[备份] 出错：', error?.message ?? error)
+    }
+  }, 6 * 60 * 60 * 1000)
+  backupTimer.unref?.()
+
+  try {
+    const first = runBackup()
+    if (!first.skipped) console.log(`[备份] 今天的备份已完成：${first.files} 个文件`)
+  } catch (error) {
+    console.warn('[备份] 启动备份失败：', error?.message ?? error)
   }
 
   const mediaTtlHours = env.mediaTtlHours

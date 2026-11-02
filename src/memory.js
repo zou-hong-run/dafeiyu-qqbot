@@ -263,6 +263,34 @@ export function reset(key) {
   scheduleSave()
 }
 
+/**
+ * 精准忘掉几条：从长期记忆里删掉包含关键词的条目，不动别的。
+ * @returns {string[]} 被删掉的条目原文
+ */
+export function forget(key, keyword) {
+  const word = String(keyword ?? '').trim()
+  if (!word) return []
+
+  const session = getSession(key)
+  const removed = []
+  session.longTerm = session.longTerm.filter((item) => {
+    if (!String(item.text ?? '').includes(word)) return true
+    removed.push(item.text)
+    return false
+  })
+
+  if (removed.length > 0) {
+    session.updatedAt = Date.now()
+    scheduleSave()
+  }
+  return removed
+}
+
+export function listLongTerm(key, limit = 20) {
+  const session = getSession(key)
+  return session.longTerm.slice(-limit).map((item) => item.text)
+}
+
 export function stats(key) {
   const session = getSession(key)
   return {

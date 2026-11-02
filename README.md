@@ -101,6 +101,9 @@ src/
   templates.js     任务模板：成功的工单沉淀成「目标 → 路子 → 要点」
   choices.js       选择题：编号选项 + 回数字选中（替代需要平台预建的按钮）
   usage.js         token 用量与花费统计（data/usage.json，/cost 查看）
+  backup.js        每天把 data/ 和 skills/ 备份到 backups/，保留 7 份
+  quiet.js         降噪：群内节流 + 「安静」静音状态
+  merge.js         连发合并：同一个人连着几句合成一次理解
   pitfalls.js      失败复盘：同一工具连续失败 3 次写进 skills/pitfalls.md
   ticket.js        工单：一项工作的授权、进展、交付全记在这里，落盘可恢复
   worker.js        Worker：上下文隔离的执行单元，只干活、不直接对外说话

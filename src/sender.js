@@ -117,10 +117,33 @@ function notePassive(event) {
   }
 }
 
+// QQ 接口会限流（发太快）、偶尔 5xx。这类错误重试一次通常就好了，
+// 不重试的话表现就是「用户看到一句没头没尾的回复」或者「什么都没发出来」
+const RATE_LIMIT_PATTERN = /429|频率|频繁|rate limit|too many|too frequent/i
+const TRANSIENT_PATTERN = /50\d|server error|bad gateway|timed? ?out|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed/i
+
+export async function withSendRetry(task, label = '发送') {
+  try {
+    return await task()
+  } catch (error) {
+    const message = String(error?.message ?? error)
+    const rateLimited = RATE_LIMIT_PATTERN.test(message)
+    const transient = TRANSIENT_PATTERN.test(message)
+    if (!rateLimited && !transient) throw error
+
+    const wait = rateLimited ? 1500 : 800
+    console.warn(
+      `[发送] ${label}失败（${rateLimited ? '被限流' : '临时错误'}），${wait}ms 后重试一次：${message.slice(0, 60)}`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, wait))
+    return task()
+  }
+}
+
 export async function deliver(event, payload) {
   if (canUsePassive(event)) {
     try {
-      await event.reply.call(event, payload)
+      await withSendRetry(() => event.reply.call(event, payload), '被动回复')
       notePassive(event)
       return
     } catch (error) {
@@ -130,8 +153,11 @@ export async function deliver(event, payload) {
     }
   }
 
-  if (event.message_type === 'group') await bot.group(event.group_id).send(payload)
-  else await bot.user(event.user_id).send(payload)
+  if (event.message_type === 'group') {
+    await withSendRetry(() => bot.group(event.group_id).send(payload), '群消息')
+  } else {
+    await withSendRetry(() => bot.user(event.user_id).send(payload), '私聊消息')
+  }
 }
 
 export async function postMessage(event, body, { reference = true } = {}) {
@@ -154,7 +180,7 @@ export async function postMessage(event, body, { reference = true } = {}) {
   }
 
   try {
-    await bot.request.post(apiPath, body)
+    await withSendRetry(() => bot.request.post(apiPath, body), '接口发送')
     if (usePassive) notePassive(event)
   } catch (error) {
     const message = String(error?.message ?? error)
@@ -164,7 +190,7 @@ export async function postMessage(event, body, { reference = true } = {}) {
     delete body.msg_id
     delete body.msg_seq
     delete body.message_reference
-    await bot.request.post(apiPath, body)
+    await withSendRetry(() => bot.request.post(apiPath, body), '主动发送')
   }
 }
 
