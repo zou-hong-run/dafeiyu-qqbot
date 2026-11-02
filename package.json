@@ -13,15 +13,14 @@
     "pm2:stop": "pm2 stop dafeiyu",
     "pm2:delete": "pm2 delete dafeiyu",
     "pm2:logs": "pm2 logs dafeiyu",
-    "pm2:status": "pm2 status dafeiyu",
-    "diagnose": "node scripts/diagnose.js",
-    "version:tag": "node scripts/release.js"
+    "pm2:status": "pm2 status dafeiyu"
   },
   "engines": {
     "node": ">=20.12"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@napi-rs/canvas": "^1.1.0",
     "dotenv": "^18.0.9",
     "openai": "^7.45.1",
     "qq-official-bot": "^1.3.3"

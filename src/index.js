@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
-import { chat, summarizeGroup, runTaskAgent, testVision } from './deepseek.js'
+import { chat, summarizeGroup, runTaskAgent } from './deepseek.js'
 import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
@@ -12,12 +12,12 @@ import { ensureSkillsDir } from './skills.js'
 import { evictIdleSessions, reset, stats, flush } from './memory.js'
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
-import { commitAndPush, describeStatus, pullLatest } from './sync.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
-import { clip, passiveCountOf, sendReply } from './sender.js'
+import { chunkText, passiveCountOf, sendLongReply, sendReply } from './sender.js'
+import { pendingCount, takePending } from './pending.js'
 import {
   audioSenderFor,
   cardSenderFor,
@@ -111,81 +111,6 @@ function referencedContext(event) {
   return ''
 }
 
-// 让模型自己把改动提交回仓库，或者拉取最新代码
-function gitSyncFor() {
-  return async ({ mode = 'status', reason = '' } = {}) => {
-    const action = String(mode).toLowerCase()
-
-    if (action === 'status') return describeStatus()
-
-    if (action === 'push') {
-      const result = commitAndPush(reason ? `auto sync: ${String(reason).slice(0, 60)}` : 'auto sync: 手动推送')
-      if (result.skipped) return `没有需要同步的改动（${result.reason}）`
-      if (result.pushed) return `已提交并推送 ${result.files} 个文件到 ${result.branch}`
-      return `已本地提交 ${result.files} 个文件，但推送失败：${result.reason}`
-    }
-
-    if (action === 'pull') {
-      const result = pullLatest()
-      if (!result.ok) throw new Error(result.reason)
-      return `已拉取 ${result.branch} 的最新代码${result.output ? `：
-${result.output}` : ''}
-改完记得重启才生效`
-    }
-
-    throw new Error(`不认识的 mode：${mode}，只能是 status / push / pull`)
-  }
-}
-
-// 主动往别的群发消息：私聊里也能把话送到指定的群
-function groupSenderFor(event) {
-  const currentGroup = event?.group_id
-
-  return async (input) => {
-    const target = String(input?.groupId ?? '').trim()
-    const text = String(input?.text ?? '').trim()
-
-    if (!text) throw new Error('缺少要发送的内容')
-    if (text.length > 2000) throw new Error(`内容 ${text.length} 字，太长了，压到 2000 字以内`)
-
-    const groupId = !target || target === 'current' ? currentGroup : target
-    if (!groupId) throw new Error('没指定群，也没法确定当前群：私聊里要传 groupId')
-
-    const result = await bot.group(groupId).send(clip(text))
-    console.log(`[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字）`)
-
-    return { groupId, chars: text.length, messageId: result?.id ?? '' }
-  }
-}
-
-// 列出机器人待过的群，模型用它找 groupId
-function groupsReaderFor() {
-  return async () => {
-    let ids = []
-    try {
-      ids = fs
-        .readdirSync(path.join(dataDir, 'groups'))
-        .filter((name) => name.endsWith('.jsonl'))
-        .map((name) => name.slice(0, -6))
-    } catch {
-      ids = []
-    }
-
-    if (ids.length === 0) return '还没有群聊记录，等群里有消息进来才有。'
-
-    const lines = ids.map((groupId) => {
-      const info = groupLog.statsOf(groupId)
-      const last = info.to ?? '-'
-      return `${groupId}｜${info.count} 条｜最近 ${last}`
-    })
-
-    return (
-      `待过的群（${ids.length} 个）：\n${lines.join('\n')}\n\n` +
-      '发消息用 send_to_group，groupId 传上面那串。'
-    )
-  }
-}
-
 // 给模型读当前群聊记录用：只读本群，不跨群
 function historyReaderFor(event) {
   const groupId = event.group_id
@@ -228,27 +153,23 @@ function sessionKeyOf(event) {
   return event.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
 
-// 群里被 @ 的判定：mentions 里出现机器人自己（QQ 号或 AppID）
-// 群里被 @ 的判定。QQ 给过来的 mentions 有两种形态：
-//   数组 [{ id, user_openid, ... }]，或对象 { bot: true, is_you: true, username }
-// 只看 openid 比对会漏掉后一种，导致「@ 了但被当闲聊丢掉」
+// 群里被 @ 的判定：优先用 SDK 给的 is_you，其次兜底比对 QQ 号 / AppID
 function atMe(event) {
-  const raw = event?.mentions
-  if (!raw) return false
+  const list = event?.mentions
+  if (!Array.isArray(list) || list.length === 0) return false
 
-  const items = Array.isArray(raw) ? raw : [raw]
   const selfId = String(bot.self_id ?? process.env.QQ_APP_ID ?? '')
   const appId = String(env.appId ?? '')
+  const nick = String(env.personaName ?? '')
 
-  return items.some((item) => {
-    if (!item || typeof item !== 'object') return false
-    if (item.is_you === true) return true
-    if (item.bot === true) return true
+  return list.some((item) => {
+    // QQ 官方 API 在群里的 mention 只给 openid，跟 self_id / appId 对不上，is_you 才是准的
+    if (item?.is_you === true) return true
+    if (item?.bot === true && nick && String(item?.username ?? '').includes(nick)) return true
 
-    const candidates = [item.id, item.user_openid, item.member_openid, item.user_id]
+    const candidates = [item?.id, item?.user_openid, item?.member_openid, item?.user_id]
       .filter(Boolean)
       .map(String)
-
     return candidates.some((value) => value === selfId || value === appId)
   })
 }
@@ -316,24 +237,30 @@ function notifierFor(event) {
   let passiveUsed = 0
 
   return async (text) => {
-    const body = clip(text)
-    const canPassive = Date.now() - startedAt < 4 * 60_000 && passiveUsed < 3
+    const parts = chunkText(text)
 
-    if (canPassive) {
-      passiveUsed += 1
-      try {
-        await sendReply(event, body)
-        return
-      } catch (error) {
-        console.warn('[任务通知] 被动回复失败，改用主动消息：', error?.message ?? error)
+    for (let i = 0; i < parts.length; i += 1) {
+      const body = parts[i]
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+      const canPassive = Date.now() - startedAt < 4 * 60_000 && passiveUsed < 3
+
+      if (canPassive) {
+        passiveUsed += 1
+        try {
+          await sendReply(event, body)
+          continue
+        } catch (error) {
+          console.warn('[任务通知] 被动回复失败，改用主动消息：', error?.message ?? error)
+        }
       }
-    }
 
-    try {
-      if (isGroup) await bot.group(groupId).send(body)
-      else await bot.user(userId).send(body)
-    } catch (error) {
-      console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
+      try {
+        if (isGroup) await bot.group(groupId).send(body)
+        else await bot.user(userId).send(body)
+      } catch (error) {
+        console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
+        break
+      }
     }
   }
 }
@@ -353,6 +280,26 @@ async function handleMessage(event, trigger = 'at') {
   const key = sessionKeyOf(event)
   const scope = event.message_type === 'group' ? 'group' : 'private'
 
+  // 「接着发」：把上一条超长内容没发完的尾巴补出去
+  if (
+    text.length <= 12 &&
+    !text.startsWith('/') &&
+    /接着发|继续发|继续吧|剩下的|补发|没发完|后面的段|后面那些/.test(text) &&
+    pendingCount(event) > 0
+  ) {
+    const { parts, rest } = takePending(event, 6)
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+      try {
+        await sendReply(event, parts[i])
+      } catch (error) {
+        console.warn(`[补发] 第 ${i + 1}/${parts.length} 段失败：`, error?.message ?? error)
+      }
+    }
+    if (rest > 0) await sendReply(event, `还剩 ${rest} 段，再说一次「接着发」我继续。`)
+    return
+  }
+
   if (text === '/id' || text === '我的id' || text === '我的ID') {
     const admin = env.adminOpenIds.includes(String(event.user_id))
     await sendReply(
@@ -363,61 +310,6 @@ async function handleMessage(event, trigger = 'at') {
         `管理员权限：${admin ? '有' : '无'}\n\n` +
         '要开高危工具（执行命令、写文件、装包、加 MCP）就把上面这串 openid 填进 .env 的 ADMIN_OPENIDS，逗号分隔。',
     )
-    return
-  }
-
-  if (text === '/diag vision') {
-    if (!isAdmin(scope, event.user_id ?? '')) {
-      await sendReply(event, `视觉自检只对管理员开放。你的 openid：${event.user_id ?? '未知'}。`)
-      return
-    }
-
-    // 现场画一张纯红方块，用它测「能不能真的读到图」
-    const probe = path.join(projectRoot, 'downloads', 'vision-probe.png')
-    try {
-      const { DRAW_HANDLERS } = await import('./mcp-server/draw-pixel.js')
-      await DRAW_HANDLERS.draw_pixel({
-        pattern: ['######', '######', '######', '######'],
-        colors: ['#e53935'],
-        scale: 16,
-      })
-      const latest = fs
-        .readdirSync(path.join(projectRoot, 'downloads'))
-        .filter((name) => name.startsWith('draw-'))
-        .sort()
-        .pop()
-
-      if (!latest) throw new Error('生成测试图失败')
-      fs.copyFileSync(path.join(projectRoot, 'downloads', latest), probe)
-      fs.rmSync(path.join(projectRoot, 'downloads', latest), { force: true })
-    } catch (error) {
-      await sendReply(event, `视觉自检失败：生成测试图出错 ${error?.message ?? error}`)
-      return
-    }
-
-    const result = await testVision('downloads/vision-probe.png')
-
-    if (result.ok) {
-      await sendReply(
-        event,
-        `视觉通道正常。
-模型：${result.model}
-读图结果：「${result.answer}」（测试图是纯红色）
-` +
-          '如果你发图我还是看不见，那就是入站附件那一步没拿到图，把 pm2 日志里带 [附件] 的行发我。',
-      )
-    } else if (result.stage === 'read') {
-      await sendReply(event, `视觉自检失败在「读图」这一步：${result.reason}`)
-    } else {
-      await sendReply(
-        event,
-        `视觉自检失败在「模型调用」这一步（模型 ${result.model}）：
-${result.reason}
-
-` +
-          '大概率是这个账号还没开通 deepseek-flash 的图片输入，或者模型名要用你控制台里能看到的那个。',
-      )
-    }
     return
   }
 
@@ -658,7 +550,7 @@ ${result.reason}
 
     if (inbound.length > 0) {
       try {
-        const described = await describeInbound(inbound, key)
+        const described = await describeInbound(inbound)
         input = `${input}${described.text}`.trim()
         images = described.images
       } catch (error) {
@@ -682,9 +574,6 @@ ${result.reason}
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
       historyReader: historyReaderFor(event),
-      groupSender: groupSenderFor(event),
-      groupsReader: groupsReaderFor(),
-      gitSync: gitSyncFor(),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>
@@ -713,7 +602,8 @@ ${result.reason}
         return result
       },
     })
-    await sendReply(event, clip(answer))
+    console.log(`[发送诊断] answer长度=${String(answer ?? "").length}`)
+    await sendLongReply(event, answer)
   } catch (error) {
     console.error(`[模型调用失败] ${key}:`, error?.message ?? error)
     await sendReply(event, '抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
@@ -744,7 +634,7 @@ async function handleSummary(event) {
     await sendReply(event, `翻记录中，一共 ${entries.length} 条，稍等…`)
     const transcript = groupLog.formatForSummary(entries)
     const summary = await summarizeGroup(transcript, '')
-    await sendReply(event, clip(summary))
+    await sendLongReply(event, summary)
   } catch (error) {
     console.error('[总结失败]', error?.message ?? error)
     await sendReply(event, '总结没成功，可能记录太多，等会儿再试。').catch(() => {})
@@ -754,7 +644,6 @@ async function handleSummary(event) {
 async function handleGroupAll(event) {
   const text = (event.content ?? '').trim()
   recordGroupMessage(event, text || '[附件]')
-  if (!text) return
 
   if (env.toolDebug && Array.isArray(event.mentions) && event.mentions.length > 0) {
     console.log(
@@ -771,6 +660,9 @@ async function handleGroupAll(event) {
     await handleMessage(event, 'at')
     return
   }
+
+  // 只 @ 不打字也要回，所以空文本过滤放在 @ 判定之后
+  if (!text) return
 
   if (SUMMARY_CMD.test(text) && text.length <= 20) {
     if (hasReplied(event.message_id)) return
@@ -855,22 +747,6 @@ async function shutdown(signal) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
 
-  // 机器人自己改了源码时，退出前把它提交回仓库，实现「自己进化」
-  if (process.env.AUTO_SYNC_ON_EXIT !== 'false') {
-    try {
-      const synced = commitAndPush('auto sync: 退出前自动提交')
-      if (synced.skipped) {
-        console.log(`[同步] 跳过：${synced.reason}`)
-      } else if (synced.pushed) {
-        console.log(`[同步] 已提交并推送 ${synced.files} 个文件（${synced.branch}）`)
-      } else {
-        console.warn(`[同步] 已本地提交 ${synced.files} 个文件，但推送失败：${synced.reason}`)
-      }
-    } catch (error) {
-      console.error('[同步] 自动提交失败（不影响退出）：', error?.message ?? error)
-    }
-  }
-
   stopWatchdog()
 
   await withTimeout(stopMcp(), 5000)
@@ -953,13 +829,6 @@ function reportMemory() {
 
 reportMemory()
 
-try {
-  const repoLine = describeStatus().split('\n')[0]
-  console.log(`[同步] ${repoLine}`)
-} catch (error) {
-  console.error('[同步] 读仓库状态失败：', error?.message ?? error)
-}
-
 console.log(`[启动] 正在连接 QQ 开放平台（AppID: ${env.appId}）...`)
 
 try {
@@ -980,9 +849,12 @@ try {
 
   initScheduler({
     sendMessage: async (target, text) => {
-      const body = clip(text)
-      if (target.type === 'group') await bot.group(target.id).send(body)
-      else await bot.user(target.id).send(body)
+      const parts = chunkText(text)
+      for (let i = 0; i < parts.length; i += 1) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+        if (target.type === 'group') await bot.group(target.id).send(parts[i])
+        else await bot.user(target.id).send(parts[i])
+      }
     },
     runTask: runScheduledTask,
   })
@@ -1007,9 +879,12 @@ try {
   // 外部控制回路：只在外面看工单有没有真的在往前走，不参与执行
   startWatchdog({
     send: async (target, text) => {
-      const body = clip(text)
-      if (target?.type === 'group') await bot.group(target.id).send(body)
-      else if (target?.id) await bot.user(target.id).send(body)
+      const parts = chunkText(text)
+      for (let i = 0; i < parts.length; i += 1) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+        if (target?.type === 'group') await bot.group(target.id).send(parts[i])
+        else if (target?.id) await bot.user(target.id).send(parts[i])
+      }
     },
     abort: (ticketId) => {
       try {

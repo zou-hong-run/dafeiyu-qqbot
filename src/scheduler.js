@@ -8,6 +8,9 @@ const scheduleFile = path.join(dataDir, 'schedules.json')
 
 const MAX_PER_SESSION = 5
 const MAX_TOTAL = 20
+// 启动补跑：只补最近 6 小时内错过的，太久的不补（避免关机一整天后一次性轰炸）
+const CATCHUP_MAX_AGE_MS = 6 * 60 * 60 * 1000
+const CATCHUP_DELAY_MS = 20_000
 
 let tasks = []
 let deps = { sendMessage: null, runTask: null }
@@ -16,7 +19,8 @@ let lastTickKey = ''
 function load() {
   try {
     const raw = JSON.parse(fs.readFileSync(scheduleFile, 'utf8'))
-    if (Array.isArray(raw)) return raw
+    // running 是内存态：重启后从磁盘读回来一律清掉，否则会永远被当成「正在跑」跳过
+    if (Array.isArray(raw)) return raw.map((task) => ({ ...task, running: false }))
   } catch {
     return []
   }
@@ -71,6 +75,17 @@ export function cronMatches(expr, date = new Date()) {
     matchField(month, date.getMonth() + 1) &&
     matchField(dayOfWeek, date.getDay())
   )
+}
+
+// 从 from 往前找最近一次命中 cron 的分钟，找不到返回 null
+export function previousMatch(cronExpr, from = new Date(), maxMinutes = 60 * 24 * 8) {
+  const cursor = new Date(from)
+  cursor.setSeconds(0, 0)
+  for (let i = 0; i <= maxMinutes; i += 1) {
+    if (cronMatches(cronExpr, cursor)) return cursor.getTime()
+    cursor.setMinutes(cursor.getMinutes() - 1)
+  }
+  return null
 }
 
 export function validateCron(expr) {
@@ -180,20 +195,27 @@ export function removeSchedule(id, sessionKey) {
   return removed
 }
 
-async function fire(task) {
+async function fire(task, options = {}) {
   if (task.running) return
   task.running = true
   task.lastRunAt = Date.now()
 
+  const catchUpNote = options.catchUp
+    ? `｜补发（原定 ${new Date(options.plannedAt).toLocaleString('zh-CN', { hour12: false })}）`
+    : ''
+
   try {
-    console.log(`[定时] 触发 ${task.id}（${describeCron(task.cron)}）`)
+    console.log(`[定时] 触发 ${task.id}（${describeCron(task.cron)}）${catchUpNote}`)
     const result = await deps.runTask(task)
 
-    task.lastStatus = 'ok'
+    task.lastStatus = options.catchUp ? 'ok:catchup' : 'ok'
     persist()
 
     if (result) {
-      await deps.sendMessage(task.target, `定时任务 ${task.id}｜${describeCron(task.cron)}\n\n${result}`)
+      await deps.sendMessage(
+        task.target,
+        `定时任务 ${task.id}｜${describeCron(task.cron)}${catchUpNote}\n\n${result}`,
+      )
     }
   } catch (error) {
     task.lastStatus = `failed: ${error?.message ?? error}`.slice(0, 120)
@@ -203,6 +225,26 @@ async function fire(task) {
       .catch(() => {})
   } finally {
     task.running = false
+    persist()
+  }
+}
+
+// 启动时补跑：上次该跑的时刻没跑（进程当时没在跑），就补一次
+async function catchUpMissed() {
+  const now = Date.now()
+  for (const task of tasks) {
+    if (!task.enabled || task.running) continue
+
+    const plannedAt = previousMatch(task.cron, new Date(now))
+    if (!plannedAt) continue
+    if (now - plannedAt > CATCHUP_MAX_AGE_MS) continue
+
+    // 任务本身是触发时刻之后才创建的，说明那会儿还不存在，不算错过
+    const anchor = Math.max(Number(task.lastRunAt) || 0, Number(task.createdAt) || 0)
+    if (anchor >= plannedAt) continue
+
+    console.log(`[定时] 补跑 ${task.id}，错过 ${new Date(plannedAt).toLocaleString('zh-CN')}`)
+    await fire(task, { catchUp: true, plannedAt })
   }
 }
 
@@ -223,12 +265,18 @@ function tick() {
 export function initScheduler({ sendMessage, runTask }) {
   deps = { sendMessage, runTask }
   tasks = load()
+  persist() // 把清干净的 running 写回磁盘
 
   const timer = setInterval(tick, 20_000)
   timer.unref?.()
 
   const active = tasks.filter((task) => task.enabled).length
   console.log(`[定时] 已加载 ${tasks.length} 个任务（启用 ${active} 个）`)
+
+  // 等网关和依赖就绪后再补跑，避免启动瞬间发不出去
+  setTimeout(() => {
+    catchUpMissed().catch((error) => console.error('[定时] 补跑异常：', error?.message ?? error))
+  }, CATCHUP_DELAY_MS).unref?.()
 }
 
 export function schedulerStats() {

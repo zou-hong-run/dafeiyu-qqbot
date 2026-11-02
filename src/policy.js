@@ -17,8 +17,6 @@ export const DANGEROUS_TOOLS = new Set([
   'start_task',
   'schedule_task',
   'restart_self',
-  'send_to_group',
-  'git_sync',
 ])
 
 // 管理员判定：配了白名单就只认名单，没配就只认私聊
@@ -55,19 +53,16 @@ export const TOOL_POLICY = {
 
   remember: OPEN,
   read_group_history: GROUP_ONLY,
-  list_groups: READ_ONLY,
-  send_to_group: OPEN,
-  git_sync: OPEN,
   goal: OPEN,
   send_image: OPEN,
   send_audio: OPEN,
   send_video: OPEN,
   send_file: OPEN,
   send_card: OPEN,
-  draw_pixel: OPEN,
   speak: OPEN,
   clear_memory: OPEN,
   download: OPEN,
+  draw_pixel: OPEN,
 
   shell: SHELL,
   run_script: SHELL,

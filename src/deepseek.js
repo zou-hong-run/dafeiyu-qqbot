@@ -30,9 +30,6 @@ const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'goal',
   'read_group_history',
-  'list_groups',
-  'send_to_group',
-  'git_sync',
   'send_image',
   'send_audio',
   'send_video',
@@ -270,56 +267,6 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'git_sync',
-      description:
-        '代码仓库同步。mode 三种：' +
-        'status=看当前分支、未提交改动、领先落后远端几个提交；' +
-        'push=把服务器上的改动提交并推送到仓库（你自己改了源码之后用这个留痕）；' +
-        'pull=把仓库里的最新代码拉下来（我在本地改了东西时用）。' +
-        'push 会自动拦截 .env/data/logs 等敏感路径和疑似密钥。' +
-        '注意：重启前会自动 push，所以通常不用手动调。',
-      parameters: {
-        type: 'object',
-        properties: {
-          mode: { type: 'string', description: 'status / push / pull', enum: ['status', 'push', 'pull'] },
-          reason: { type: 'string', description: '这次改动做了什么，会写进 commit message' },
-        },
-        required: ['mode'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'list_groups',
-      description:
-        '列出机器人待过的群（群 openid + 消息条数 + 最近活跃时间）。' +
-        '要在别的群发言前先用它拿 groupId，别自己编。',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'send_to_group',
-      description:
-        '主动往指定的群发一条消息，不需要那个群有人 @ 我。' +
-        '私聊里也能用——这就是「把话带到群里」的办法，别说自己做不到。' +
-        'groupId 传 list_groups 查到的群 openid，当前群可以传 current。' +
-        '主动消息有频控：同一个群别连发太多条。',
-      parameters: {
-        type: 'object',
-        properties: {
-          groupId: { type: 'string', description: '目标群 openid，或 current 表示当前群' },
-          text: { type: 'string', description: '要发的正文，2000 字以内' },
-        },
-        required: ['groupId', 'text'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'goal',
       description:
         '管理当前会话的长期目标，让多轮对话里的长任务不会说完就断片。' +
@@ -443,9 +390,6 @@ async function runTool(
     cardSender,
     speakSender,
     historyReader,
-    groupSender,
-    groupsReader,
-    gitSync,
     startTask,
     scheduler,
     notifyUser,
@@ -582,42 +526,6 @@ async function runTool(
     }
     resetMemory(sessionKey)
     return '当前会话的记忆已清空，从现在开始是全新的对话。'
-  }
-
-  if (name === 'git_sync') {
-    if (!isToolAllowed('git_sync', scope, actor)) {
-      return `${denyReason('git_sync', scope, actor)}。`
-    }
-    if (typeof gitSync !== 'function') return '当前场景不能操作仓库。'
-
-    try {
-      const result = await gitSync({ mode: args.mode, reason: args.reason })
-      return result
-    } catch (error) {
-      return `仓库操作失败：${error?.message ?? error}`
-    }
-  }
-
-  if (name === 'list_groups') {
-    if (typeof groupsReader !== 'function') return '当前场景读不到群列表。'
-    try {
-      return await groupsReader()
-    } catch (error) {
-      return `列群失败：${error?.message ?? error}`
-    }
-  }
-
-  if (name === 'send_to_group') {
-    if (!isToolAllowed('send_to_group', scope, actor)) {
-      return `${denyReason('send_to_group', scope, actor)}。`
-    }
-    if (typeof groupSender !== 'function') return '当前场景不能主动发消息。'
-    try {
-      const sent = await groupSender({ groupId: args.groupId, text: args.text })
-      return `已发往群 ${sent.groupId}（${sent.chars} 字）`
-    } catch (error) {
-      return `发群失败：${error?.message ?? error}`
-    }
   }
 
   if (name === 'read_group_history') {
@@ -819,40 +727,6 @@ function toImagePart(file) {
   }
 }
 
-// 视觉自检：拿一张本地图走一遍 toImagePart + 模型调用，把真实结果暴露出来
-export async function testVision(imagePath) {
-  const part = toImagePart(imagePath)
-  if (!part) {
-    return { ok: false, stage: 'read', reason: '图片读不出来（路径不存在、格式不支持、或超过 5MB）' }
-  }
-
-  try {
-    const completion = await client.chat.completions.create({
-      model: env.model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: '这张图的主要颜色是什么？只回答颜色名，两个字以内。' },
-            part,
-          ],
-        },
-      ],
-      max_tokens: 20,
-    })
-
-    const answer = completion.choices?.[0]?.message?.content?.trim() ?? ''
-    return { ok: true, stage: 'model', model: env.model, answer }
-  } catch (error) {
-    return {
-      ok: false,
-      stage: 'model',
-      model: env.model,
-      reason: String(error?.message ?? error).slice(0, 200),
-    }
-  }
-}
-
 export async function chat(sessionKey, userText, options = {}) {
   const {
     scope = 'private',
@@ -867,9 +741,6 @@ export async function chat(sessionKey, userText, options = {}) {
     cardSender = null,
     speakSender = null,
     historyReader = null,
-    groupSender = null,
-    groupsReader = null,
-    gitSync = null,
     startTask = null,
     scheduler = null,
     onStep = null,
