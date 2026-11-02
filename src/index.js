@@ -17,7 +17,8 @@ import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
-import { clip, passiveCountOf, sendReply } from './sender.js'
+import { chunkText, clip, passiveCountOf, sendLongReply, sendReply } from './sender.js'
+import { pendingCount, takePending } from './pending.js'
 import {
   audioSenderFor,
   cardSenderFor,
@@ -352,6 +353,28 @@ async function handleMessage(event, trigger = 'at') {
 
   const key = sessionKeyOf(event)
   const scope = event.message_type === 'group' ? 'group' : 'private'
+
+  // 「接着发」：把上一条超长内容没发完的尾巴补出去
+  if (
+    text.length <= 12 &&
+    !text.startsWith('/') &&
+    /接着发|继续发|继续吧|剩下的|补发|没发完|后面的段|后面那些/.test(text) &&
+    pendingCount(event) > 0
+  ) {
+    const { parts, rest } = takePending(event, 6)
+
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+      try {
+        await sendReply(event, parts[i])
+      } catch (error) {
+        console.warn(`[补发] 第 ${i + 1}/${parts.length} 段失败：`, error?.message ?? error)
+      }
+    }
+
+    if (rest > 0) await sendReply(event, `还剩 ${rest} 段，再说一次「接着发」我继续。`)
+    return
+  }
 
   if (text === '/id' || text === '我的id' || text === '我的ID') {
     const admin = env.adminOpenIds.includes(String(event.user_id))
@@ -713,7 +736,7 @@ ${result.reason}
         return result
       },
     })
-    await sendReply(event, clip(answer))
+    await sendLongReply(event, answer)
   } catch (error) {
     console.error(`[模型调用失败] ${key}:`, error?.message ?? error)
     await sendReply(event, '抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
@@ -744,7 +767,7 @@ async function handleSummary(event) {
     await sendReply(event, `翻记录中，一共 ${entries.length} 条，稍等…`)
     const transcript = groupLog.formatForSummary(entries)
     const summary = await summarizeGroup(transcript, '')
-    await sendReply(event, clip(summary))
+    await sendLongReply(event, summary)
   } catch (error) {
     console.error('[总结失败]', error?.message ?? error)
     await sendReply(event, '总结没成功，可能记录太多，等会儿再试。').catch(() => {})
@@ -980,9 +1003,13 @@ try {
 
   initScheduler({
     sendMessage: async (target, text) => {
-      const body = clip(text)
-      if (target.type === 'group') await bot.group(target.id).send(body)
-      else await bot.user(target.id).send(body)
+      // 定时任务的日报可能很长：分段发，别用 clip 截断
+      const parts = chunkText(text)
+      for (let i = 0; i < parts.length && i < 6; i += 1) {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+        if (target.type === 'group') await bot.group(target.id).send(parts[i])
+        else await bot.user(target.id).send(parts[i])
+      }
     },
     runTask: runScheduledTask,
   })

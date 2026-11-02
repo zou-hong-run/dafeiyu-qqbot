@@ -1,5 +1,6 @@
 import { env } from './env.js'
 import { bot } from './bot.js'
+import { addPending } from './pending.js'
 
 // 发送层：被动回复配额、引用气泡、Markdown 降级都收在这里
 // 对外只暴露 clip / sendReply / deliver / postMessage
@@ -179,6 +180,77 @@ async function sendMarkdownMessage(event, content) {
     }
 
     throw error
+  }
+}
+
+// 长文本切分：优先在换行 / 句末 / 逗号处断开，尽量不切断词句
+export function chunkText(text, limit = Math.max(200, env.replyMaxChars)) {
+  const raw = String(text ?? '').trim()
+  if (!raw) return []
+  if (raw.length <= limit) return [raw]
+
+  const parts = []
+  let buf = ''
+  const flush = () => {
+    const piece = buf.trim()
+    if (piece) parts.push(piece)
+    buf = ''
+  }
+
+  for (const line of raw.split('\n')) {
+    let rest = `${line}\n`
+    while (rest.length > 0) {
+      const room = limit - buf.length
+      if (rest.length <= room) {
+        buf += rest
+        break
+      }
+      const win = rest.slice(0, room)
+      let cut = Math.max(
+        win.lastIndexOf('\n'),
+        win.lastIndexOf('。'),
+        win.lastIndexOf('！'),
+        win.lastIndexOf('？'),
+        win.lastIndexOf('；'),
+        win.lastIndexOf('. '),
+        win.lastIndexOf('，'),
+        win.lastIndexOf(' '),
+      )
+      cut = cut > room * 0.35 ? cut + 1 : room
+      buf += rest.slice(0, cut)
+      flush()
+      rest = rest.slice(cut)
+    }
+  }
+
+  flush()
+  return parts
+}
+
+// 超长回复拆成多条发，不再截断；超出的段存起来，等用户说「接着发」
+export async function sendLongReply(event, text, { maxParts = 6, gapMs = 600 } = {}) {
+  const parts = chunkText(text)
+  if (parts.length === 0) return
+  if (parts.length === 1) {
+    await sendReply(event, parts[0])
+    return
+  }
+
+  let list = parts
+  if (parts.length > maxParts) {
+    list = parts.slice(0, maxParts)
+    const rest = parts.slice(maxParts)
+    addPending(event, rest)
+    list[maxParts - 1] += `\n\n（还有 ${rest.length} 段，说「接着发」我继续）`
+  }
+
+  for (let i = 0; i < list.length; i += 1) {
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, gapMs))
+    try {
+      await sendReply(event, list[i])
+    } catch (error) {
+      console.warn(`[发送] 第 ${i + 1}/${list.length} 段失败：`, error?.message ?? error)
+    }
   }
 }
 
