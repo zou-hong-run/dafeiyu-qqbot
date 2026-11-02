@@ -833,16 +833,31 @@ export async function testVision(imagePath) {
         {
           role: 'user',
           content: [
-            { type: 'text', text: '这张图的主要颜色是什么？只回答颜色名，两个字以内。' },
+            { type: 'text', text: '这张图是什么颜色？直接回答颜色名，不要解释。' },
             part,
           ],
         },
       ],
-      max_tokens: 20,
+      // 20 token 会被思维链吃光，给足才拿得到最终回答
+      max_tokens: 200,
     })
 
-    const answer = completion.choices?.[0]?.message?.content?.trim() ?? ''
-    return { ok: true, stage: 'model', model: env.model, answer }
+    const choice = completion.choices?.[0]
+    const message = choice?.message ?? {}
+    const answer = String(message.content ?? '').trim()
+    const reasoning = String(message.reasoning_content ?? '').trim()
+
+    return {
+      ok: true,
+      stage: 'model',
+      model: env.model,
+      answer,
+      reasoning: reasoning.slice(0, 80),
+      finish: choice?.finish_reason ?? '',
+      usage: completion.usage
+        ? `${completion.usage.prompt_tokens ?? 0} in / ${completion.usage.completion_tokens ?? 0} out`
+        : '',
+    }
   } catch (error) {
     return {
       ok: false,

@@ -420,24 +420,29 @@ async function handleMessage(event, trigger = 'at') {
 
     const result = await testVision('downloads/vision-probe.png')
 
-    if (result.ok) {
+    if (result.ok && result.answer) {
+      const usage = result.usage ? `用量：${result.usage}\n` : ''
       await sendReply(
         event,
-        `视觉通道正常。
-模型：${result.model}
-读图结果：「${result.answer}」（测试图是纯红色）
-` +
-          '如果你发图我还是看不见，那就是入站附件那一步没拿到图，把 pm2 日志里带 [附件] 的行发我。',
+        `视觉通道正常。\n模型：${result.model}\n读图结果：「${result.answer}」（测试图是纯红色）\n${usage}` +
+          '图片识别没问题，正常发图我就能看。',
+      )
+    } else if (result.ok) {
+      const usage = result.usage ? `用量：${result.usage}\n` : ''
+      const thought = result.reasoning ? `思维链片段：${result.reasoning}\n` : ''
+      await sendReply(
+        event,
+        `模型调用成功，但返回了空内容，视觉可能没真正生效。\n` +
+          `模型：${result.model}\n结束原因：${result.finish || '未知'}\n${usage}${thought}\n` +
+          '如果是 finish=length，说明 token 还是不够；如果是 stop 但内容为空，' +
+          '多半是这个模型/账号还不支持图片输入，可以先把 DEEPSEEK_MODEL 退回 deepseek-chat 用纯文本。',
       )
     } else if (result.stage === 'read') {
       await sendReply(event, `视觉自检失败在「读图」这一步：${result.reason}`)
     } else {
       await sendReply(
         event,
-        `视觉自检失败在「模型调用」这一步（模型 ${result.model}）：
-${result.reason}
-
-` +
+        `视觉自检失败在「模型调用」这一步（模型 ${result.model}）：\n${result.reason}\n\n` +
           '大概率是这个账号还没开通 deepseek-flash 的图片输入，或者模型名要用你控制台里能看到的那个。',
       )
     }
