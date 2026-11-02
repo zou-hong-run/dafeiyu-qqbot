@@ -38,6 +38,12 @@ function git(args, { allowFail = false } = {}) {
   }
 }
 
+// 没装 git 或不是仓库时不要反复报错：安静跳过，只在启动日志里提示一次
+export function isRepo() {
+  const probe = git(['rev-parse', '--is-inside-work-tree'], { allowFail: true })
+  return probe.ok && probe.out === 'true'
+}
+
 export function repoStatus() {
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true }).out || 'unknown'
   const dirty = git(['status', '--porcelain'], { allowFail: true }).out
@@ -79,6 +85,10 @@ function assertSafeStaged() {
 }
 
 export function commitAndPush(reason = 'auto sync') {
+  if (!isRepo()) {
+    return { ok: true, skipped: true, reason: '服务器上不是 git 仓库，改动只留在本机' }
+  }
+
   const status = repoStatus()
   if (status.changes.length === 0) return { ok: true, skipped: true, reason: '没有改动' }
 
@@ -132,6 +142,8 @@ export function commitAndPush(reason = 'auto sync') {
 }
 
 export function pullLatest() {
+  if (!isRepo()) throw new Error('服务器上不是 git 仓库，没法拉取。先按部署文档初始化')
+
   const status = repoStatus()
   const pulled = git(['pull', '--rebase', '--autostash', 'origin', status.branch], { allowFail: true })
 
@@ -143,6 +155,8 @@ export function pullLatest() {
 }
 
 export function describeStatus() {
+  if (!isRepo()) return '服务器上不是 git 仓库：自动同步已跳过，改动只留在本机'
+
   const status = repoStatus()
   const lines = [
     `分支 ${status.branch}｜未提交改动 ${status.changes.length} 个｜领先远端 ${status.ahead}｜落后远端 ${status.behind}`,

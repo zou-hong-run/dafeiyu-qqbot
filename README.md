@@ -205,6 +205,8 @@ QQ 网关 ──WS──▶ index.js
 
 **代码自同步**：机器人在服务器上改完源码后，进程退出（`restart_self` / `pm2 restart`）时会自动 `git commit` + `push` 回仓库，改动不会因为一次部署覆盖而丢失。手动控制用 `git_sync` 工具（`status` / `push` / `pull`）。提交前会拦截 `.env`、`data/`、`logs/`、`downloads/`、`tmp/` 和疑似密钥内容。
 
+> **前提**：部署目录必须是 git 仓库且能推送到远端。只在文件系统层面 `scp` 同步的话，`isRepo()` 会判定为「不是仓库」，自动提交会被静默跳过（改动仍在服务器上，但不会进仓库）。服务器初始化见下文「在服务器上初始化 git 仓库」。
+
 **自动清理**：每小时跑一次——闲置超过 `SESSION_TTL_MINUTES` 的会话清空短期/中期记忆（`remember` 写的长期事实保留），`downloads/incoming/` 里超过 `MEDIA_TTL_HOURS` 的附件删除。
 
 **记忆分层**：短期只保留最近 `HISTORY_TURNS` 轮原文（超出的自动压成中期摘要），另有一道 token 上限兜底；`remember` 写入的长期事实跨重启保留。
@@ -247,6 +249,52 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 - 审计日志在 `data/audit.log`，出问题先看它
 - 别把 `.env` 提交上去，`.gitignore` 已经忽略；仓库里只有 `.env.example`
 
+## 在服务器上初始化 git 仓库
+
+想让「自动提交」生效，`/qq` 得是个能 push 的仓库。先备份，再初始化：
+
+```bash
+cd /qq
+
+# 1. 备份现有代码（机器人可能改过，别丢）
+cp -r src /tmp/src-backup-$(date +%s)
+
+# 2. 初始化仓库并指向远端
+git init
+git remote add origin git@github.com:zou-hong-run/dafeiyu-qqbot.git
+git fetch origin main
+
+# 3. 索引对齐远端，但不动工作区文件
+git reset --mixed origin/main
+
+# 4. 看服务器上到底和仓库差了什么（这就是机器人改的）
+git status
+git diff --stat
+```
+
+确认差异没问题后，正常提交一次：
+
+```bash
+git add -A
+git commit -m "chore: 同步服务器上的改动"
+git push origin main
+```
+
+推送需要 SSH key（服务器上生成，公钥加到 GitHub 仓库的 Deploy Key，勾选 Allow write access）：
+
+```bash
+ssh-keygen -t ed25519 -C "qqbot-server" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+```
+
+验证：
+
+```bash
+cd /qq && git ls-remote origin main
+```
+
+能列出 commit 就说明通了。
+
 ## 常见问题
 
 | 现象 | 原因 / 处理 |
@@ -258,6 +306,8 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 | `speak` 报「没有可用的语音合成后端」 | 服务器装一个：`pip3 install edge-tts`（音质好，需外网）或 `apt-get install espeak-ng`（离线） |
 | 群里只收到 @ 它的消息 | 群里把「机器人可获取的群聊消息范围」设成「获取群内全部消息」 |
 | 发了文件但对方没收到 | 让机器人发 `/diag`（管理员），它会实测 `send_image` 和 `send_file` 并把真实错误贴出来 |
+| 日志里只有 `[同步] 服务器上不是 git 仓库` | 部署目录没初始化成仓库，按上面「在服务器上初始化 git 仓库」做 |
+| 自动提交报 `Permission denied (publickey)` | 服务器没配 GitHub SSH key，或者 Deploy Key 没勾 write access |
 | 机器人说「不在白名单里」 | 发 `/id` 拿到自己的 openid，填进 `.env` 的 `ADMIN_OPENIDS` 后重启 |
 | 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；`GROUP_JUDGE=true` 才会自动插话，关掉就完全不会乱接 |
 
