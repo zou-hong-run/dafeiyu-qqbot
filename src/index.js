@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
-import { chat, summarizeGroup, runTaskAgent, testVision } from './deepseek.js'
+import { chat, proactiveReply, summarizeGroup, runTaskAgent, testVision } from './deepseek.js'
 import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
 import { initScheduler, addSchedule, listSchedules, removeSchedule } from './scheduler.js'
 import { cleanWorkspace, workspaceStats } from './workspace.js'
@@ -17,6 +17,8 @@ import { flushUsage, formatUsage } from './usage.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { formatProfile } from './profiles.js'
+import { flushKnowledge, knowledgePrompt, rebuildAll } from './knowledge.js'
+import { findCandidates, formatCandidates, noteProactive, shouldProactive } from './proactive.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { bot } from './bot.js'
 import { chunkText, clip, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
@@ -401,6 +403,52 @@ function progressReporter(event) {
     lastAt = Date.now()
     count += 1
     await notify(`还在处理｜第 ${round + 1} 步：${describeTool(tool)}`)
+  }
+}
+
+// 主动扫描：没人叫它的时候，自己去翻群记录，看有没有值得接的问题
+async function runProactiveScan() {
+  if (process.env.PROACTIVE_ENABLED === 'false') return
+
+  let ids = []
+  try {
+    ids = fs
+      .readdirSync(path.join(dataDir, 'groups'))
+      .filter((name) => name.endsWith('.jsonl'))
+      .map((name) => name.slice(0, -6))
+  } catch {
+    return
+  }
+
+  for (const groupId of ids) {
+    try {
+      const candidates = findCandidates(groupId)
+      const decision = shouldProactive(groupId, candidates)
+      if (!decision.ok) continue
+
+      const answer = await proactiveReply({
+        transcript: formatCandidates(candidates),
+        knowledge: knowledgePrompt(groupId),
+        personaName: env.personaName,
+      })
+
+      if (!answer) continue
+
+      noteProactive(groupId, candidates[candidates.length - 1].c)
+      await sendToTarget({ type: 'group', id: groupId }, answer)
+
+      groupLog.record(groupId, {
+        t: Date.now(),
+        u: 'bot',
+        n: env.personaName,
+        c: answer.replace(/\s+/g, ' ').slice(0, 200),
+        id: `bot-${Date.now()}`,
+      })
+
+      console.log(`[主动] ${groupId.slice(0, 12)}… 插了一句：${answer.slice(0, 40)}`)
+    } catch (error) {
+      console.warn(`[主动] ${groupId.slice(0, 12)}… 失败：`, error?.message ?? error)
+    }
   }
 }
 
@@ -875,6 +923,16 @@ async function handleMessage(event, trigger = 'at') {
       },
     })
     await sendLongReply(event, answer)
+
+    if (event.message_type === 'group' && answer) {
+      groupLog.record(event.group_id, {
+        t: Date.now(),
+        u: 'bot',
+        n: env.personaName,
+        c: String(answer).replace(/\s+/g, ' ').slice(0, 200),
+        id: `bot-${Date.now()}`,
+      })
+    }
   } catch (error) {
     console.error(`[模型调用失败] ${key}:`, error?.message ?? error)
     await sendReply(event, '抱歉，我这边暂时无法回答，请稍后再试。').catch(() => {})
@@ -1013,6 +1071,7 @@ async function shutdown(signal) {
     flush()
     flushTickets()
     flushUsage()
+    flushKnowledge()
   } catch (error) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
@@ -1152,6 +1211,13 @@ try {
     },
     runTask: runScheduledTask,
   })
+
+  try {
+    const groups = rebuildAll()
+    if (groups > 0) console.log(`[知识] 已重建 ${groups} 个群的画像`)
+  } catch (error) {
+    console.warn('[知识] 启动重建失败：', error?.message ?? error)
+  }
 
   // 复活播报：重启后主动说话，别让用户猜「它到底起没起来」
   const announce = async (interruptedList) => {
@@ -1293,14 +1359,30 @@ try {
     console.log(`[同步] 每 ${syncMinutes} 分钟自动提交一次（AUTO_SYNC_INTERVAL_MINUTES 可调，0 关闭）`)
   }
 
+  // 主动扫描：每 N 分钟翻一遍群记录，看有没有「有人问但没人答」的问题
+  const proactiveMinutes = Number(process.env.PROACTIVE_INTERVAL_MINUTES ?? 5)
+  if (process.env.PROACTIVE_ENABLED !== 'false' && proactiveMinutes > 0) {
+    const proactiveTimer = setInterval(() => {
+      runProactiveScan().catch((error) => console.warn('[主动] 扫描异常：', error?.message ?? error))
+    }, proactiveMinutes * 60_000)
+    proactiveTimer.unref?.()
+
+    console.log(
+      `[主动] 每 ${proactiveMinutes} 分钟扫一遍群记录` +
+        `（每小时最多 ${process.env.PROACTIVE_MAX_PER_HOUR || 2} 次，` +
+        `${process.env.PROACTIVE_QUIET_START || 23}-${process.env.PROACTIVE_QUIET_END || 8} 点静默）`,
+    )
+  }
+
   const mediaTtlHours = Number(process.env.MEDIA_TTL_HOURS || 24)
   const cleaner = setInterval(async () => {
     try {
+      const groups = rebuildAll()
       const { cleared, removed } = evictIdleSessions(env.sessionTtlMs)
       const files = await cleanupIncoming(mediaTtlHours)
       if (cleared || removed || files) {
         console.log(
-          `[清理] 闲置会话：清空 ${cleared} 个、删除 ${removed} 个空壳；回收附件 ${files} 个`,
+          `[清理] 群知识重建 ${groups} 个；闲置会话：清空 ${cleared} 个、删除 ${removed} 个空壳；回收附件 ${files} 个`,
         )
       }
     } catch (error) {

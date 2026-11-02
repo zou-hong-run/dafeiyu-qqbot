@@ -6,6 +6,7 @@ import { env } from './env.js'
 import { denyReason, isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './policy.js'
 import { recordUsage } from './usage.js'
 import { noteToolResult } from './pitfalls.js'
+import { knowledgePrompt } from './knowledge.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
@@ -433,6 +434,12 @@ function buildSystemPrompt(sessionKey, userText) {
 
   const self = selfDoc()
   if (self) parts.push(`【自身能力说明】\n${self}`)
+
+  // 本群沉淀：谁常来、什么时段、聊什么——开口前就知道自己在哪个群
+  if (sessionKey.startsWith('group:')) {
+    const knowledge = knowledgePrompt(sessionKey.slice(6))
+    if (knowledge) parts.push(knowledge)
+  }
 
   if (env.markdownReply) {
     parts.push(
@@ -989,6 +996,45 @@ async function runToolTracked(call, context) {
     const message = `调用失败：${error?.message ?? error}`
     noteToolResult(toolName, message)
     return `工具 ${toolName} ${message}`
+  }
+}
+
+/**
+ * 主动接话：群里没人叫它，但发现了能帮上的问题。
+ * 返回空字符串表示这次不该说话（模型判断帮不上或不该插）。
+ */
+export async function proactiveReply({ transcript, knowledge = '', personaName = '' } = {}) {
+  const text = String(transcript ?? '').trim()
+  if (!text) return ''
+
+  const systemPrompt = `你是「${personaName || env.personaName}」，正在群里潜水。下面是群里最近的消息，没有人 @ 你，也没有叫你的名字。
+
+判断标准：只有出现「明确在问、你确实能答、且还没人答」的问题时才插一句。闲聊、已经有人回答、你也不确定的，一律不说话。
+要说话就直接说，简短自然，别用「我来回答」这种开场，别重复别人的话。
+不想说话就只输出四个字母：SKIP`
+
+  const userContent = knowledge ? `${knowledge}
+
+最近的群消息：
+${text}` : `最近的群消息：
+${text}`
+
+  try {
+    const completion = await createCompletion({
+      model: env.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      max_tokens: 400,
+    })
+
+    const answer = String(completion.choices?.[0]?.message?.content ?? '').trim()
+    if (!answer || answer.toUpperCase().startsWith('SKIP') || answer.length < 4) return ''
+    return answer
+  } catch (error) {
+    console.error('[主动] 生成回复失败：', error?.message ?? error)
+    return ''
   }
 }
 

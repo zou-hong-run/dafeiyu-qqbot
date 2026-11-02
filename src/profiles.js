@@ -43,7 +43,7 @@ export function buildProfile(groupId, window = ANALYSIS_WINDOW) {
 
   for (const entry of entries) {
     const id = String(entry.u ?? '')
-    if (!id) continue
+    if (!id || id === 'bot') continue
 
     if (!people.has(id)) {
       people.set(id, {
