@@ -32,6 +32,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'read_group_history',
   'list_groups',
   'send_to_group',
+  'git_sync',
   'send_image',
   'send_audio',
   'send_video',
@@ -269,6 +270,27 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'git_sync',
+      description:
+        '代码仓库同步。mode 三种：' +
+        'status=看当前分支、未提交改动、领先落后远端几个提交；' +
+        'push=把服务器上的改动提交并推送到仓库（你自己改了源码之后用这个留痕）；' +
+        'pull=把仓库里的最新代码拉下来（我在本地改了东西时用）。' +
+        'push 会自动拦截 .env/data/logs 等敏感路径和疑似密钥。' +
+        '注意：重启前会自动 push，所以通常不用手动调。',
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', description: 'status / push / pull', enum: ['status', 'push', 'pull'] },
+          reason: { type: 'string', description: '这次改动做了什么，会写进 commit message' },
+        },
+        required: ['mode'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_groups',
       description:
         '列出机器人待过的群（群 openid + 消息条数 + 最近活跃时间）。' +
@@ -423,6 +445,7 @@ async function runTool(
     historyReader,
     groupSender,
     groupsReader,
+    gitSync,
     startTask,
     scheduler,
     notifyUser,
@@ -559,6 +582,20 @@ async function runTool(
     }
     resetMemory(sessionKey)
     return '当前会话的记忆已清空，从现在开始是全新的对话。'
+  }
+
+  if (name === 'git_sync') {
+    if (!isToolAllowed('git_sync', scope, actor)) {
+      return `${denyReason('git_sync', scope, actor)}。`
+    }
+    if (typeof gitSync !== 'function') return '当前场景不能操作仓库。'
+
+    try {
+      const result = await gitSync({ mode: args.mode, reason: args.reason })
+      return result
+    } catch (error) {
+      return `仓库操作失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'list_groups') {
@@ -832,6 +869,7 @@ export async function chat(sessionKey, userText, options = {}) {
     historyReader = null,
     groupSender = null,
     groupsReader = null,
+    gitSync = null,
     startTask = null,
     scheduler = null,
     onStep = null,

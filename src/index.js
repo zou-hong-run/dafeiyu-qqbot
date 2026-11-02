@@ -12,6 +12,7 @@ import { ensureSkillsDir } from './skills.js'
 import { evictIdleSessions, reset, stats, flush } from './memory.js'
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
+import { commitAndPush, describeStatus, pullLatest } from './sync.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
@@ -108,6 +109,32 @@ function referencedContext(event) {
   }
 
   return ''
+}
+
+// 让模型自己把改动提交回仓库，或者拉取最新代码
+function gitSyncFor() {
+  return async ({ mode = 'status', reason = '' } = {}) => {
+    const action = String(mode).toLowerCase()
+
+    if (action === 'status') return describeStatus()
+
+    if (action === 'push') {
+      const result = commitAndPush(reason ? `auto sync: ${String(reason).slice(0, 60)}` : 'auto sync: 手动推送')
+      if (result.skipped) return `没有需要同步的改动（${result.reason}）`
+      if (result.pushed) return `已提交并推送 ${result.files} 个文件到 ${result.branch}`
+      return `已本地提交 ${result.files} 个文件，但推送失败：${result.reason}`
+    }
+
+    if (action === 'pull') {
+      const result = pullLatest()
+      if (!result.ok) throw new Error(result.reason)
+      return `已拉取 ${result.branch} 的最新代码${result.output ? `：
+${result.output}` : ''}
+改完记得重启才生效`
+    }
+
+    throw new Error(`不认识的 mode：${mode}，只能是 status / push / pull`)
+  }
 }
 
 // 主动往别的群发消息：私聊里也能把话送到指定的群
@@ -657,6 +684,7 @@ ${result.reason}
       historyReader: historyReaderFor(event),
       groupSender: groupSenderFor(event),
       groupsReader: groupsReaderFor(),
+      gitSync: gitSyncFor(),
       scheduler: schedulerFor(event),
       onStep: progressReporter(event),
       startTask: (goal) =>
@@ -827,6 +855,22 @@ async function shutdown(signal) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
 
+  // 机器人自己改了源码时，退出前把它提交回仓库，实现「自己进化」
+  if (process.env.AUTO_SYNC_ON_EXIT !== 'false') {
+    try {
+      const synced = commitAndPush('auto sync: 退出前自动提交')
+      if (synced.skipped) {
+        console.log(`[同步] 跳过：${synced.reason}`)
+      } else if (synced.pushed) {
+        console.log(`[同步] 已提交并推送 ${synced.files} 个文件（${synced.branch}）`)
+      } else {
+        console.warn(`[同步] 已本地提交 ${synced.files} 个文件，但推送失败：${synced.reason}`)
+      }
+    } catch (error) {
+      console.error('[同步] 自动提交失败（不影响退出）：', error?.message ?? error)
+    }
+  }
+
   stopWatchdog()
 
   await withTimeout(stopMcp(), 5000)
@@ -908,6 +952,13 @@ function reportMemory() {
 }
 
 reportMemory()
+
+try {
+  const repoLine = describeStatus().split('\n')[0]
+  console.log(`[同步] ${repoLine}`)
+} catch (error) {
+  console.error('[同步] 读仓库状态失败：', error?.message ?? error)
+}
 
 console.log(`[启动] 正在连接 QQ 开放平台（AppID: ${env.appId}）...`)
 

@@ -203,6 +203,8 @@ QQ 网关 ──WS──▶ index.js
                   └─ 发送：被动回复优先（每条消息最多 4 次），超时/超次自动降级主动消息
 ```
 
+**代码自同步**：机器人在服务器上改完源码后，进程退出（`restart_self` / `pm2 restart`）时会自动 `git commit` + `push` 回仓库，改动不会因为一次部署覆盖而丢失。手动控制用 `git_sync` 工具（`status` / `push` / `pull`）。提交前会拦截 `.env`、`data/`、`logs/`、`downloads/`、`tmp/` 和疑似密钥内容。
+
 **自动清理**：每小时跑一次——闲置超过 `SESSION_TTL_MINUTES` 的会话清空短期/中期记忆（`remember` 写的长期事实保留），`downloads/incoming/` 里超过 `MEDIA_TTL_HOURS` 的附件删除。
 
 **记忆分层**：短期只保留最近 `HISTORY_TURNS` 轮原文（超出的自动压成中期摘要），另有一道 token 上限兜底；`remember` 写入的长期事实跨重启保留。
