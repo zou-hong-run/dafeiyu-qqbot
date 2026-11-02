@@ -50,6 +50,7 @@ const summarizing = new Set()
 const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'note_situation',
+  'ask_choice',
   'goal',
   'read_group_history',
   'read_profile',
@@ -84,6 +85,28 @@ const LOCAL_TOOLS = [
           text: { type: 'string', description: '一句话事实，如「用户是做前端的，主要在写 React」' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ask_choice',
+      description:
+        '拿不准对方要哪个的时候，发一个带编号的选择题，对方回数字就算选中。' +
+        '一次 2 到 5 个选项，每个选项写清楚具体做什么（不要写「其他」「再说」这种空选项）。' +
+        '适合：要不要继续、选哪种方案、挑哪个文件。别拿它做问卷或连环追问。',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: '一句话问题，如「要哪种配色」' },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '2 到 5 个选项，每个不超过 20 字',
+          },
+        },
+        required: ['question', 'options'],
       },
     },
   },
@@ -541,6 +564,7 @@ async function runTool(
     fileSender,
     cardSender,
     speakSender,
+    choiceSender,
     historyReader,
     groupSender,
     groupsReader,
@@ -602,6 +626,21 @@ async function runTool(
         : `记下了：${result.item.topic}（id ${result.item.id}）`
     } catch (error) {
       return `记录失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'ask_choice') {
+    if (!isToolAllowed('ask_choice', scope, actor)) {
+      return `${denyReason('ask_choice', scope, actor)}。`
+    }
+    if (typeof choiceSender !== 'function') {
+      return '当前场景发不了选择题，直接把选项写在回复里让对方挑。'
+    }
+    try {
+      const sent = await choiceSender({ question: args.question, options: args.options })
+      return `选择题已发出（${sent.count} 个选项），对方回数字就算选中：${sent.text.split('\n')[0]}`
+    } catch (error) {
+      return `发选择题失败：${error?.message ?? error}`
     }
   }
 
@@ -1169,6 +1208,41 @@ export async function hotTakeReply({ headlines = '', recent = [], personaName = 
   }
 }
 
+// 工单跑完后回头看一眼：下次做同类任务，什么值得提前知道
+export async function summarizeTask({ goal = '', tools = [], answer = '' } = {}) {
+  const body = [
+    `任务目标：${goal}`,
+    `调用过的工具：${tools.join(' → ') || '无记录'}`,
+    `产出摘要：${String(answer ?? '').slice(0, 800)}`,
+  ].join('\n')
+
+  const systemPrompt = `你是任务复盘助手。下面是一个刚跑成功的工作任务，请写「下次做同类任务要提前知道的事」：
+- 关键前置条件（要装什么、要什么权限、文件放哪、要什么配置）
+- 踩过的坑（过程里有报错、重试、换方案的地方）
+- 最省事的那条命令或步骤
+
+规则：两三行中文，一行一条，不要复述任务本身，不要评价做得好不好，不要写「本次任务」；
+只写从过程里能看出来的具体事实，看不出来就只输出四个字母：SKIP。总长 150 字以内。`
+
+  try {
+    const completion = await createCompletion({
+      model: env.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: body },
+      ],
+      max_tokens: 400,
+    })
+
+    const raw = String(completion.choices?.[0]?.message?.content ?? '').trim()
+    if (!raw || raw.toUpperCase().startsWith('SKIP')) return ''
+    return raw.slice(0, 300)
+  } catch (error) {
+    console.error('[模板] 复盘失败：', error?.message ?? error)
+    return ''
+  }
+}
+
 export async function chat(sessionKey, userText, options = {}) {
   usageKey = sessionKey
 
@@ -1184,6 +1258,7 @@ export async function chat(sessionKey, userText, options = {}) {
     fileSender = null,
     cardSender = null,
     speakSender = null,
+    choiceSender = null,
     historyReader = null,
     groupSender = null,
     groupsReader = null,
@@ -1384,6 +1459,7 @@ export async function chat(sessionKey, userText, options = {}) {
         fileSender,
         cardSender,
         speakSender,
+        choiceSender,
         historyReader,
         profileReader,
         groupSender,

@@ -22,6 +22,7 @@ import { findCandidates, formatCandidates, noteProactive, shouldProactive } from
 import { dueFollowUps, flushSituations, markFollowedUp } from './situations.js'
 import { generateHotTake } from './hot-takes.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
+import { putChoice, resolveChoice, choiceText } from './choices.js'
 import { bot } from './bot.js'
 import { chunkText, clip, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
 import { pendingCount, takePending } from './pending.js'
@@ -504,6 +505,20 @@ async function runFollowUps() {
   }
 }
 
+// 选择题：QQ 官方按钮要开放平台预建模板，机器人自己造不出来，
+// 所以用「编号选项 + 回数字」实现同样的交互
+function choiceSenderFor(event) {
+  const sessionKey = sessionKeyOf(event)
+  return async ({ question, options } = {}) => {
+    const entry = putChoice(sessionKey, { question, options })
+    if (!entry) throw new Error('至少给 2 个选项，最多 5 个')
+
+    const text = choiceText(entry)
+    await sendReply(event, text)
+    return { count: entry.options.length, text }
+  }
+}
+
 // 热点吐槽：自己去搜当天新闻，挑一条在群里说两句
 function pickActiveGroup() {
   if (process.env.HOT_TAKE_TARGET) return String(process.env.HOT_TAKE_TARGET).trim()
@@ -960,6 +975,12 @@ async function handleMessage(event, trigger = 'at') {
   try {
     const actor = event.user_id ?? ''
 
+    // 上一条发了选择题、这条回数字：当成选中，翻成明确的话再交给模型
+    const picked = resolveChoice(key, text)
+    if (picked) {
+      text = `${picked.choice}\n（对方刚在「${picked.question}」这道选择题里选了这一项）`
+    }
+
     // 语音/图片/文件：下载后在输入里附一段说明，图片还会直接喂给多模态模型
     let input = `${text}${referencedContext(event)}`
     let images = []
@@ -989,6 +1010,7 @@ async function handleMessage(event, trigger = 'at') {
       fileSender: fileSenderFor(event),
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
+      choiceSender: choiceSenderFor(event),
       historyReader: historyReaderFor(event),
       profileReader: profileReaderFor(event),
       groupSender: groupSenderFor(event),

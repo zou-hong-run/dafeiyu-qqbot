@@ -232,6 +232,8 @@ export async function sendLongReply(event, text, { maxParts = 6, gapMs = 600 } =
   const parts = chunkText(text)
   if (parts.length === 0) return
   if (parts.length === 1) {
+    // 私聊单条长回复走流式接口：内容一小截一小截出现，不用干等一整块
+    if (await sendStreamReply(event, parts[0])) return
     await sendReply(event, parts[0])
     return
   }
@@ -251,6 +253,39 @@ export async function sendLongReply(event, text, { maxParts = 6, gapMs = 600 } =
     } catch (error) {
       console.warn(`[发送] 第 ${i + 1}/${list.length} 段失败：`, error?.message ?? error)
     }
+  }
+}
+
+// 私聊流式：调 QQ 的单聊流式接口，内容一截一截下发，界面上是逐段长出来的
+// 群里不用——一群人看着字一个个蹦出来很吵。失败就返回 false，由调用方回落成普通发送
+export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 80 } = {}) {
+  const body = String(text ?? '').trim()
+  if (event?.message_type !== 'private' || !event?.user_id) return false
+  if (env.streamReply === false) return false
+  if (body.length < 120) return false
+
+  let stream
+  try {
+    stream = bot.user(event.user_id).createStream()
+  } catch (error) {
+    console.warn('[流式] 创建流失败，改普通发送：', String(error?.message ?? error).slice(0, 60))
+    return false
+  }
+
+  try {
+    for (let i = 0; i < body.length; i += chunkSize) {
+      const chunk = body.slice(i, i + chunkSize)
+      if (i + chunkSize >= body.length) {
+        await stream.end(chunk)
+      } else {
+        await stream.write(chunk)
+        if (gapMs > 0) await new Promise((resolve) => setTimeout(resolve, gapMs))
+      }
+    }
+    return true
+  } catch (error) {
+    console.warn('[流式] 发送中断（前面几段已发出）：', String(error?.message ?? error).slice(0, 80))
+    return true // 已经发出去一部分了，别再整条重发造成重复
   }
 }
 

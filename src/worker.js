@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './env.js'
-import { runTaskAgent, verifyCompletion } from './deepseek.js'
+import { runTaskAgent, verifyCompletion, summarizeTask } from './deepseek.js'
+import { recordTemplate } from './templates.js'
 import {
   createTicket,
   finishTicket,
@@ -149,8 +150,10 @@ export function startTask({
   updateTicket(ticket.id, { status: STATUS.running })
 
   let lastReportAt = Date.now()
+  const toolSeq = []
 
   const onStep = async ({ round, tool }) => {
+    toolSeq.push(tool)
     const current = noteStep(ticket.id, round + 1, tool)
     if (!current) return
 
@@ -246,6 +249,19 @@ export function startTask({
       const tail = passed ? '' : `\n（自动续跑 ${env.taskMaxContinuations} 次仍未通过验收）`
 
       finishTicket(ticket.id, { status: STATUS.done, answer })
+
+      // 成功的复杂任务沉淀成模板：下次同类任务直接照路子走，不用重新试错
+      if (passed && toolSeq.length >= 3) {
+        summarizeTask({ goal, tools: toolSeq, answer })
+          .then((note) =>
+            recordTemplate({ goal, tools: toolSeq, steps: toolSeq.length, note }),
+          )
+          .then((block) => {
+            if (block) console.log(`[模板] 已沉淀：${block.split('\n')[0].replace(/^### /, '')}`)
+          })
+          .catch((error) => console.warn('[模板] 沉淀失败：', error?.message ?? error))
+      }
+
       await say(`工单 ${ticket.id} 完成，用时 ${seconds} 秒，共 ${ticket.step} 步${tail}\n\n${answer}`)
       return answer
     } catch (error) {
