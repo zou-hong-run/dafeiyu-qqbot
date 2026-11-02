@@ -159,7 +159,50 @@ function groupSenderFor(event) {
   }
 }
 
-// 列出机器人待过的群，模型用它找 groupId
+// 列出机器人待过的群，模型用它找 groupId// 全服通报：把同一条消息推给所有待过的群，默认跳过当前群
+function broadcastSenderFor(event) {
+  const currentGroup = event?.group_id
+
+  return async (input) => {
+    const text = String(input?.text ?? '').trim()
+    if (!text) throw new Error('缺少要通报的内容')
+    if (text.length > 2000) throw new Error(`内容 ${text.length} 字，太长了，压到 2000 字以内`)
+
+    let ids = []
+    try {
+      ids = fs
+        .readdirSync(path.join(dataDir, 'groups'))
+        .filter((name) => name.endsWith('.jsonl'))
+        .map((name) => name.slice(0, -6))
+    } catch {
+      ids = []
+    }
+
+    const only = Array.isArray(input?.targets) ? input.targets.map(String) : []
+    if (only.length > 0) ids = ids.filter((id) => only.includes(id))
+    if (!input?.includeCurrent && currentGroup) ids = ids.filter((id) => id !== currentGroup)
+
+    if (ids.length === 0) return { total: 0, sent: [], failed: [] }
+    if (input?.dryRun) return { total: ids.length, sent: [], failed: [], dryRun: true, targets: ids }
+
+    const sent = []
+    const failed = []
+    for (const groupId of ids) {
+      try {
+        await bot.group(groupId).send(clip(text))
+        sent.push(groupId)
+      } catch (error) {
+        failed.push(`${groupId}：${error?.message ?? error}`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 900))
+    }
+
+    console.log(`[全服通报] 成功 ${sent.length}/${ids.length} 个群`)
+    return { total: ids.length, sent, failed }
+  }
+}
+
+
 function groupsReaderFor() {
   return async () => {
     let ids = []
@@ -289,6 +332,7 @@ async function runScheduledTask(task) {
     scheduler: schedulerForTarget(sessionKey, task.target),
     historyReader: historyReaderForGroup(task.target.type === 'group' ? task.target.id : ''),
     groupSender: groupSenderFor(null),
+    broadcastSender: broadcastSenderFor(null),
     groupsReader: groupsReaderFor(),
     gitSync: gitSyncFor(),
   })
@@ -612,7 +656,9 @@ async function handleMessage(event, trigger = 'at') {
         groupsReader: groupsReaderFor(),
         gitSync: gitSyncFor(),
         callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
+        broadcastSender: broadcastSenderFor(event),
       })
+
       await sendReply(event, `已建工单 ${id}：${goal}\n进度会自动推过来，随时发 /tasks 查状态。`)
     } catch (error) {
       await sendReply(event, `启动失败：${error?.message ?? error}`)
@@ -737,6 +783,8 @@ async function handleMessage(event, trigger = 'at') {
       groupsReader: groupsReaderFor(),
       gitSync: gitSyncFor(),
       scheduler: schedulerFor(event),
+      broadcastSender: broadcastSenderFor(event),
+
       onStep: progressReporter(event),
       startTask: (goal) =>
         launchTask({

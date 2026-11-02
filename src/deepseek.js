@@ -32,6 +32,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'read_group_history',
   'list_groups',
   'send_to_group',
+  'broadcast',
   'git_sync',
   'send_image',
   'send_audio',
@@ -320,6 +321,30 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'broadcast',
+      description:
+        '全服通报：把同一条消息推给机器人待过的所有群。默认跳过当前群（避免和回复撞车），' +
+        '要连当前群一起发就传 includeCurrent=true。正式发之前先传 dryRun=true 预演一遍，' +
+        '确认目标群没问题再发。每个群之间隔 0.9 秒防频控，只管理员可用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要通报的正文，2000 字以内' },
+          dryRun: { type: 'boolean', description: 'true 只列出会发到哪些群，不真发' },
+          includeCurrent: { type: 'boolean', description: 'true 时连当前群也发一份，默认不发' },
+          targets: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '只发给指定的群 openid（可选，不填就是全部群）',
+          },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'goal',
       description:
         '管理当前会话的长期目标，让多轮对话里的长任务不会说完就断片。' +
@@ -449,7 +474,9 @@ async function runTool(
     startTask,
     scheduler,
     notifyUser,
+    broadcastSender,
   },
+
 ) {
   const name = call.function?.name ?? ''
 
@@ -604,6 +631,27 @@ async function runTool(
       return await groupsReader()
     } catch (error) {
       return `列群失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'broadcast') {
+    if (!isToolAllowed('broadcast', scope, actor)) {
+      return `${denyReason('broadcast', scope, actor)}。`
+    }
+    if (typeof broadcastSender !== 'function') return '当前场景不能做全服通报。'
+    try {
+      const result = await broadcastSender(args)
+      if (result.total === 0) return '没有可以通报的群。'
+      if (result.dryRun) {
+        return `预演：这次会发给 ${result.total} 个群：\n${result.targets.join('\n')}`
+      }
+      const lines = [`全服通报：成功 ${result.sent.length} / ${result.total} 个群`]
+      if (result.failed.length > 0) {
+        lines.push(`失败 ${result.failed.length} 个：\n${result.failed.join('\n')}`)
+      }
+      return lines.join('\n')
+    } catch (error) {
+      return `全服通报失败：${error?.message ?? error}`
     }
   }
 
@@ -884,6 +932,8 @@ export async function chat(sessionKey, userText, options = {}) {
     historyReader = null,
     groupSender = null,
     groupsReader = null,
+    broadcastSender = null,
+
     gitSync = null,
     startTask = null,
     scheduler = null,
@@ -1081,6 +1131,7 @@ export async function chat(sessionKey, userText, options = {}) {
         speakSender,
         historyReader,
         groupSender,
+        broadcastSender,
         groupsReader,
         gitSync,
         startTask,
@@ -1143,6 +1194,7 @@ export async function runTaskAgent({
   cardSender,
   speakSender,
   groupSender,
+  broadcastSender,
   groupsReader,
   gitSync,
   scheduler,
@@ -1233,6 +1285,7 @@ export async function runTaskAgent({
         cardSender,
         speakSender,
         groupSender,
+        broadcastSender,
         groupsReader,
         gitSync,
         scheduler,

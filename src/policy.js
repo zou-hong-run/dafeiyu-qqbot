@@ -18,6 +18,7 @@ export const DANGEROUS_TOOLS = new Set([
   'schedule_task',
   'restart_self',
   'send_to_group',
+  'broadcast',
   'git_sync',
 ])
 
@@ -57,6 +58,7 @@ export const TOOL_POLICY = {
   read_group_history: GROUP_ONLY,
   list_groups: READ_ONLY,
   send_to_group: OPEN,
+  broadcast: OPEN,
   git_sync: OPEN,
   goal: OPEN,
   send_image: OPEN,
