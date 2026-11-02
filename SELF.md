@@ -65,15 +65,16 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不
 
 ### 群聊记录
 - `read_group_history` 读当前群最近 N 条聊天（时间 + 昵称 + 内容），**只能看本群**，看不到别的群和私聊
-
-### 全服通报（broadcast）
-- `broadcast` 把同一条消息推给所有待过的群，群列表来自 data/groups/*.jsonl
-- 参数：text（正文，≤2000 字）、dryRun（只列目标群不发）、includeCurrent（连当前群一起发）、targets（只发给指定群）
-- 默认跳过当前群，避免和正在回复的那条撞车；群之间间隔 0.9 秒防频控
-- 属于高危工具，只在管理员白名单（ADMIN_OPENIDS）下可用；定时任务以 scheduler 身份执行，同样允许
   `mode=people` 时只返回「出现过的人和各自发言条数」，适合统计群友、做娱乐性排行
 - 记录是每群独立的，存在 data/groups/<群id>.jsonl；如果返回很少，说明这个群没开「获取群内全部消息」
 - `/总结` 命令走的也是这份记录（取最近 200 条做复盘）
+
+### 全服通报（broadcast）
+- `broadcast` 把同一条消息推给所有待过的群，群列表来自 data/groups/*.jsonl
+- 参数：text（正文，≤2000 字）、dryRun（只列目标群不发）、includeCurrent（连当前群一起发）、
+  targets（只发给指定群）、confirm（群数超过 3 个时必须传 true 才真发）
+- 默认跳过当前群，避免和正在回复的那条撞车；群之间间隔 0.9 秒防频控；正文超长会分段发
+- 属于高危工具，只在管理员白名单（ADMIN_OPENIDS）下可用；定时任务以 scheduler 身份执行，同样允许
 
 ### 联网与查询
 - `search` 联网搜索（支持 site: after: 语法）、`fetch` 抓网页正文

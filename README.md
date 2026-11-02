@@ -168,6 +168,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `remember` / `clear_memory` | 写长期记忆 / 清空当前会话全部记忆 |
 | `read_group_history` | 读当前群最近 N 条聊天记录（只限本群，跨群不可见） |
 | `list_groups` / `send_to_group` | 列出待过的群 / 主动往指定群发消息（不需要有人 @，管理员限定） |
+| `broadcast` | 全服通报：同一段话推给所有待过的群，默认跳过当前群；群数超 3 个必须传 `confirm:true` 才真发，正文超长自动分段 |
 | `start_task` | 把复杂任务丢给后台子助手，边做边汇报 |
 | `schedule_task` / `list_schedules` / `remove_schedule` | 定时任务增删查 |
 | `goal` | 跨轮目标跟踪：目标没完成就继续推进 |

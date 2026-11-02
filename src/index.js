@@ -159,7 +159,7 @@ function groupSenderFor(event) {
   }
 }
 
-// 列出机器人待过的群，模型用它找 groupId// 全服通报：把同一条消息推给所有待过的群，默认跳过当前群
+// 全服通报：把同一条消息推给所有待过的群，默认跳过当前群
 function broadcastSenderFor(event) {
   const currentGroup = event?.group_id
 
@@ -185,11 +185,23 @@ function broadcastSenderFor(event) {
     if (ids.length === 0) return { total: 0, sent: [], failed: [] }
     if (input?.dryRun) return { total: ids.length, sent: [], failed: [], dryRun: true, targets: ids }
 
+    // 群多的时候强制先预演一次：全服通报发错很难收回
+    const needConfirm = ids.length > 3 && input?.confirm !== true
+    if (needConfirm) {
+      return { total: ids.length, sent: [], failed: [], dryRun: true, targets: ids, needConfirm: true }
+    }
+
+    // 通报正文可能超过单条上限，按句子边界切开逐段发，别用 clip 截断
+    const parts = chunkText(text).slice(0, 3)
     const sent = []
     const failed = []
+
     for (const groupId of ids) {
       try {
-        await bot.group(groupId).send(clip(text))
+        for (let i = 0; i < parts.length; i += 1) {
+          if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+          await bot.group(groupId).send(parts[i])
+        }
         sent.push(groupId)
       } catch (error) {
         failed.push(`${groupId}：${error?.message ?? error}`)
@@ -197,10 +209,12 @@ function broadcastSenderFor(event) {
       await new Promise((resolve) => setTimeout(resolve, 900))
     }
 
-    console.log(`[全服通报] 成功 ${sent.length}/${ids.length} 个群`)
-    return { total: ids.length, sent, failed }
+    console.log(`[全服通报] 成功 ${sent.length}/${ids.length} 个群，每个 ${parts.length} 段`)
+    return { total: ids.length, sent, failed, parts: parts.length }
   }
 }
+
+// 列出机器人待过的群，模型用它找 groupId
 
 
 function groupsReaderFor() {

@@ -337,6 +337,10 @@ const LOCAL_TOOLS = [
             items: { type: 'string' },
             description: '只发给指定的群 openid（可选，不填就是全部群）',
           },
+          confirm: {
+            type: 'boolean',
+            description: '群数超过 3 个时必须传 true 才会真发，否则只返回预演结果',
+          },
         },
         required: ['text'],
       },
@@ -642,10 +646,19 @@ async function runTool(
     try {
       const result = await broadcastSender(args)
       if (result.total === 0) return '没有可以通报的群。'
+
+      if (result.needConfirm) {
+        return (
+          `要发给 ${result.total} 个群，超过 3 个了，先给你一份清单：\n${result.targets.join('\n')}\n\n` +
+          '确认没问题就把 confirm 传成 true 再调一次，这次才会真发。'
+        )
+      }
+
       if (result.dryRun) {
         return `预演：这次会发给 ${result.total} 个群：\n${result.targets.join('\n')}`
       }
       const lines = [`全服通报：成功 ${result.sent.length} / ${result.total} 个群`]
+      if (result.parts > 1) lines.push(`正文拆成 ${result.parts} 段发送`)
       if (result.failed.length > 0) {
         lines.push(`失败 ${result.failed.length} 个：\n${result.failed.join('\n')}`)
       }
