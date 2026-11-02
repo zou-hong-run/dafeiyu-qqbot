@@ -45,7 +45,7 @@ function mediaMissingHint(downloadDir, resolved) {
   )
 }
 
-export function imageSenderFor(event) {
+export function imageSenderFor(event, send = (payload) => deliver(event, payload)) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
   return async (input) => {
@@ -53,7 +53,7 @@ export function imageSenderFor(event) {
     if (!target) throw new Error('缺少图片路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await deliver(event, segment.image(target))
+      await send(segment.image(target))
       return target
     }
 
@@ -74,12 +74,12 @@ export function imageSenderFor(event) {
       throw new Error(`图片 ${(size / 1048576).toFixed(1)}MB，超过 10MB 平台传不上去`)
     }
 
-    await deliver(event, segment.image(resolved))
+    await send(segment.image(resolved))
     return path.basename(resolved)
   }
 }
 
-export function audioSenderFor(event) {
+export function audioSenderFor(event, send = (payload) => deliver(event, payload)) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
   return async (input) => {
@@ -87,7 +87,7 @@ export function audioSenderFor(event) {
     if (!target) throw new Error('缺少音频路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await deliver(event, segment.audio(target))
+      await send(segment.audio(target))
       return target
     }
 
@@ -108,7 +108,7 @@ export function audioSenderFor(event) {
       throw new Error(`音频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 传不上去`)
     }
 
-    await deliver(event, segment.audio(resolved))
+    await send(segment.audio(resolved))
     return path.basename(resolved)
   }
 }
@@ -217,7 +217,7 @@ async function synthesizeSpeech(text, voice = TTS_VOICE) {
   )
 }
 
-export function speakSenderFor(event) {
+export function speakSenderFor(event, send) {
   return async (input) => {
     const payload = typeof input === 'string' ? { text: input } : (input ?? {})
     const text = String(payload.text ?? '').trim()
@@ -231,7 +231,7 @@ export function speakSenderFor(event) {
     const { file, backend } = await synthesizeSpeech(text, voice)
 
     try {
-      await deliver(event, segment.audio(file))
+      await (send ?? ((payload) => deliver(event, payload)))(segment.audio(file))
     } finally {
       fs.rm(file, { force: true }, () => {})
     }
@@ -240,7 +240,7 @@ export function speakSenderFor(event) {
   }
 }
 
-export function videoSenderFor(event) {
+export function videoSenderFor(event, send = (payload) => deliver(event, payload)) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
   return async (input) => {
@@ -248,7 +248,7 @@ export function videoSenderFor(event) {
     if (!target) throw new Error('缺少视频路径')
 
     if (/^https?:\/\//i.test(target)) {
-      await deliver(event, segment.video(target))
+      await send(segment.video(target))
       return target
     }
 
@@ -271,7 +271,7 @@ export function videoSenderFor(event) {
       )
     }
 
-    await deliver(event, segment.video(resolved))
+    await send(segment.video(resolved))
     return path.basename(resolved)
   }
 }
@@ -292,6 +292,9 @@ function scopeTagOf(event) {
 }
 
 function assertSameScope(resolved, event) {
+  // 定时任务没有会话上下文，不做跨会话校验
+  if (!event) return
+
   const rel = path.relative(incomingRoot, resolved)
   if (rel.startsWith('..') || path.isAbsolute(rel)) return // 不在 incoming 下，与附件无关
   if (rel.split(path.sep)[0] === scopeTagOf(event)) return
@@ -325,7 +328,7 @@ export function resolveSendableFile(target) {
   return null
 }
 
-export function fileSenderFor(event) {
+export function fileSenderFor(event, options = {}) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
   return async (input, options = {}) => {

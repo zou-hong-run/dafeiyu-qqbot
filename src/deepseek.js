@@ -1145,6 +1145,7 @@ export async function runTaskAgent({
   groupSender,
   groupsReader,
   gitSync,
+  scheduler,
   onStep,
   notifyUser,
   pullInput = null,
@@ -1234,6 +1235,7 @@ export async function runTaskAgent({
         groupSender,
         groupsReader,
         gitSync,
+        scheduler,
         startTask: null,
         notifyUser,
       })

@@ -188,8 +188,7 @@ function groupsReaderFor() {
 }
 
 // 给模型读当前群聊记录用：只读本群，不跨群
-function historyReaderFor(event) {
-  const groupId = event.group_id
+function historyReaderForGroup(groupId) {
   if (!groupId) return null
 
   return async (limit, mode) => {
@@ -223,6 +222,12 @@ function historyReaderFor(event) {
       groupLog.formatForSummary(entries)
     )
   }
+}
+
+// 按 target 主动发消息（定时任务、跨群播报都用它，不依赖 event）
+function sendToTarget(target, payload) {
+  if (target?.type === 'group') return bot.group(target.id).send(payload)
+  return bot.user(target.id).send(payload)
 }
 
 function sessionKeyOf(event) {
@@ -263,18 +268,25 @@ async function runScheduledTask(task) {
     console.error('[定时] 同步工具注册表失败：', error?.message ?? error)
   }
 
+  // 定时任务没有 event，所有发送走主动消息
+  const send = (payload) => sendToTarget(task.target, payload)
+  const sessionKey = `${task.target.type}:${task.target.id}`
+
   return runTaskAgent({
     taskPrompt: task.prompt,
     scope,
     actor: 'scheduler',
     tools: toolsForScope(scope, 'scheduler'),
     callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
-    sendImage: async () => {
-      throw new Error('定时任务里不能发图片，请把结果写成文字')
-    },
-    audioSender: async () => {
-      throw new Error('定时任务里不能发音频')
-    },
+    sendImage: imageSenderFor(null, send),
+    audioSender: audioSenderFor(null, send),
+    videoSender: videoSenderFor(null, send),
+    speakSender: speakSenderFor(null, send),
+    scheduler: schedulerForTarget(sessionKey, task.target),
+    historyReader: historyReaderForGroup(task.target.type === 'group' ? task.target.id : ''),
+    groupSender: groupSenderFor(null),
+    groupsReader: groupsReaderFor(),
+    gitSync: gitSyncFor(),
   })
 }
 
@@ -294,6 +306,14 @@ function progressReporter(event) {
   }
 }
 
+function schedulerForTarget(sessionKey, target) {
+  return {
+    add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt }),
+    list: () => listSchedules(sessionKey),
+    remove: (id) => removeSchedule(id, sessionKey),
+  }
+}
+
 function schedulerFor(event) {
   const sessionKey = sessionKeyOf(event)
   const isGroup = event.message_type === 'group'
@@ -302,11 +322,7 @@ function schedulerFor(event) {
     id: isGroup ? event.group_id : event.user_id,
   }
 
-  return {
-    add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt }),
-    list: () => listSchedules(sessionKey),
-    remove: (id) => removeSchedule(id, sessionKey),
-  }
+  return schedulerForTarget(sessionKey, target)
 }
 
 function notifierFor(event) {
