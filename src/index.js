@@ -23,6 +23,7 @@ import { dueFollowUps, flushSituations, markFollowedUp } from './situations.js'
 import { generateHotTake } from './hot-takes.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { putChoice, resolveChoice, choiceText } from './choices.js'
+import { mergeMessage } from './merge.js'
 import { bot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, passiveCountOf, sendLongReply, sendReply } from './sender.js'
 import { pendingCount, takePending } from './pending.js'
@@ -1169,9 +1170,10 @@ async function handleGroupAll(event) {
   }
 }
 
-async function handleGroupAt(event) {
-  const text = (event.content ?? '').trim()
-  recordGroupMessage(event, text || '[附件]')
+async function handleGroupAt(event, overrideText = '') {
+  const raw = (event.content ?? '').trim()
+  const text = (overrideText || raw).trim()
+  recordGroupMessage(event, raw || '[附件]')
 
   // 只 @ 不说话、也没带附件：以前是静默丢，用户会以为坏了，这里给一句引导（每群 60 秒最多一次）
   if (!text && extractInbound(event).length === 0) {
@@ -1183,7 +1185,7 @@ async function handleGroupAt(event) {
     return
   }
 
-  if (hasReplied(event.message_id)) return
+  if (hasReplied(event.message_id) && !overrideText) return
   markReplied(event.message_id)
 
   if (SUMMARY_CMD.test(text) && text.length <= 20) {
@@ -1202,12 +1204,62 @@ initTrigger({
 bot.on('message.private.friend', (event) => {
   // 平台偶尔会重推同一条，没这道去重会回两遍
   if (!claim(event.message_id, 'private')) return
-  enqueue(sessionKeyOf(event), () => handleMessage(event, 'private'))
+
+  const key = sessionKeyOf(event)
+  const hasInbound = extractInbound(event).length > 0
+
+  // 连发合并：连着几句合成一次理解，别只理解最后一句
+  mergeMessage(
+    {
+      sessionKey: key,
+      userId: event.user_id ?? '',
+      text: event.content,
+      event,
+      windowMs: env.mergeWindowMs,
+      immediate: hasInbound,
+    },
+    ({ text }) => enqueue(key, () => handleMessage(event, 'private', text)),
+  )
 })
 
 bot.on('message.group.at', (event) => {
   if (env.toolDebug) console.log(`[事件] group.at mentions=${event.mentions?.length ?? 0}`)
-  enqueue(sessionKeyOf(event), () => handleGroupAt(event))
+
+  const key = sessionKeyOf(event)
+  const hasInbound = extractInbound(event).length > 0
+
+  mergeMessage(
+    {
+      sessionKey: key,
+      userId: event.user_id ?? '',
+      text: event.content,
+      event,
+      windowMs: env.mergeWindowMs,
+      immediate: hasInbound,
+    },
+    ({ events, text }) => {
+      // 同一条消息可能已经从 message.group 走过一遍，过滤掉已处理的
+      const fresh = events.filter((item) => !hasReplied(item.message_id))
+      if (fresh.length === 0) return
+
+      for (const item of fresh) {
+        markReplied(item.message_id)
+        recordGroupMessage(item, (item.content ?? '').trim() || '[附件]')
+      }
+
+      const last = fresh[fresh.length - 1]
+      const merged = fresh
+        .map((item) => (item.content ?? '').trim())
+        .filter(Boolean)
+        .join('\n')
+
+      if (env.toolDebug && fresh.length > 1) {
+        console.log(`[合并] ${key} 连发 ${fresh.length} 条合成一次理解`)
+      }
+
+      enqueue(key, () => handleGroupAt(last, merged || text))
+    },
+  )
 })
 
 bot.on('message.group', (event) => {

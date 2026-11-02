@@ -130,6 +130,9 @@ export const env = {
   judgeMinLength: Math.floor(positiveNumber('JUDGE_MIN_LENGTH', 2)),
   judgeHourlyLimit: Math.floor(positiveNumber('JUDGE_HOURLY_LIMIT', 120)),
 
+  // 连发合并窗口：同一个人连着发的几句合成一次理解，0 = 关闭（逐条处理）
+  mergeWindowMs: nonNegativeNumber('MERGE_WINDOW_MS', 1200),
+
   groupLogLimit: Math.floor(positiveNumber('GROUP_LOG_LIMIT', 600)),
   summaryLimit: Math.floor(positiveNumber('SUMMARY_LIMIT', 200)),
   summaryCooldown: nonNegativeNumber('SUMMARY_COOLDOWN', 0) * 1000,
