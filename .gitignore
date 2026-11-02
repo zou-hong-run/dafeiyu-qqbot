@@ -5,3 +5,6 @@ logs/
 data/
 downloads/
 skills/*.md
+tmp/
+fables/
+notes/
