@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import OpenAI from 'openai'
 import { env } from './env.js'
 import { denyReason, isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from './policy.js'
+import { recordUsage } from './usage.js'
+import { noteToolResult } from './pitfalls.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
@@ -24,6 +26,23 @@ const client = new OpenAI({
   timeout: 60_000,
   maxRetries: 2,
 })
+
+// 当前正在服务的会话，用来把 token 用量归到对应的会话账上
+let usageKey = 'unknown'
+
+// 所有模型调用统一走这里：原样返回结果，顺手记一笔用量
+async function createCompletion(payload) {
+  const completion = await createCompletion(payload)
+  const usage = completion?.usage
+  if (usage) {
+    recordUsage({
+      sessionKey: usageKey,
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+    })
+  }
+  return completion
+}
 
 const summarizing = new Set()
 const LOCAL_TOOL_NAMES = new Set([
@@ -820,7 +839,7 @@ async function summarize(sessionKey, overflow) {
       .join('\n')
 
     const previous = midTerm(sessionKey)
-    const completion = await client.chat.completions.create({
+    const completion = await createCompletion({
       model: env.model,
       messages: [
         {
@@ -888,7 +907,7 @@ export async function testVision(imagePath) {
   }
 
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await createCompletion({
       model: env.model,
       messages: [
         {
@@ -929,7 +948,24 @@ export async function testVision(imagePath) {
   }
 }
 
+// 包一层：工具调用结果顺手记进复盘库，同类问题连栽三次会被写进 skills/pitfalls.md
+async function runToolTracked(call, context) {
+  const toolName = call?.function?.name ?? 'unknown'
+
+  try {
+    const result = await runTool(call, context)
+    noteToolResult(toolName, result)
+    return result
+  } catch (error) {
+    const message = `调用失败：${error?.message ?? error}`
+    noteToolResult(toolName, message)
+    return `工具 ${toolName} ${message}`
+  }
+}
+
 export async function chat(sessionKey, userText, options = {}) {
+  usageKey = sessionKey
+
   const {
     scope = 'private',
     actor = '',
@@ -986,7 +1022,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
   const finalize = async (label) => {
     try {
-      const response = await client.chat.completions.create({
+      const response = await createCompletion({
         model: env.model,
         messages: [
           ...messages,
@@ -1027,7 +1063,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
     let completion
     try {
-      completion = await client.chat.completions.create(payload)
+      completion = await createCompletion(payload)
     } catch (error) {
       const reason = String(error?.message ?? error)
       const contextIssue = /context length|too many tokens|maximum context|token limit|exceed/i.test(
@@ -1049,7 +1085,7 @@ export async function chat(sessionKey, userText, options = {}) {
           { role: 'user', content: userText },
         )
 
-        completion = await client.chat.completions.create(payload)
+        completion = await createCompletion(payload)
       } else if (imageParts.length > 0 && /image|vision|multimodal|invalid.*content/i.test(reason)) {
         // 当前模型不认识图片：去掉图片再来一次，别让整条消息直接失败
         console.warn(`[视觉] ${env.model} 不支持图片输入，去掉图片重试：${reason.slice(0, 100)}`)
@@ -1131,7 +1167,7 @@ export async function chat(sessionKey, userText, options = {}) {
         console.log(`[执行] ${sessionKey} ${toolName}(${argsText.slice(0, 150)})`)
       }
 
-      const result = await runTool(call, {
+      const result = await runToolTracked(call, {
         scope,
         actor,
         callTool,
@@ -1216,6 +1252,8 @@ export async function runTaskAgent({
   pullInput = null,
   signal,
 }) {
+  usageKey = sessionKey
+
   const systemPrompt = workdir
     ? `${TASK_SYSTEM_PROMPT}\n\n本次工作的目录：${workdir}\n中间产物写在这里，别散落到项目根。`
     : TASK_SYSTEM_PROMPT
@@ -1267,7 +1305,7 @@ export async function runTaskAgent({
       payload.tool_choice = round < total - 2 ? 'auto' : 'none'
     }
 
-    const completion = await client.chat.completions.create(payload)
+    const completion = await createCompletion(payload)
     const message = completion.choices?.[0]?.message
     if (!message) throw new Error('DeepSeek 返回了空响应')
 
@@ -1286,7 +1324,7 @@ export async function runTaskAgent({
       const toolName = call.function?.name ?? '未知工具'
       console.log(`[Worker:${sessionKey}] 第${round + 1}步 ${toolName}`)
 
-      const result = await runTool(call, {
+      const result = await runToolTracked(call, {
         scope,
         actor,
         callTool,
@@ -1316,7 +1354,7 @@ export async function runTaskAgent({
 
   if (!answer) {
     try {
-      const wrapUp = await client.chat.completions.create({
+      const wrapUp = await createCompletion({
         model: env.model,
         messages: [
           ...messages,
@@ -1351,7 +1389,7 @@ const TASK_VERIFY_PROMPT = `你是任务验收员。判断给定目标是否真�
 
 export async function verifyCompletion(goal, transcript) {
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await createCompletion({
       model: env.model,
       messages: [
         { role: 'system', content: TASK_VERIFY_PROMPT },
@@ -1378,7 +1416,7 @@ export async function verifyCompletion(goal, transcript) {
   }
 }
 
-export async function summarizeGroup(transcript, label = '') {  const completion = await client.chat.completions.create({
+export async function summarizeGroup(transcript, label = '') {  const completion = await createCompletion({
     model: env.model,
     messages: [
       {
@@ -1404,7 +1442,7 @@ export async function summarizeGroup(transcript, label = '') {  const completion
 }
 
 export async function judgeRelevance(transcript, botName = '机器人') {
-  const completion = await client.chat.completions.create({
+  const completion = await createCompletion({
     model: env.model,
     messages: [
       {

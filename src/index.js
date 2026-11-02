@@ -13,6 +13,7 @@ import { evictIdleSessions, recentSessions, reset, stats, flush } from './memory
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './sync.js'
+import { flushUsage, formatUsage } from './usage.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
@@ -489,6 +490,17 @@ async function handleMessage(event, trigger = 'at') {
         `管理员权限：${admin ? '有' : '无'}\n\n` +
         '要开高危工具（执行命令、写文件、装包、加 MCP）就把上面这串 openid 填进 .env 的 ADMIN_OPENIDS，逗号分隔。',
     )
+    return
+  }
+
+  if (text === '/cost' || text.startsWith('/cost ')) {
+    if (!isAdmin(scope, event.user_id ?? '')) {
+      await sendReply(event, `用量统计只对管理员开放。你的 openid：${event.user_id ?? '未知'}。`)
+      return
+    }
+
+    const days = Math.min(Math.max(Number(text.split(' ')[1]) || 7, 1), 60)
+    await sendReply(event, formatUsage(days))
     return
   }
 
@@ -989,6 +1001,7 @@ async function shutdown(signal) {
   try {
     flush()
     flushTickets()
+    flushUsage()
   } catch (error) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
