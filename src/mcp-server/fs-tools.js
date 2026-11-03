@@ -40,6 +40,48 @@ async function writeFile({ path: inputPath, content }) {
   return `已写入 ${rel}（${body.length} 字符）`
 }
 
+async function editFile({ path: inputPath, old_string, new_string, replace_all }) {
+  const { target, rel } = resolveSafe(inputPath)
+  if (!fs.existsSync(target)) throw new Error(`文件不存在：${rel}，先用 read_file 看一眼`)
+
+  const stat = fs.statSync(target)
+  if (stat.isDirectory()) throw new Error(`${rel} 是目录，不是文件`)
+
+  const oldText = String(old_string ?? '')
+  const newText = String(new_string ?? '')
+  if (!oldText) throw new Error('old_string 不能为空；要新建文件请用 write_file')
+  if (oldText === newText) throw new Error('old_string 和 new_string 完全一样，没有改动')
+
+  const original = fs.readFileSync(target, 'utf8')
+
+  // 换行风格：纯 CRLF 的文件按 CRLF 写回，避免整文件被改动
+  const crlf = !/[^\r]\n/.test(original) && original.includes('\r\n')
+  const before = crlf ? original.replace(/\r\n/g, '\n') : original
+  const needle = crlf ? oldText.replace(/\r\n/g, '\n') : oldText
+  const replacement = crlf ? newText.replace(/\r\n/g, '\n') : newText
+
+  const count = before.split(needle).length - 1
+  if (count === 0) {
+    throw new Error(
+      `在 ${rel} 里没找到 old_string。可能是缩进/换行不一致，或这段内容已经被改过——` +
+        '先 read_file 重新看一眼再改，别猜。',
+    )
+  }
+  if (count > 1 && !replace_all) {
+    throw new Error(
+      `old_string 在 ${rel} 里出现了 ${count} 次，不唯一。` +
+        '多带几行上下文把它定位到唯一位置；确实要全部替换就传 replace_all=true。',
+    )
+  }
+
+  const changed = replace_all ? before.split(needle).join(replacement) : before.replace(needle, replacement)
+  if (changed.length > MAX_CONTENT) throw new Error(`改完后 ${changed.length} 字符，超过上限 ${MAX_CONTENT}`)
+
+  fs.writeFileSync(target, crlf ? changed.replace(/\n/g, '\r\n') : changed, 'utf8')
+
+  return `已修改 ${rel}：替换 ${replace_all ? count : 1} 处，文件 ${changed.length} 字符`
+}
+
 async function readFile({ path: inputPath, limit }) {
   const { target, rel } = resolveSafe(inputPath)
   if (!fs.existsSync(target)) throw new Error(`文件不存在：${rel}`)
@@ -72,9 +114,32 @@ async function listDir({ path: inputPath }) {
   return `${rel} 下共 ${lines.length} 项：\n${lines.join('\n')}`
 }
 
-export const FS_HANDLERS = { write_file: writeFile, read_file: readFile, list_dir: listDir }
+export const FS_HANDLERS = {
+  write_file: writeFile,
+  edit_file: editFile,
+  read_file: readFile,
+  list_dir: listDir,
+}
 
 export const FS_TOOLS = [
+  {
+    name: 'edit_file',
+    description:
+      '精确替换文件里的一小段内容：给出现有的 old_string 和要换成的 new_string。' +
+      '改代码就该用它，不要用 write_file 整文件重写——那会把没看到的改动一起覆盖掉。' +
+      'old_string 必须和文件里的内容逐字一致（缩进、换行都算），且在文件里唯一；不唯一就多带几行上下文。' +
+      '改之前先 read_file 看一眼，改完再读一次确认。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '相对项目根的路径，如 src/sender.js' },
+        old_string: { type: 'string', description: '要被替换的原文，逐字精确，不要带行号' },
+        new_string: { type: 'string', description: '替换成的内容' },
+        replace_all: { type: 'boolean', description: 'old_string 出现多次且全都要换时才传 true' },
+      },
+      required: ['path', 'old_string', 'new_string'],
+    },
+  },
   {
     name: 'write_file',
     description:

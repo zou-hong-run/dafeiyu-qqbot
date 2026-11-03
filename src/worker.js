@@ -200,7 +200,8 @@ export function startTask({
 
         const prompt =
           attempt === 1
-            ? goal
+            ? `${goal}\n\n（开工前先用 todo_write 把这件事拆成 3 到 8 步的清单，每完成一步就更新状态；` +
+              '清单是给你自己用的，不用念给用户。改代码一律用 edit_file 精确替换，别整文件重写）'
             : `${goal}\n\n【上一轮进展】\n${history[history.length - 1] ?? ''}\n\n` +
               `【验收意见】${lastNextStep || '目标还没完成'}\n\n` +
               '继续推进，不要重复已经做完的部分。'

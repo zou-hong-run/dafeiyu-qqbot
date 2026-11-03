@@ -11,6 +11,7 @@ export const DANGEROUS_TOOLS = new Set([
   'shell',
   'run_script',
   'write_file',
+  'edit_file',
   'write_skill',
   'install_package',
   'add_mcp',
@@ -57,6 +58,7 @@ export const TOOL_POLICY = {
   remember: OPEN,
   note_situation: OPEN,
   ask_choice: OPEN,
+  todo_write: OPEN,
   read_group_history: GROUP_ONLY,
   read_profile: GROUP_ONLY,
   list_groups: READ_ONLY,
@@ -88,6 +90,7 @@ export const TOOL_POLICY = {
   remove_schedule: OPEN,
 
   write_file: OPEN,
+  edit_file: OPEN,
   read_file: READ_ONLY,
   list_dir: READ_ONLY,
 

@@ -8,6 +8,7 @@ import { recordUsage } from './usage.js'
 import { noteToolResult } from './pitfalls.js'
 import { knowledgePrompt } from './knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from './situations.js'
+import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
@@ -53,6 +54,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'note_situation',
   'ask_choice',
+  'todo_write',
   'goal',
   'read_group_history',
   'read_profile',
@@ -115,6 +117,39 @@ const LOCAL_TOOLS = [
           text: { type: 'string', description: '一句话事实，如「用户是做前端的，主要在写 React」' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'todo_write',
+      description:
+        '维护当前任务清单。三步以上的活先拆成清单再动手，每做完一项就更新状态。' +
+        '每次要传完整清单（覆盖旧的），不是只传改动的那一项。' +
+        'status 只有三种：pending（还没做）、in_progress（正在做，同一时间最多一项）、done（做完）。' +
+        '清单会挂在每一轮的提示词里，你自己也会看到进度，所以别让它和实际对不上。全部做完传空数组清空。',
+      parameters: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            description: '完整清单，最多 20 项',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: '一步做什么，20 字以内' },
+                status: {
+                  type: 'string',
+                  enum: ['pending', 'in_progress', 'done'],
+                  description: 'pending / in_progress / done',
+                },
+              },
+              required: ['title', 'status'],
+            },
+          },
+        },
+        required: ['items'],
       },
     },
   },
@@ -521,6 +556,10 @@ function buildSystemPrompt(sessionKey, userText) {
   const ongoing = situationPrompt(sessionKey)
   if (ongoing) parts.push(ongoing)
 
+  // 任务清单：长任务靠它防止跑到一半忘了还剩什么
+  const todos = todoPrompt(sessionKey)
+  if (todos) parts.push(todos)
+
   if (env.markdownReply) {
     parts.push(
       '【输出格式（优先于上文的格式要求）】当前环境支持 Markdown 渲染：可以用 **粗体**、- 列表、' +
@@ -685,6 +724,25 @@ async function runTool(
     }
     const saved = addLongTerm(sessionKey, args.text)
     return saved ? `已记住：${args.text}` : '这条已经记过了。'
+  }
+
+  if (name === 'todo_write') {
+    if (!isToolAllowed('todo_write', scope, actor)) {
+      return `${denyReason('todo_write', scope, actor)}。`
+    }
+    try {
+      const result = writeTodos(sessionKey, args.items)
+      if (result.items.length === 0) return '清单已清空。'
+
+      const lines = result.items.map((item) => {
+        const mark = item.status === 'done' ? '[x]' : item.status === 'in_progress' ? '[~]' : '[ ]'
+        return `${mark} ${item.title}`
+      })
+
+      return `清单已更新：${result.progress.done}/${result.progress.total} 完成\n${lines.join('\n')}`
+    } catch (error) {
+      return `更新清单失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'note_situation') {
@@ -1702,6 +1760,13 @@ export async function chat(sessionKey, userText, options = {}) {
         answer = await finalize(sessionKey)
         break outer
       }
+    }
+
+    // 清单太久没更新、又还有没做完的，提醒一次
+    const todoHint = noteTodoStep(sessionKey)
+    if (todoHint) {
+      messages.push({ role: 'user', content: todoHint })
+      if (env.toolDebug) console.log(`[清单] ${sessionKey} 第${round + 1}轮提醒更新清单`)
     }
   }
 

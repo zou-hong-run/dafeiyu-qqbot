@@ -256,6 +256,8 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `schedule_task` / `list_schedules` / `remove_schedule` | 定时任务增删查 |
 | `git_sync` | 代码仓库操作：`status` 看状态 / `push` 提交推送 / `pull` 拉最新（管理员） |
 | `goal` | 跨轮目标跟踪：目标没完成就继续推进 |
+| `todo_write` | 任务清单：三步以上的活先拆步骤，做完一项打一次勾，清单挂进提示词防跑偏 |
+| `ask_choice` / `note_situation` | 发编号选择题 / 记下「谁在为什么事卡住」 |
 
 **内置 MCP 工具**（跑在子进程里，通过 MCP 协议调用）
 
@@ -268,6 +270,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `restart_self` | 重启自己：延迟几秒后 `pm2 restart <应用名>`，留时间把话说完再重启（应用名自动取 pm2 注入的 `name`） |
 | `read_file` / `write_file` / `list_dir` | 项目内文件读写（`.env`、`data/` 不可写） |
 | `download` | 下载网络文件到 `downloads/` |
+| `edit_file` | 精确替换文件里的一段内容，改代码用它而不是整文件重写 |
 | `read_document` | 读 PDF / Word / Excel / CSV / 文本，提取正文给模型（20MB 内，8000 字截断） |
 | `draw_pixel` | 画像素风 PNG（heart/star/fish/camera 预设，或自定义字符网格），PNG 编码用 pngjs（纯 JS，无原生依赖），所有人可用 |
 | `write_skill` / `list_skills` | 写技能 Markdown 到 `skills/`，后续对话自动注入 |

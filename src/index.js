@@ -23,6 +23,7 @@ import { findCandidates, formatCandidates, noteProactive, shouldProactive } from
 import { dueFollowUps, flushSituations, markFollowedUp } from './situations.js'
 import { generateHotTake } from './hot-takes.js'
 import { listBackups, runBackup } from './backup.js'
+import { flushTodos } from './todos.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
 import { putChoice, resolveChoice, choiceText } from './choices.js'
 import { mergeMessage } from './merge.js'
@@ -1579,6 +1580,7 @@ async function shutdown(signal) {
     flushKnowledge()
     flushSituations()
     flushQuiet()
+    flushTodos()
   } catch (error) {
     console.error('[退出] 落盘失败：', error?.message ?? error)
   }
