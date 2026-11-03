@@ -1819,6 +1819,18 @@ try {
       }
     }
 
+    if (targets.size === 0) {
+      // 兜底：半小时内没人吭声也不能装死，退一步发给最近有过活动的会话
+      const fallback = recentSessions(7 * 24 * 60 * 60_000)[0]
+      if (fallback) {
+        const [ftype, ...frest] = fallback.key.split(':')
+        const fid = frest.join(':')
+        if ((ftype === 'group' || ftype === 'user') && fid) {
+          targets.set(fallback.key, { type: ftype, id: fid })
+        }
+      }
+    }
+
     if (targets.size === 0) return
 
     const reasonText = pending?.reason ? `（${pending.reason}）` : ''
@@ -1874,6 +1886,13 @@ try {
 
   if (interrupted.length > 0) {
     console.log(`[启动] 发现 ${interrupted.length} 个被中断的工单，已通知对应会话`)
+  }
+
+  // 复活播报真的得调用，不然上面那个函数就是死代码
+  try {
+    await announce(interrupted)
+  } catch (error) {
+    console.warn('[启动] 复活播报失败：', error?.message ?? error)
   }
 
   // 外部控制回路：只在外面看工单有没有真的在往前走，不参与执行
