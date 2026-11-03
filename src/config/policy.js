@@ -82,6 +82,7 @@ export const TOOL_POLICY = {
   find_video: READ_ONLY,
   fetch_video: READ_ONLY,
   read_video_subtitle: READ_ONLY,
+  video_meta: READ_ONLY,
   read_document: READ_ONLY,
 
   shell: SHELL,

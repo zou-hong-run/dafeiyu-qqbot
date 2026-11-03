@@ -455,18 +455,35 @@ async function readVideoSubtitle({ url = '', lang = 'zh-Hans,zh-CN,zh,en', start
   if (files.length === 0) {
     fs.rmSync(workDir, { recursive: true, force: true })
 
+    // 没字幕时顺手拿一下元数据，至少能说清「这是什么视频」
+    let extra = ''
+    try {
+      const meta = await videoMeta({ url })
+      const bits = [`《${meta.title}》`]
+      if (meta.uploader) bits.push(`UP 主 ${meta.uploader}`)
+      if (meta.duration) bits.push(`${Math.round(meta.duration)} 秒`)
+      extra = `\n\n顺手拿到了元数据：${bits.join('，')}`
+      if (meta.description) {
+        extra += `\n简介：${meta.description.replace(/\s+/g, ' ').slice(0, 200)}`
+      }
+    } catch {
+      // 元数据也拿不到就算，别掩盖「没字幕」这个主因
+    }
+
     // B 站的字幕只有登录态才给，没 cookies 会静默跳过
     if (/Subtitles are only available when logged in/i.test(stderr)) {
       throw new Error(
         'B 站的字幕要登录才给，服务器上缺 cookies。把浏览器导出的 cookies.txt 放到 data/cookies.txt 再试；' +
-          '在那之前只能截片段看画面。',
+          '在那之前只能截片段看画面。' +
+          extra,
       )
     }
     throw new Error(
       '没拿到字幕。两个常见原因：\n' +
         '1) B 站的字幕只有登录态才给 —— 确认 data/cookies.txt 在；\n' +
         '2) 这条视频本身没有 CC 字幕，也没有自动字幕。\n' +
-        '可以改 lang 试试（如 "en"），或者退回截片段看画面。',
+        '可以改 lang 试试（如 "en"），或者退回截片段看画面。' +
+        extra,
     )
   }
 
@@ -543,6 +560,66 @@ export const VIDEO_TOOLS_EXTRA = [
           maximum: 12000,
           description: '最多返回多少字，默认 6000',
         },
+      },
+      required: ['url'],
+    },
+  },
+]
+
+// 拿视频元数据（标题/时长/UP 主/简介）。比抓网页可靠：
+// 网页几百 KB 还容易被风控超时，这个走 yt-dlp 的结构化接口，几 KB 就够。
+async function videoMeta({ url = '' } = {}) {
+  assertPublicLink(url)
+  if (!(await checkYtdlp())) throw new Error('服务器上没装 yt-dlp')
+
+  const args = [
+    ...commonArgs(url),
+    '--skip-download',
+    '--print', '%(title)s\t%(duration)s\t%(uploader)s\t%(upload_date)s',
+    '--print', 'description:%(description)s',
+    url,
+  ]
+
+  let stdout = ''
+  try {
+    const result = await run(YTDLP, args, { timeout: 40_000, maxBuffer: 4 * 1024 * 1024 })
+    stdout = result.stdout || ''
+  } catch (error) {
+    const message = String(error?.stderr || error?.message || error)
+    if (/412|403|Failed to extract play info/i.test(message)) {
+      throw new Error('拿元数据被站点拦了（412）。先查 cookies、YTDLP_IMPERSONATE、yt-dlp 版本')
+    }
+    throw new Error(`拿元数据失败：${message.slice(0, 160)}`)
+  }
+
+  const lines = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  const head = (lines[0] ?? '').split('\t')
+  const description = (lines.find((line) => line.startsWith('description:')) ?? '')
+    .replace(/^description:/, '')
+    .trim()
+
+  return {
+    title: String(head[0] ?? '').trim() || '未命名',
+    duration: Number(head[1]) || 0,
+    uploader: String(head[2] ?? '').trim(),
+    date: String(head[3] ?? '').trim(),
+    description,
+  }
+}
+
+export const VIDEO_HANDLERS_META = { video_meta: videoMeta }
+
+export const VIDEO_TOOLS_META = [
+  {
+    name: 'video_meta',
+    type: 'tool',
+    description:
+      '拿视频的标题、UP 主、时长、简介（走 yt-dlp 的结构化接口，几 KB 就够；比 fetch 整个网页快得多，也不容易被风控超时）。' +
+      '用户问「这个视频讲了什么」但没字幕时先用它；和 read_video_subtitle 配合：有字幕读字幕，没字幕至少能说清标题和简介。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '视频链接' },
       },
       required: ['url'],
     },
