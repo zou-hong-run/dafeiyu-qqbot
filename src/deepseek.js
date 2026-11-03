@@ -1566,6 +1566,7 @@ export async function runTaskAgent({
   groupsReader,
   gitSync,
   scheduler,
+  recallMessages = null,
   onStep,
   notifyUser,
   pullInput = null,
