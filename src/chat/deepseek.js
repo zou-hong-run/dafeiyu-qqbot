@@ -11,7 +11,7 @@ import { noteSituation, resolveSituation, situationPrompt } from '../memory/situ
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { resetSession } from './session-reset.js'
 import { readSkill, skillsPrompt } from '../skills/skills.js'
-import { selfDoc } from '../skills/self-doc.js'
+import { appendLesson, selfDoc } from '../skills/self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from '../memory/goal.js'
 import {
   appendTurn,
@@ -56,6 +56,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'ask_choice',
   'todo_write',
   'read_skill',
+  'note_lesson',
   'goal',
   'read_group_history',
   'read_profile',
@@ -118,6 +119,26 @@ const LOCAL_TOOLS = [
           text: { type: 'string', description: '一句话事实，如「用户是做前端的，主要在写 React」' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'note_lesson',
+      description:
+        '把这次踩的坑记进自己的笔记（SELF.md 的踩坑记录段），下次会自动带上，不用再犯。' +
+        '什么时候用：折腾了两次以上才解决的问题、试错中发现的环境问题、某个工具突然不工作的真实原因。' +
+        '只写结论，不写过程：症状一句、原因一句、正确做法一句。' +
+        '别记一次性的（网络抖一下、用户打错字），只记下次还会遇到的。',
+      parameters: {
+        type: 'object',
+        properties: {
+          symptom: { type: 'string', description: '症状：看到什么现象，如「B 站报 412 无法解析」' },
+          cause: { type: 'string', description: '原因：真正卡住的是什么，如「yt-dlp 是 2024 旧版」' },
+          fix: { type: 'string', description: '正确做法：下次怎么处理，一句话' },
+        },
+        required: ['symptom', 'fix'],
       },
     },
   },
@@ -750,6 +771,20 @@ async function runTool(
     }
     const saved = addLongTerm(sessionKey, args.text)
     return saved ? `已记住：${args.text}` : '这条已经记过了。'
+  }
+
+  if (name === 'note_lesson') {
+    if (!isToolAllowed('note_lesson', scope, actor)) {
+      return `${denyReason('note_lesson', scope, actor)}。`
+    }
+    try {
+      const saved = appendLesson({ symptom: args.symptom, cause: args.cause, fix: args.fix })
+      return saved.duplicated
+        ? `这条已经记过了：${saved.line}`
+        : `已记进自己的笔记（第 ${saved.total} 条）：${saved.line}`
+    } catch (error) {
+      return `记录失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'read_skill') {

@@ -262,3 +262,7 @@ logs/                 pm2 日志
 3. 发现自己这份能力说明和实际情况不符时，用 `write_file` 更新 SELF.md
 
 最后同步测试：2026-11-02
+
+## 踩坑记录（自己总结的，别删）
+
+- B 站报 412 无法解析 → yt-dlp 是 2024 旧版，且没开 TLS 伪装 → 先查 yt-dlp 版本和 cookies，再试 --impersonate chrome
