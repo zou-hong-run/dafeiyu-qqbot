@@ -90,6 +90,8 @@ function sniffFile(filePath) {
     if (head.subarray(0, 4).toString() === 'OggS') return { type: 'audio/ogg', ok: true }
     if (head.subarray(0, 4).toString() === 'RIFF') return { type: 'audio/wav', ok: true }
     if (head.subarray(0, 4).toString() === 'fLaC') return { type: 'audio/flac', ok: true }
+    // m4a / mp4：第 4-8 字节是 'ftyp'
+    if (head.subarray(4, 8).toString() === 'ftyp') return { type: 'audio/mp4', ok: true }
     if (head.subarray(0, 4).toString() === 'PK\u0003\u0004') return { type: 'application/zip', ok: true }
     if (head.subarray(0, 4).toString() === '%PDF') return { type: 'application/pdf', ok: true }
     if (/^\s*<(!doctype|html|head|body|\?xml)/i.test(head.toString('utf8'))) {

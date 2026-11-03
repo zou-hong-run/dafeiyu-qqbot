@@ -1806,22 +1806,14 @@ try {
     // 10 分钟内刚播报过就别再刷一遍（避免震荡重启时反复打扰）
     if (last?.announcedAt && now - last.announcedAt < 10 * 60_000) return
 
+    // 只在私聊播报：群里「我回来了」纯属打扰，群友不关心进程重启
     const recent = recentSessions(30 * 60_000)
     const targets = new Map()
 
     for (const session of recent) {
       const [type, ...rest] = session.key.split(':')
       const id = rest.join(':')
-      if ((type === 'group' || type === 'user') && id) targets.set(session.key, { type, id })
-    }
-
-    for (const task of interruptedList) {
-      if (task.target?.id) {
-        targets.set(`${task.target.type}:${task.target.id}`, {
-          type: task.target.type,
-          id: task.target.id,
-        })
-      }
+      if (type === 'user' && id) targets.set(session.key, { type, id })
     }
 
     if (targets.size === 0) {
@@ -1855,14 +1847,7 @@ try {
 
     for (const [key, target] of targets) {
       try {
-        // 群里播报要克制：被喊过安静的不发，同一个群 12 小时最多一条
-        if (target.type === 'group') {
-          if (isMuted(target.id)) continue
-          if (!oncePer(`announce:${target.id}`, QUIET_MS.announce)) continue
-        }
-
-        if (target.type === 'group') await bot.group(target.id).send(text)
-        else await bot.user(target.id).send(text)
+        await bot.user(target.id).send(text)
         console.log(`[启动] 已向 ${key} 播报复活`)
       } catch (error) {
         console.warn(`[启动] 向 ${key} 播报失败：`, error?.message ?? error)
@@ -1882,8 +1867,12 @@ try {
       `上次有个工单没跑完（${task.id}）：\n${String(task.goal ?? '').slice(0, 100)}\n\n` +
       '需要重跑的话发 /task 重新发起，或者直接说「继续刚才那个」。'
     try {
-      if (task.target?.type === 'group') await bot.group(task.target.id).send(body)
-      else if (task.target?.id) await bot.user(task.target.id).send(body)
+      // 同样只在私聊说：群里的工单中断通知会变成噪音
+      if (task.target?.type === 'user' && task.target?.id) {
+        await bot.user(task.target.id).send(body)
+      } else {
+        console.log(`[工单] ${task.id} 是在群里发起的，跳过中断通知（重启后发 /tasks 能查到）`)
+      }
     } catch (error) {
       console.error('[工单] 中断通知发送失败：', error?.message ?? error)
     }

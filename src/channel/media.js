@@ -79,6 +79,30 @@ export function imageSenderFor(event, send = (payload) => deliver(event, payload
   }
 }
 
+// QQ 语音不认 m4a：用 ffmpeg 转成 mp3 再发（30 秒的试听转码内存开销很小）
+async function ensurePlayableAudio(filePath) {
+  if (!/\.m4a$/i.test(filePath)) return filePath
+
+  const outDir = path.join(projectRoot, 'tmp', 'audio')
+  fs.mkdirSync(outDir, { recursive: true })
+  const out = path.join(outDir, `conv-${Date.now()}.mp3`)
+
+  try {
+    await run(
+      'ffmpeg',
+      ['-y', '-threads', '1', '-i', filePath, '-vn', '-b:a', '96k', '-f', 'mp3', out],
+      { timeout: 60_000 },
+    )
+  } catch (error) {
+    throw new Error(
+      `这个音频是 m4a，需要转成 mp3 才能发，但转码失败了：${String(error?.message ?? error).slice(0, 120)}。` +
+        '要么让用户换个 mp3 直链，要么先确认服务器上装了 ffmpeg。',
+    )
+  }
+
+  return out
+}
+
 export function audioSenderFor(event, send = (payload) => deliver(event, payload)) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
@@ -108,8 +132,11 @@ export function audioSenderFor(event, send = (payload) => deliver(event, payload
       throw new Error(`音频 ${(size / 1048576).toFixed(1)}MB，超过 20MB 传不上去`)
     }
 
-    await send(segment.audio(resolved))
-    return path.basename(resolved)
+    // QQ 语音只认 silk/mp3/wav/ogg/flac；Apple 的试听是 m4a，播放前先转一趟
+    const playable = await ensurePlayableAudio(resolved)
+
+    await send(segment.audio(playable))
+    return path.basename(playable)
   }
 }
 
