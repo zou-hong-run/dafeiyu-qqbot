@@ -18,6 +18,8 @@ const SEARCH_API = 'https://itunes.apple.com/search'
 const TIMEOUT_MS = 15_000
 const MAX_RESULTS = 5
 const PREVIEW_SECONDS = 30
+// 同一首歌（歌名+歌手）在这个时间内不再重复推给同一个机器人
+const REPEAT_WINDOW_MS = 12 * 3600_000
 
 function readCache() {
   try {
@@ -89,7 +91,7 @@ async function findMusic({ query = '', limit = 3, country = 'cn' } = {}) {
   }
 
   const rows = Array.isArray(payload?.results) ? payload.results : []
-  const usable = rows
+  const all = rows
     .filter((row) => row && row.previewUrl && /^https?:\/\//i.test(row.previewUrl))
     .map((row) => ({
       title: clean(row.trackName) || '未命名',
@@ -97,6 +99,29 @@ async function findMusic({ query = '', limit = 3, country = 'cn' } = {}) {
       album: clean(row.collectionName, 40),
       url: row.previewUrl,
     }))
+
+  // 同一个关键词搜出来顺序是固定的，不去重就会一直推同一首
+  const cache = readCache()
+  const now = Date.now()
+  const fresh = all.filter((track) => {
+    const at = cache[`${track.title}|${track.artist}`]
+    return !at || now - at > REPEAT_WINDOW_MS
+  })
+
+  // 全都在 12 小时内给过了：宁可说没有，也别再重复推同一首
+  if (fresh.length === 0 && all.length > 0) {
+    return (
+      `「${keyword}」搜到的 ${all.length} 首最近都发过了（同一首 12 小时内不重复）。` +
+      '换个风格或歌手再试：lofi / jazz / piano / 摇滚 / 粤语 / 英文…'
+    )
+  }
+
+  // 有新歌就从新歌里随机挑，别永远给搜索结果第一条
+  const pool = fresh
+  const usable = pool
+    .map((track) => ({ track, sort: Math.random() }))
+    .sort((x, y) => x.sort - y.sort)
+    .map((item) => item.track)
     .slice(0, want)
 
   if (usable.length === 0) {
@@ -106,17 +131,19 @@ async function findMusic({ query = '', limit = 3, country = 'cn' } = {}) {
     )
   }
 
-  // 记一下给过哪些，方便下次换点别的
+  // 记一下给过哪些，下次同一个关键词会绕开它们
   try {
-    const cache = readCache()
-    for (const track of usable) cache[track.url] = Date.now()
-    writeCache(cache)
+    const updated = readCache()
+    for (const track of usable) updated[`${track.title}|${track.artist}`] = Date.now()
+    writeCache(updated)
   } catch {
     // 忽略
   }
 
+  const skipped = all.length - fresh.length
   const lines = [
-    `找到 ${usable.length} 首（每段都是 ${PREVIEW_SECONDS} 秒试听，不是整首）：`,
+    `找到 ${usable.length} 首（每段都是 ${PREVIEW_SECONDS} 秒试听，不是整首）` +
+      `${skipped > 0 ? `，已经跳过最近给过的 ${skipped} 首` : ''}：`,
     '',
   ]
 
