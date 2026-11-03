@@ -13,7 +13,7 @@ import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, 
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './sync.js'
-import { noteSent, recallMessages } from './recall.js'
+import { noteSent, noteSentToGroup, recallMessages } from './recall.js'
 import { flushUsage, formatUsage } from './usage.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
@@ -200,6 +200,7 @@ function groupSenderFor(event) {
     if (!groupId) throw new Error('没指定群，也没法确定当前群：私聊里要传 groupId')
 
     const result = await bot.group(groupId).send(clip(text))
+    noteSentToGroup(groupId, result?.id, text, 'text')
     console.log(`[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字）`)
 
     audit(auditKeyOf(event), 'send_to_group', { groupId, chars: text.length }, `已发送 ${text.length} 字`)

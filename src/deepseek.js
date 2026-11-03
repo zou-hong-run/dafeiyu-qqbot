@@ -79,7 +79,8 @@ const LOCAL_TOOLS = [
       name: 'recall_message',
       description:
         '撤回我自己发出去的消息。QQ 官方限制：只能撤我发的，而且有时效（超过大约 2 分钟基本撤不掉）。' +
-        '不传 message_id 就撤本会话里我最近发的 count 条。',
+        '不传 message_id 就撤本会话里我最近发的 count 条。' +
+        '要撤我用 send_to_group 主动发到别的群的那条，把 group_id 一起传上（不传就按当前会话算）。',
       parameters: {
         type: 'object',
         properties: {
@@ -90,6 +91,10 @@ const LOCAL_TOOLS = [
           count: {
             type: 'integer',
             description: '不填 message_id 时撤最近几条，默认 1，最多 5',
+          },
+          group_id: {
+            type: 'string',
+            description: '要撤的那条发在哪个群（群 openid）；撤别的群里我发的消息时必填',
           },
         },
       },
@@ -765,7 +770,7 @@ async function runTool(
   if (name === 'recall_message') {
     if (typeof recallMessages !== 'function') return '当前场景不能撤回消息。'
     try {
-      return await recallMessages({ messageId: args.message_id, count: args.count })
+      return await recallMessages({ messageId: args.message_id, count: args.count, groupId: args.group_id })
     } catch (error) {
       return `撤回失败：${error?.message ?? error}`
     }

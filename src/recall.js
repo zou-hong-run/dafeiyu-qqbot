@@ -68,14 +68,33 @@ export function noteSent(event, messageId, text, kind = 'text') {
   persist()
 }
 
-export function listSent(event, limit = 5) {
+// 主动发到别的群时没有 event，单独记一条：群消息，target 就是群 openid
+export function noteSentToGroup(groupId, messageId, text, kind = 'text') {
+  const id = String(messageId ?? '').trim()
+  const target = String(groupId ?? '').trim()
+  if (!id || !target) return
+  noteSent({ message_type: 'group', group_id: target }, id, text, kind)
+}
+
+// groupId 传了就按那个群算，不传就看当前会话
+function endpointOf(event, groupId = '') {
+  const gid = String(groupId ?? '').trim()
+  if (gid) return { isGroup: true, target: gid }
+  return endpointOfEvent(event)
+}
+
+function poolOf(event, limit = 5, groupId = '') {
   ensureLoaded()
-  const { isGroup, target } = endpointOfEvent(event)
+  const { isGroup, target } = endpointOf(event, groupId)
   const kind = isGroup ? 'group' : 'user'
   return entries
     .filter((item) => item.kind === kind && item.target === target)
     .slice(-Math.max(1, limit))
     .reverse()
+}
+
+export function listSent(event, limit = 5) {
+  return poolOf(event, limit)
 }
 
 async function recallOne(entry) {
@@ -89,15 +108,16 @@ function describe(item) {
 }
 
 // 不传 messageId 就撤最近的 count 条（默认撤最后一条）
-export async function recallMessages({ event, messageId = '', count = 1 } = {}) {
+// groupId 用来撤「我主动发到别的群」的那条：当前会话不是那个群时也能定位
+export async function recallMessages({ event, messageId = '', count = 1, groupId = '' } = {}) {
   ensureLoaded()
 
   const queue = []
   const wanted = String(messageId ?? '').trim()
+  const { isGroup, target } = endpointOf(event, groupId)
 
   if (wanted) {
     const hit = entries.find((item) => item.messageId === wanted)
-    const { isGroup, target } = endpointOfEvent(event)
     queue.push(
       hit ?? {
         t: Date.now(),
@@ -110,9 +130,14 @@ export async function recallMessages({ event, messageId = '', count = 1 } = {}) 
       },
     )
   } else {
-    const pool = listSent(event, 20).filter((item) => !item.recalled)
+    if (!target) {
+      return '没拿到要撤的会话或群 id，撤不了。如果是在别的群发的，把 group_id 一起给我。'
+    }
+    const pool = poolOf(event, 20, groupId).filter((item) => !item.recalled)
     if (pool.length === 0) {
-      return '这个会话里没有我发出去的消息记录，撤不了。记录只保留最近 200 条，重启也不丢。'
+      return groupId
+        ? `我在群 ${groupId} 没有发出去的消息记录，撤不了。记录只保留最近 200 条。`
+        : '这个会话里没有我发出去的消息记录，撤不了。记录只保留最近 200 条，重启也不丢。'
     }
     const n = Math.max(1, Math.min(5, Number(count) || 1))
     queue.push(...pool.slice(0, n))
