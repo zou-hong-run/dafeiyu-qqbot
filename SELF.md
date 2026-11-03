@@ -48,7 +48,10 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - `fetch_video`：给链接和时段，用 yt-dlp 截一段下来（默认 10 秒 360p），自动合并成 mp4
 - 8 秒片段约 600KB，这台机器几十秒能下完；**整部电影下不动**，别试
 - 下完用 `send_video` 发；要别的片段改 `startAt` 再调一次
-- 依赖 yt-dlp：没装会报错，管理员跑一次 `pip3 install yt-dlp` 即可
+- 依赖三样：`yt-dlp`（新版，2024 年的旧版解析不了 B 站）、`curl_cffi`（TLS 伪装）、`ffmpeg`（合并切片）
+- 站点风控（412 / Failed to extract play info）先查这三样，别急着下「IP 被封」的结论：
+  `data/cookies.txt` 在不在、`.env` 里有没有 `YTDLP_IMPERSONATE=chrome`、改完重启过没有
+- 这三样都对的还是失败，才是真的 IP 段被拦；换 BV 号也可能是某条视频本身解析不了，不等于整站不通
 
 ### 转发别人发来的视频/图片
 
