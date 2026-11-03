@@ -588,7 +588,7 @@ function buildSystemPrompt(sessionKey, userText) {
 }
 
 // 工具输出太长时别再一刀切掉中间：把全文落到 tmp/ 里，模型需要时能自己读回来。
-// 这个思路来自 kimi-code 的 ToolOutputAccumulator —— 上下文里放摘要，原文留在磁盘。
+// 做法：上下文里只放摘要，原文留在磁盘，模型需要时自己去读回来。
 const SPILL_LIMIT = 7000
 const SPILL_HEAD = 4000
 const SPILL_MAX_FILES = 120
@@ -1230,7 +1230,7 @@ export async function testVision(imagePath) {
 
 // 包一层：工具调用结果顺手记进复盘库，同类问题连栽三次会被写进 skills/pitfalls.md
 // 只读且结果稳定的工具，同一轮里用完全相同的参数重复调用时直接复用上次结果。
-// 思路来自 kimi-code 的 toolDedupe：模型偶尔会卡在「同样的问题问两遍」，
+// 模型偶尔会卡在「同样的问题问两遍」，
 // 重跑一次既费钱又费时间（fetch 甚至可能这次就失败了）
 const DEDUPE_TOOLS = new Set([
   'search',

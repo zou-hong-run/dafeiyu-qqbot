@@ -313,7 +313,7 @@ QQ 网关 ──WS──▶ index.js
 
 > 这两道上限必须都在：只按 token 裁的话，`CONTEXT_WINDOW_TOKENS` 设得大就永远不触发，短期记忆会一直长下去。
 
-**任务按「工单 + Worker + 巡检」组织**（借鉴 DeepSeek 的 Super-agent 分层）：
+**任务按「工单 + Worker + 巡检」三层组织**：
 
 ```
 Router（index.js）          接消息、判断要不要干、建工单、统一对外说话

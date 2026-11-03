@@ -3,8 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // 任务清单：模型自己拆步骤、自己打勾。
-// 思路来自 kimi-code 的 features/todo —— 长任务最容易出的问题是「跑到一半忘了还剩什么」，
-// 有了清单，每轮提示词里都挂着进度，模型不容易跑偏，也能在最后自查有没有漏。
+// 长任务最容易出的问题是「跑到一半忘了还剩什么」，有了清单，每轮提示词里都挂着进度，
+// 模型不容易跑偏，也能在最后自查有没有漏。
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
 const todoFile = path.join(dataDir, 'todos.json')

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// 工单：Super-agent 架构里 Router 和 Worker 之间的唯一契约
+// 工单：Router 和 Worker 之间的唯一契约
 // 一项工作从「谁来提的、授权依据是什么」到「做到哪一步、交付了什么」都记在这里，落盘可恢复
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')

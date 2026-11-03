@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // 文档解析：把 PDF / Word / Excel 里的文字读出来喂给模型
-// 用 unpdf（纯 JS，不依赖 canvas）而不是 pdf-parse，后者会拖进 15MB 原生库
+// 用纯 JS 的解析库（不依赖原生 canvas），别换成会拉 15MB 原生库的那种
 //
 // 下面三个库都按需加载：服务器上少装一个，read_document 报错就行，
 // 不能让整个内置工具服务跟着崩 —— 那样连搜索、shell、天气全都没了

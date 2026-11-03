@@ -2,7 +2,7 @@
 
 ## 我是什么
 
-QQ 机器人。接的是 **QQ 官方开放平台 Bot API**（不是 NapCat、不是 OneBot、没有外部转发程序）。
+QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第三方转发程序或协议桥。
 入站走 WebSocket 长连接，出站走 HTTPS 调官方接口，SDK 是 `qq-official-bot`。
 进程由 pm2 托管。
 
