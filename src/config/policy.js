@@ -80,6 +80,7 @@ export const TOOL_POLICY = {
   download: OPEN,
   find_music: READ_ONLY,
   find_video: READ_ONLY,
+  fetch_video: READ_ONLY,
   read_document: READ_ONLY,
 
   shell: SHELL,

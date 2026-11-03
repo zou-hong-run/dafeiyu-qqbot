@@ -149,7 +149,108 @@ async function findVideo({ url = '', maxSizeMB = DEFAULT_MAX_MB } = {}) {
   ].join('\n')
 }
 
-export const VIDEO_HANDLERS = { find_video: findVideo }
+function assertPublicLink(raw) {
+  let parsed
+  try {
+    parsed = new URL(String(raw ?? '').trim())
+  } catch {
+    throw new Error('链接格式不对，需要完整的 http:// 或 https://')
+  }
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error('只支持 http/https 链接')
+
+  const host = parsed.hostname.toLowerCase()
+  const blocked =
+    host === 'localhost' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    /^(10|127)\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^169\.254\./.test(host)
+
+  if (blocked) throw new Error('不允许解析内网地址')
+  return parsed
+}
+
+/**
+ * 下载视频的一段（不是整部）。整部电影几百 MB，这台机器下不动；
+ * 十几秒的片段只有几百 KB，几十秒就能下完。
+ */
+async function fetchVideo({ url = '', seconds = 10, startAt = 0, maxHeight = 360, fileName = '' } = {}) {
+  assertPublicLink(url)
+  if (!(await checkYtdlp())) {
+    throw new Error('服务器上没装 yt-dlp。让管理员在项目目录跑一次 pip3 install yt-dlp，重启后就能用')
+  }
+
+  const start = Math.max(0, Number(startAt) || 0)
+  const span = Math.min(Math.max(Math.floor(Number(seconds) || 10), 3), 30)
+  const end = start + span
+  const height = Math.min(Math.max(Math.floor(Number(maxHeight) || 360), 144), 720)
+
+  const safeName = String(fileName ?? '').trim().replace(/[^\w.\-]/g, '') || `clip-${Date.now()}.mp4`
+  const outFile = path.join(projectRoot, 'downloads', safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`)
+
+  const args = [
+    '-f', `bv*[height<=${height}]+ba/b[height<=${height}]/b`,
+    '--merge-output-format', 'mp4',
+    '--download-sections', `*${start}-${end}`,
+    '--force-keyframes-at-cuts',
+    '--no-playlist',
+    '--no-warnings',
+    '--no-progress',
+    '-o', outFile,
+    url,
+  ]
+
+  let stderr = ''
+  try {
+    const result = await run(YTDLP, args, { timeout: 45_000, maxBuffer: 8 * 1024 * 1024 })
+    stderr = result.stderr || ''
+  } catch (error) {
+    stderr = String(error?.stderr || error?.message || error)
+
+    // 超时：文件可能只写了一半，删掉别留垃圾
+    if (error?.killed || /timed? ?out|ETIMEDOUT/i.test(stderr)) {
+      try {
+        fs.rmSync(outFile, { force: true })
+      } catch {
+        // 删不掉就算了
+      }
+      throw new Error(
+        `下了 45 秒还没完（多半是这台机器带宽只有十几 KB/s）。` +
+          '把片段再缩短一点（seconds 改成 5 或 8），或者把 maxHeight 降到 240，再试一次。',
+      )
+    }
+
+    if (/login|cookie|Sign in/i.test(stderr)) {
+      throw new Error('这个视频需要登录（会员内容或抖音），没有 cookies 下不了。让对方把片段直接发给我')
+    }
+    if (/Unsupported URL/i.test(stderr)) {
+      throw new Error('这个站不支持解析。B 站、YouTube 这类可以；小众站和需要登录的解析不了')
+    }
+    throw new Error(`下载失败：${stderr.slice(0, 200)}`)
+  }
+
+  if (!fs.existsSync(outFile)) throw new Error('yt-dlp 跑完了但没有产出文件，可能被站点限制，换一个视频试试')
+
+  const stat = fs.statSync(outFile)
+  if (stat.size < 10 * 1024) {
+    fs.rmSync(outFile, { force: true })
+    throw new Error('产出的文件太小，可能是解析到了错误页，换个视频或换个片段起点')
+  }
+
+  const sizeMB = (stat.size / 1048576).toFixed(2)
+  const relative = path.relative(projectRoot, outFile).split(path.sep).join('/')
+
+  return [
+    `已截取 ${span} 秒（从第 ${start} 秒开始）存到 ${relative}`,
+    `大小 ${sizeMB}MB｜清晰度 ${height}p 以内`,
+    '直接用 send_video 传这个文件名就能发出去。',
+    '如果对方还想要别的片段，改 startAt 再调一次。',
+  ].join('\n')
+}
+
+export const VIDEO_HANDLERS = { find_video: findVideo, fetch_video: fetchVideo }
 
 export const VIDEO_TOOLS = [
   {
@@ -171,6 +272,40 @@ export const VIDEO_TOOLS = [
           maximum: 60,
           description: '允许的最大体积（MB），默认 15。调大意味着下载更久',
         },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'fetch_video',
+    type: 'tool',
+    description:
+      '截取并下载视频的一段（不是整部），自动合并成 mp4 存到 downloads，然后用 send_video 发出去。' +
+      '整部电影几百 MB 这台机器下不动，但 10 秒的片段只有几百 KB，几十秒就能下完。' +
+      '单次最多跑 45 秒，超时会提示你缩短片段。' +
+      '用户说「发一段 XX 的视频」「截个片段给我」时用它；只要链接和大概位置。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '视频链接（B 站 / YouTube 等）' },
+        seconds: {
+          type: 'integer',
+          minimum: 3,
+          maximum: 30,
+          description: '截多长（秒），默认 10。带宽慢就调小，5 到 8 秒最稳',
+        },
+        startAt: {
+          type: 'integer',
+          minimum: 0,
+          description: '从第几秒开始截，默认 0（开头）',
+        },
+        maxHeight: {
+          type: 'integer',
+          minimum: 144,
+          maximum: 720,
+          description: '清晰度上限，默认 360。调低下载更快',
+        },
+        fileName: { type: 'string', description: '保存的文件名（可选）' },
       },
       required: ['url'],
     },
