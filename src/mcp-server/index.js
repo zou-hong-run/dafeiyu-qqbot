@@ -427,6 +427,10 @@ const { MUSIC_TOOLS, MUSIC_HANDLERS } = await import('./music.js')
 TOOLS.push(...MUSIC_TOOLS)
 Object.assign(HANDLERS, MUSIC_HANDLERS)
 
+const { VIDEO_TOOLS, VIDEO_HANDLERS } = await import('./video.js')
+TOOLS.push(...VIDEO_TOOLS)
+Object.assign(HANDLERS, VIDEO_HANDLERS)
+
 const server = new Server(
   { name: 'qq-bot-tools', version: '1.0.0' },
   { capabilities: { tools: {} } },

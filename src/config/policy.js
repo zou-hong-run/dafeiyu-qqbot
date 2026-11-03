@@ -79,6 +79,7 @@ export const TOOL_POLICY = {
   clear_memory: OPEN,
   download: OPEN,
   find_music: READ_ONLY,
+  find_video: READ_ONLY,
   read_document: READ_ONLY,
 
   shell: SHELL,
