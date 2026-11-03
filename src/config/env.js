@@ -135,7 +135,7 @@ export const env = {
   judgeHourlyLimit: Math.floor(positiveNumber('JUDGE_HOURLY_LIMIT', 120)),
 
   // 连发合并窗口：同一个人连着发的几句合成一次理解，0 = 关闭（逐条处理）
-  mergeWindowMs: nonNegativeNumber('MERGE_WINDOW_MS', 1200),
+  mergeWindowMs: nonNegativeNumber('MERGE_WINDOW_MS', 2500),
 
   // 退出前自动把改过的代码提交回仓库（「自己进化」靠它）；间隔 0 = 只靠退出时提交
   autoSyncOnExit: process.env.AUTO_SYNC_ON_EXIT !== 'false',
