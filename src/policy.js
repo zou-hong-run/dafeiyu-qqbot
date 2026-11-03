@@ -96,6 +96,7 @@ export const TOOL_POLICY = {
 
   write_skill: OPEN,
   list_skills: READ_ONLY,
+  read_skill: READ_ONLY,
   add_mcp: OPEN,
   list_mcp: READ_ONLY,
   install_package: OPEN,

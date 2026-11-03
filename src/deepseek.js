@@ -9,7 +9,7 @@ import { noteToolResult } from './pitfalls.js'
 import { knowledgePrompt } from './knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from './situations.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
-import { skillsPrompt } from './skills.js'
+import { readSkill, skillsPrompt } from './skills.js'
 import { selfDoc } from './self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from './goal.js'
 import {
@@ -55,6 +55,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'note_situation',
   'ask_choice',
   'todo_write',
+  'read_skill',
   'goal',
   'read_group_history',
   'read_profile',
@@ -117,6 +118,22 @@ const LOCAL_TOOLS = [
           text: { type: 'string', description: '一句话事实，如「用户是做前端的，主要在写 React」' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_skill',
+      description:
+        '读某个技能的完整说明。提示词里【更多技能（按需读取）】只给了摘要，' +
+        '判断这个技能用得上时，先读全文再照着做，别凭摘要猜步骤。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '技能名，如 deploy-static-site' },
+        },
+        required: ['name'],
       },
     },
   },
@@ -724,6 +741,17 @@ async function runTool(
     }
     const saved = addLongTerm(sessionKey, args.text)
     return saved ? `已记住：${args.text}` : '这条已经记过了。'
+  }
+
+  if (name === 'read_skill') {
+    if (!isToolAllowed('read_skill', scope, actor)) {
+      return `${denyReason('read_skill', scope, actor)}。`
+    }
+    try {
+      return readSkill(args.name)
+    } catch (error) {
+      return `读技能失败：${error?.message ?? error}`
+    }
   }
 
   if (name === 'todo_write') {
