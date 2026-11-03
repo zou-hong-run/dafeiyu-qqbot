@@ -157,6 +157,14 @@ export function removeSchedule(id, sessionKey) {
   return removed
 }
 
+// 群被解散/机器人被踢出去后，QQ 会一直回 11255，这种重试和自愈都没意义，直接停用任务
+const TARGET_GONE_RE = /code\(11255\)|用户\/群已注销|请求的资源不存在/
+
+function isTargetGone(error) {
+  const message = String(error?.message ?? error ?? '')
+  return TARGET_GONE_RE.test(message)
+}
+
 // 推送前查台账：同一条内容发过就不再发，补跑时更是整个任务当天只发一次
 async function deliver(task, text, options) {
   const dup = checkDuplicate({
@@ -171,7 +179,21 @@ async function deliver(task, text, options) {
     return { skipped: dup.reason }
   }
 
-  const ids = await deps.sendMessage(task.target, text)
+  let ids
+  try {
+    ids = await deps.sendMessage(task.target, text)
+  } catch (error) {
+    // 目标群已经不存在，这条任务再也不会成功：自动停用，别再每天报警
+    if (isTargetGone(error)) {
+      task.enabled = false
+      const reason = String(error?.message ?? error).slice(0, 100)
+      console.log(`[定时] ${task.id} 目标群不可用，已自动停用：${reason}`)
+      persist()
+      return { skipped: '目标群不可用，任务已自动停用', disabled: true, reason }
+    }
+    throw error
+  }
+
   const idList = (Array.isArray(ids) ? ids : [ids]).map((id) => String(id ?? '')).filter(Boolean)
 
   const kept = recordSent({
@@ -264,7 +286,9 @@ async function fire(task, options = {}) {
       const text = `定时任务 ${task.id}｜${describeCron(task.cron)}${catchUpNote}${retryNote}\n\n${result}`
       const outcome = await deliver(task, text, options)
       if (outcome.skipped) {
-        task.lastStatus = `${task.lastStatus}（跳过推送：${outcome.skipped}）`.slice(0, 160)
+        task.lastStatus = outcome.disabled
+          ? `已自动停用：${outcome.reason ?? outcome.skipped}`.slice(0, 160)
+          : `${task.lastStatus}（跳过推送：${outcome.skipped}）`.slice(0, 160)
         persist()
       }
     }
@@ -273,6 +297,15 @@ async function fire(task, options = {}) {
     task.lastStatus = `failed: ${message}`.slice(0, 120)
     // 失败不算跑完：退回上一次成功的时间，重启后的补跑逻辑才会认这次
     task.lastRunAt = prevLastRunAt
+
+    // 群没了就没必要自愈也没必要重试：直接停用这条任务
+    if (isTargetGone(error)) {
+      task.enabled = false
+      console.log(`[定时] ${task.id} 目标群不可用，已自动停用：${message.slice(0, 100)}`)
+      persist()
+      return
+    }
+
     persist()
 
     const heal = await runHeal(task, error, options)
