@@ -16,6 +16,18 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const YTDLP = process.env.YTDLP_PATH?.trim() || 'yt-dlp'
 const PARSE_TIMEOUT_MS = 60_000
 const DEFAULT_MAX_MB = 15
+// 有的站对服务器 IP 有风控（B 站常见 412），带上浏览器导出的 cookies 就能过。
+// 文件放 data/cookies.txt（Netscape 格式），有就用，没有就直连。
+const cookieFile = path.join(projectRoot, 'data', 'cookies.txt')
+
+function commonArgs(url) {
+  const args = ['--no-warnings', '--no-progress', '--retries', '2', '--socket-timeout', '20']
+  if (fs.existsSync(cookieFile)) args.push('--cookies', cookieFile)
+  if (/bilibili\.com/i.test(String(url ?? ''))) {
+    args.push('--add-header', 'Referer:https://www.bilibili.com/')
+  }
+  return args
+}
 
 let ytdlpAvailable = null
 
@@ -57,7 +69,7 @@ async function findVideo({ url = '', maxSizeMB = DEFAULT_MAX_MB } = {}) {
   try {
     const result = await run(
       YTDLP,
-      ['-J', '--no-warnings', '--no-playlist', '--no-progress', link],
+      ['-J', ...commonArgs(link), link],
       { timeout: PARSE_TIMEOUT_MS, maxBuffer: 24 * 1024 * 1024 },
     )
     stdout = result.stdout
@@ -191,13 +203,14 @@ async function fetchVideo({ url = '', seconds = 10, startAt = 0, maxHeight = 360
   const outFile = path.join(projectRoot, 'downloads', safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`)
 
   const args = [
-    '-f', `bv*[height<=${height}]+ba/b[height<=${height}]/b`,
+    ...commonArgs(url),
+    // 别写死 height<=N：有的站点没有低清格式会直接报「format not available」，
+    // 用 -S 排序更稳（有低清就选低清，没有就退到次优）
+    '-f', 'bv*+ba/b',
+    '-S', `res:${height},ext:mp4:m4a`,
     '--merge-output-format', 'mp4',
     '--download-sections', `*${start}-${end}`,
     '--force-keyframes-at-cuts',
-    '--no-playlist',
-    '--no-warnings',
-    '--no-progress',
     '-o', outFile,
     url,
   ]
@@ -227,6 +240,13 @@ async function fetchVideo({ url = '', seconds = 10, startAt = 0, maxHeight = 360
     }
     if (/Unsupported URL/i.test(stderr)) {
       throw new Error('这个站不支持解析。B 站、YouTube 这类可以；小众站和需要登录的解析不了')
+    }
+    if (/412|403|风控|risk|blocked/i.test(stderr)) {
+      throw new Error(
+        '站点把这个服务器的 IP 拦了（常见 412/403 风控）。' +
+          '解决办法：从浏览器导出 cookies 存成 data/cookies.txt（Netscape 格式），' +
+          '工具会自动带上；如果还没有，让对方直接把视频发过来更快。',
+      )
     }
     throw new Error(`下载失败：${stderr.slice(0, 200)}`)
   }

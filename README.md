@@ -264,6 +264,17 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 - 机器人会往 `data/`、`logs/`、`downloads/`、`tmp/`、`backups/` 写东西，这些目录已在 `.gitignore` 里
 - 小内存机器（1.5G 左右）跑视频转码要小心：`ffmpeg` 一个进程能吃掉 700M，建议加 2G swap；`max_memory_restart` 默认 420M，让它在系统 OOM 之前自己重启
 
+## 站点风控与 cookies
+
+有些站会对服务器 IP 上风控（B 站常见 412）。带一份浏览器 cookies 就能过：
+
+1. 浏览器装扩展「Get cookies.txt LOCALLY」
+2. 在 `bilibili.com` 登录状态下导出，格式选 Netscape
+3. 传到服务器：`/qq/data/cookies.txt`
+4. 不用重启——工具每次调用都会检查这个文件
+
+`data/` 不对外开放读写，cookies 不会被工具读走或发出去。cookies 一般几周过期，失效了就重新导一次。
+
 ## 工具清单
 
 **本地工具**（直接接管当前会话的发送能力）
