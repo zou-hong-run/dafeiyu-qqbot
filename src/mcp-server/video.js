@@ -347,3 +347,204 @@ export const VIDEO_TOOLS = [
     },
   },
 ]
+
+// 读视频字幕：yt-dlp 把字幕扒下来，转成带时间戳的纯文本。
+// 比截片段有用得多——能看到「视频里讲了什么」，而不是只有几帧画面。
+function parseVtt(raw) {
+  const cues = []
+  const blocks = String(raw ?? '').replace(/\r/g, '').split(/\n{2,}/)
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map((line) => line.trim()).filter(Boolean)
+    if (lines.length === 0) continue
+
+    const timeLine = lines.find((line) => line.includes('-->'))
+    if (!timeLine) continue
+
+    const matched = timeLine.match(/(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})/)
+    const seconds = matched
+      ? Number(matched[1]) * 3600 + Number(matched[2]) * 60 + Number(matched[3])
+      : 0
+
+    const text = lines
+      .filter((line) => !line.includes('-->') && !/^(WEBVTT|NOTE|STYLE|REGION|Kind:|Language:)/.test(line))
+      .join(' ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (text) cues.push({ at: seconds, text })
+  }
+
+  return cues
+}
+
+// 自动字幕常见「滚动重复」：后一条包含前一条。合并掉，否则读起来全是复读
+function mergeCues(cues) {
+  const out = []
+  for (const cue of cues) {
+    const last = out[out.length - 1]
+    if (!last) {
+      out.push({ ...cue })
+      continue
+    }
+    if (cue.text === last.text) continue
+    if (cue.text.startsWith(last.text)) {
+      last.text = cue.text
+      continue
+    }
+    if (last.text.endsWith(cue.text)) continue
+    out.push({ ...cue })
+  }
+  return out
+}
+
+function stamp(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+async function readVideoSubtitle({ url = '', lang = 'zh-Hans,zh-CN,zh,en', startAt = 0, endAt = 0, maxChars = 6000 } = {}) {
+  assertPublicLink(url)
+  if (!(await checkYtdlp())) {
+    throw new Error('服务器上没装 yt-dlp。让管理员跑一次 pipx install yt-dlp（或 pip3 install yt-dlp）')
+  }
+
+  const workDir = path.join(projectRoot, 'tmp', 'subs', `s-${Date.now().toString(36)}`)
+  fs.mkdirSync(workDir, { recursive: true })
+
+  const args = [
+    ...commonArgs(url),
+    '--skip-download',
+    '--write-subs',
+    '--write-auto-subs',
+    '--sub-langs', String(lang),
+    '--sub-format', 'vtt',
+    '--no-write-playlist-metafiles',
+    '-o', path.join(workDir, '%(id)s'),
+    url,
+  ]
+
+  let stderr = ''
+  try {
+    const result = await run(YTDLP, args, { timeout: 50_000, maxBuffer: 8 * 1024 * 1024 })
+    stderr = result.stderr || ''
+  } catch (error) {
+    stderr = String(error?.stderr || '')
+    const message = String(error?.stderr || error?.message || error)
+    fs.rmSync(workDir, { recursive: true, force: true })
+
+    if (/412|403|Failed to extract play info/i.test(message)) {
+      throw new Error('解析这个视频时被站点拦了（412）。先查 cookies、YTDLP_IMPERSONATE 和 yt-dlp 版本')
+    }
+    if (/Unable to extract|This video is unavailable/i.test(message)) {
+      throw new Error('这个视频解析不了（可能已删、要会员或仅登录可见），换一个链接')
+    }
+    throw new Error(`取字幕失败：${message.slice(0, 200)}`)
+  }
+
+  let files = []
+  try {
+    files = fs.readdirSync(workDir).filter((name) => /\.(vtt|srt)$/i.test(name))
+  } catch {
+    files = []
+  }
+
+  if (files.length === 0) {
+    fs.rmSync(workDir, { recursive: true, force: true })
+
+    // B 站的字幕只有登录态才给，没 cookies 会静默跳过
+    if (/Subtitles are only available when logged in/i.test(stderr)) {
+      throw new Error(
+        'B 站的字幕要登录才给，服务器上缺 cookies。把浏览器导出的 cookies.txt 放到 data/cookies.txt 再试；' +
+          '在那之前只能截片段看画面。',
+      )
+    }
+    throw new Error(
+      '没拿到字幕。两个常见原因：\n' +
+        '1) B 站的字幕只有登录态才给 —— 确认 data/cookies.txt 在；\n' +
+        '2) 这条视频本身没有 CC 字幕，也没有自动字幕。\n' +
+        '可以改 lang 试试（如 "en"），或者退回截片段看画面。',
+    )
+  }
+
+  // 优先中文，其次按文件名顺序
+  files.sort((a, b) => {
+    const zh = (name) => (/zh/i.test(name) ? 0 : 1)
+    return zh(a) - zh(b)
+  })
+
+  const picked = path.join(workDir, files[0])
+  const raw = fs.readFileSync(picked, 'utf8')
+  fs.rmSync(workDir, { recursive: true, force: true })
+
+  let cues = mergeCues(parseVtt(raw))
+  if (cues.length === 0) throw new Error('字幕文件是空的，可能这个视频只有画面没有台词')
+
+  const from = Math.max(0, Number(startAt) || 0)
+  const to = Number(endAt) > 0 ? Number(endAt) : Infinity
+  const total = cues.length
+  if (from > 0 || to !== Infinity) cues = cues.filter((cue) => cue.at >= from && cue.at <= to)
+
+  if (cues.length === 0) throw new Error(`这个时间段（${stamp(from)} 之后）没有台词`)
+
+  const limit = Math.min(Math.max(Number(maxChars) || 6000, 500), 12_000)
+  const lines = []
+  let used = 0
+  let cut = false
+
+  for (const cue of cues) {
+    const line = `[${stamp(cue.at)}] ${cue.text}`
+    if (used + line.length > limit) {
+      cut = true
+      break
+    }
+    lines.push(line)
+    used += line.length + 1
+  }
+
+  const head = [
+    `字幕已取到（共 ${total} 条，本次输出 ${lines.length} 条，语言 ${files[0].replace(/^.*\./, '').replace(/\.vtt$/i, '') || '未知'}）`,
+    cut ? `后面还有内容，要看就传 startAt=${cues[lines.length]?.at ?? ''} 继续` : '',
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return `${head}${lines.join('\n')}`
+}
+
+export const VIDEO_HANDLERS_EXTRA = { read_video_subtitle: readVideoSubtitle }
+
+export const VIDEO_TOOLS_EXTRA = [
+  {
+    name: 'read_video_subtitle',
+    type: 'tool',
+    description:
+      '读视频的字幕全文（带时间戳），用来看「这个视频讲了什么」。' +
+      '比截片段有用：能总结内容、找某个话题在哪一分钟、回答「视频里有没有提到 X」。' +
+      '默认取中文自动字幕，没有就退回英文；视频完全没字幕会明确报错。' +
+      '太长会截断，用 startAt 接着往后来。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '视频链接（B 站 / YouTube 等）' },
+        lang: {
+          type: 'string',
+          description: '字幕语言，逗号分隔，默认 "zh-Hans,zh-CN,zh,en"',
+        },
+        startAt: { type: 'integer', minimum: 0, description: '从第几秒开始，默认 0' },
+        endAt: { type: 'integer', minimum: 0, description: '到第几秒结束，默认到最后' },
+        maxChars: {
+          type: 'integer',
+          minimum: 500,
+          maximum: 12000,
+          description: '最多返回多少字，默认 6000',
+        },
+      },
+      required: ['url'],
+    },
+  },
+]
