@@ -4,6 +4,7 @@
 
 不是聊天壳子，是一个能动手的 agent：能搜网页、跑 shell、装包、生成图片和视频、发语音、定时爬起来干活。
 
+![Version](https://img.shields.io/badge/version-2.0.0-orange)
 ![Node](https://img.shields.io/badge/node-%3E%3D20.12-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
