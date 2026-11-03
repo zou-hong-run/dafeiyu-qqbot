@@ -401,6 +401,8 @@ async function runScheduledTask(task) {
   // 定时任务没有 event，所有发送走主动消息
   const send = (payload) => sendToTarget(task.target, payload)
   const sessionKey = `${task.target.type}:${task.target.id}`
+  // 让 send_to_group 知道「当前群」是哪个：没有它就传 current 会报「没指定群」
+  const currentEvent = task.target.type === 'group' ? { group_id: task.target.id } : null
 
   return runTaskAgent({
     taskPrompt: task.prompt,
@@ -415,8 +417,8 @@ async function runScheduledTask(task) {
     scheduler: schedulerForTarget(sessionKey, task.target),
     historyReader: historyReaderForGroup(task.target.type === 'group' ? task.target.id : ''),
     profileReader: profileReaderFor({ target: task.target }),
-    groupSender: groupSenderFor(null),
-    broadcastSender: broadcastSenderFor(null),
+    groupSender: groupSenderFor(currentEvent),
+    broadcastSender: broadcastSenderFor(currentEvent),
     groupsReader: groupsReaderFor(),
     gitSync: gitSyncFor(),
   })

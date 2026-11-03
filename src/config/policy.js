@@ -78,6 +78,7 @@ export const TOOL_POLICY = {
   speak: OPEN,
   clear_memory: OPEN,
   download: OPEN,
+  find_music: READ_ONLY,
   read_document: READ_ONLY,
 
   shell: SHELL,
