@@ -27,6 +27,7 @@ import { flushTodos } from './chat/todos.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
 import { putChoice, resolveChoice, choiceText } from './chat/choices.js'
 import { mergeMessage } from './chat/merge.js'
+import { recentGroupContext } from './channel/group-context.js'
 import { resetSession } from './chat/session-reset.js'
 import {
   QUIET_MS,
@@ -780,6 +781,11 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
   const key = sessionKeyOf(event)
   const scope = event.message_type === 'group' ? 'group' : 'private'
 
+  // 群里的普通消息不进对话上下文（只有 @ 和提到名字才进），
+  // 所以被叫到时得把刚才大家说的话带上，否则模型只会回「在呢，什么事」。
+  const contextPrefix =
+    scope === 'group' && (trigger === 'name' || trigger === 'at') ? recentGroupContext(event) : ''
+
   // 「接着发」：把上一条超长内容没发完的尾巴补出去
   if (
     text.length <= 12 &&
@@ -1184,7 +1190,7 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
     }
 
     // 语音/图片/文件：下载后在输入里附一段说明，图片还会直接喂给多模态模型
-    let input = `${text}${truncated}${referencedContext(event)}`
+    let input = `${contextPrefix}${text}${truncated}${referencedContext(event)}`
     let images = []
 
     if (inbound.length > 0) {
