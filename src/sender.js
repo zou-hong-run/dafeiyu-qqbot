@@ -9,7 +9,7 @@ let markdownState = null
 
 // 撤回要 message_id，而发送接口的返回值以前被直接丢掉了，这里统一捞一次。
 // 不同接口返回结构不完全一致：可能是 { id }、{ data: { id } }，取不到就返回空串，不影响发送。
-function pickMessageId(result) {
+export function pickMessageId(result) {
   const candidates = [
     result?.id,
     result?.data?.id,

@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CronExpressionParser } from 'cron-parser'
+import { checkDuplicate, recordSent } from './outbox.js'
+import { canHeal, errorSignature, markHeal } from './heal.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')
@@ -12,9 +14,11 @@ const MAX_TOTAL = 20
 // 启动补跑：只补最近 6 小时内错过的，太久的不补（避免关机一整天后一次性轰炸）
 const CATCHUP_MAX_AGE_MS = 6 * 60 * 60 * 1000
 const CATCHUP_DELAY_MS = 20_000
+// 自愈修完之后隔多久重试
+const RETRY_DELAY_MS = 4_000
 
 let tasks = []
-let deps = { sendMessage: null, runTask: null }
+let deps = { sendMessage: null, runTask: null, selfHeal: null, recallSent: null, requestRestart: null }
 let lastTickKey = ''
 
 function load() {
@@ -153,33 +157,140 @@ export function removeSchedule(id, sessionKey) {
   return removed
 }
 
+// 推送前查台账：同一条内容发过就不再发，补跑时更是整个任务当天只发一次
+async function deliver(task, text, options) {
+  const dup = checkDuplicate({
+    taskId: task.id,
+    target: task.target,
+    text,
+    catchUp: Boolean(options.catchUp),
+  })
+
+  if (dup) {
+    console.log(`[定时] ${task.id} 跳过推送：${dup.reason}（${new Date(dup.at).toLocaleString('zh-CN', { hour12: false })}）`)
+    return { skipped: dup.reason }
+  }
+
+  const ids = await deps.sendMessage(task.target, text)
+  const idList = (Array.isArray(ids) ? ids : [ids]).map((id) => String(id ?? '')).filter(Boolean)
+
+  const kept = recordSent({
+    taskId: task.id,
+    target: task.target,
+    text,
+    ids: idList,
+    note: options.retry ? 'retry' : options.catchUp ? 'catchup' : '',
+  })
+
+  // 并发兜底：刚发出去才发现窗口里已经有一条一样的，把这条撤回来
+  if (kept.duplicated) {
+    let note = '状态显示这条重复了，但没拿到 message_id，撤不回来'
+    if (idList.length > 0 && typeof deps.recallSent === 'function') {
+      try {
+        await deps.recallSent(task.target, idList)
+        note = '已自动撤回重复的那条'
+      } catch (error) {
+        note = `自动撤回失败：${error?.message ?? error}`
+      }
+    }
+    console.log(`[定时] ${task.id} 重复推送，${note}`)
+    return { skipped: `重复推送，${note}` }
+  }
+
+  return { sent: true, ids: idList }
+}
+
+// 失败后的自愈：先过限流，再交给 index 注入的修复 agent
+async function runHeal(task, error, options) {
+  if (options.retry) return { retry: false, note: '（这次是自愈后的重试，不再重复自愈）' }
+  if (typeof deps.selfHeal !== 'function') return { retry: false, note: '' }
+
+  const signature = errorSignature(error)
+  const gate = canHeal(task.id, signature)
+  if (!gate.ok) {
+    return { retry: false, note: `（没自动修：${gate.reason}）` }
+  }
+
+  try {
+    const result = await deps.selfHeal({ task, error, signature, catchUp: Boolean(options.catchUp) })
+    const healed = Boolean(result?.healed)
+    markHeal(task.id, signature, {
+      ok: healed,
+      note: String(result?.note ?? '').slice(0, 180),
+    })
+
+    if (healed && result?.needRestart) {
+      if (typeof deps.requestRestart === 'function') {
+        await deps.requestRestart(`定时任务 ${task.id} 自愈后需要重启`).catch(() => {})
+        return {
+          retry: false,
+          note: `（代码已修：${result?.note ?? ''}；已安排重启，起来后会自动补跑）`,
+        }
+      }
+      return { retry: false, note: `（代码已修：${result?.note ?? ''}，但要重启才生效）` }
+    }
+
+    if (healed) {
+      return { retry: true, note: `（已自愈：${result?.note ?? ''}，马上重试一次）` }
+    }
+
+    return { retry: false, note: `（自愈没成功：${result?.note ?? '没定位到原因'}）` }
+  } catch (healError) {
+    const message = String(healError?.message ?? healError)
+    markHeal(task.id, signature, { ok: false, note: `自愈过程出错：${message}`.slice(0, 180) })
+    return { retry: false, note: `（自愈过程出错：${message}）` }
+  }
+}
+
 async function fire(task, options = {}) {
   if (task.running) return
+  const prevLastRunAt = task.lastRunAt
   task.running = true
   task.lastRunAt = Date.now()
 
   const catchUpNote = options.catchUp
     ? `｜补发（原定 ${new Date(options.plannedAt).toLocaleString('zh-CN', { hour12: false })}）`
     : ''
+  const retryNote = options.retry ? '｜自愈后重试' : ''
 
   try {
-    console.log(`[定时] 触发 ${task.id}（${describeCron(task.cron)}）${catchUpNote}`)
+    console.log(`[定时] 触发 ${task.id}（${describeCron(task.cron)}）${catchUpNote}${retryNote}`)
     const result = await deps.runTask(task)
 
     task.lastStatus = options.catchUp ? 'ok:catchup' : 'ok'
     persist()
 
     if (result) {
-      await deps.sendMessage(
-        task.target,
-        `定时任务 ${task.id}｜${describeCron(task.cron)}${catchUpNote}\n\n${result}`,
-      )
+      const text = `定时任务 ${task.id}｜${describeCron(task.cron)}${catchUpNote}${retryNote}\n\n${result}`
+      const outcome = await deliver(task, text, options)
+      if (outcome.skipped) {
+        task.lastStatus = `${task.lastStatus}（跳过推送：${outcome.skipped}）`.slice(0, 160)
+        persist()
+      }
     }
   } catch (error) {
-    task.lastStatus = `failed: ${error?.message ?? error}`.slice(0, 120)
+    const message = String(error?.message ?? error)
+    task.lastStatus = `failed: ${message}`.slice(0, 120)
+    // 失败不算跑完：退回上一次成功的时间，重启后的补跑逻辑才会认这次
+    task.lastRunAt = prevLastRunAt
     persist()
+
+    const heal = await runHeal(task, error, options)
+
+    if (heal?.retry) {
+      console.log(`[定时] ${task.id} ${RETRY_DELAY_MS}ms 后重试一次`)
+      const timer = setTimeout(() => {
+        fire(task, { ...options, retry: true }).catch((err) =>
+          console.error('[定时] 重试异常：', err?.message ?? err),
+        )
+      }, RETRY_DELAY_MS)
+      timer.unref?.()
+      return
+    }
+
+    const extra = heal?.note ? `\n${heal.note}` : ''
     await deps
-      .sendMessage(task.target, `定时任务 ${task.id} 执行失败：${error?.message ?? error}`)
+      .sendMessage(task.target, `定时任务 ${task.id} 执行失败：${message}${extra}`)
       .catch(() => {})
   } finally {
     task.running = false
@@ -220,8 +331,8 @@ function tick() {
   }
 }
 
-export function initScheduler({ sendMessage, runTask }) {
-  deps = { sendMessage, runTask }
+export function initScheduler({ sendMessage, runTask, selfHeal, recallSent, requestRestart }) {
+  deps = { sendMessage, runTask, selfHeal, recallSent, requestRestart }
   tasks = load()
   persist() // 把清干净的 running 写回磁盘
 
@@ -241,5 +352,20 @@ export function schedulerStats() {
   return {
     total: tasks.length,
     enabled: tasks.filter((task) => task.enabled).length,
+  }
+}
+
+// 给自愈 agent 用的只读视图：它能看见任务是怎么配的，但不能直接改
+export function describeTask(taskId) {
+  const task = tasks.find((item) => item.id === taskId)
+  if (!task) return null
+  return {
+    id: task.id,
+    cron: task.cron,
+    when: describeCron(task.cron),
+    prompt: task.prompt,
+    target: task.target,
+    lastStatus: task.lastStatus,
+    lastRunAt: task.lastRunAt,
   }
 }

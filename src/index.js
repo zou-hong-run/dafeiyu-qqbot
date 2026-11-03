@@ -13,7 +13,7 @@ import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, 
 import { flushTickets } from './ticket.js'
 import { startWatchdog, stopWatchdog } from './watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './sync.js'
-import { recallMessages } from './recall.js'
+import { noteSent, recallMessages } from './recall.js'
 import { flushUsage, formatUsage } from './usage.js'
 import * as groupLog from './group-log.js'
 import * as observe from './observe.js'
@@ -44,6 +44,7 @@ import {
   isStaleMessage,
   markQuote,
   passiveCountOf,
+  pickMessageId,
   sendLongReply,
   sendReply,
   withSendRetry,
@@ -1470,6 +1471,94 @@ bot.on('message.group', (event) => {
 
 let shuttingDown = false
 
+// ---------- 定时任务自愈 ----------
+// 失败了自己去查、去改，改完告诉调度器「要不要重启」「修没修好」。
+// 节流在 src/heal.js，这里只管干活，不判断能不能干。
+const SELF_HEAL_HINT = [
+  '定时任务执行失败了。你的活是自己定位、自己修，别只写报告。',
+  '',
+].join('\n')
+
+function parseHealVerdict(raw) {
+  const m = /SELFHEAL:\s*healed=(yes|no)\s+needRestart=(yes|no)(?:\s+note=(.*))?/i.exec(String(raw ?? ''))
+  if (!m) return { healed: false, needRestart: false, note: '子助手没给出结论行' }
+  return {
+    healed: m[1].toLowerCase() === 'yes',
+    needRestart: m[2].toLowerCase() === 'yes',
+    note: String(m[3] ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
+  }
+}
+
+async function runSelfHeal({ task, error, signature, catchUp = false } = {}) {
+  const stack = String(error?.stack ?? error?.message ?? error ?? '').slice(0, 1500)
+  const prompt = [
+    SELF_HEAL_HINT,
+    `任务 id：${task?.id ?? '未知'}`,
+    `任务目标：${String(task?.prompt ?? '').slice(0, 400)}`,
+    `触发方式：${catchUp ? '启动补跑' : '按点触发'}`,
+    `报错签名：${signature ?? ''}`,
+    '报错原文（可能截断）：',
+    stack,
+    '',
+    '要求：',
+    '1. 先 grep 报错里出现的标识符，确认在哪个文件哪一行，别凭记忆猜。',
+    '2. 读上下文，判断是漏了 import、参数没传、还是函数根本不存在，改最小必要的地方。',
+    '3. 改完再 grep 一次，确认那个标识符现在有定义/有导入。机器内存小，别硬跑 node --check，OOM 会拖死整机。',
+    '4. 不要自己敲 pm2 restart，重启交给上层。',
+    '5. 结果里别贴大段代码。',
+    '',
+    '最后单独一行给结论，格式严格如下，别加别的字：',
+    'SELFHEAL: healed=yes needRestart=no note=一句话说改了什么',
+    '没定位到原因就写 healed=no，needRestart 照实写。',
+  ].join('\n')
+
+  const raw = await runTaskAgent({
+    taskPrompt: prompt,
+    scope: 'private',
+    actor: 'scheduler', // 复用定时任务的授权，能读写源码
+    sessionKey: `heal:${task?.id ?? 'unknown'}`,
+    tools: toolsForScope('private', 'scheduler'),
+    callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
+    gitSync: gitSyncFor(),
+  })
+
+  const verdict = parseHealVerdict(raw)
+  console.log(`[自愈] ${task?.id ?? ''} 结论：healed=${verdict.healed} needRestart=${verdict.needRestart}｜${verdict.note}`)
+  return verdict
+}
+
+// 自愈改完代码需要重启：走 restart_self 工具，别在进程里直接敲 pm2
+async function requestSchedulerRestart(reason) {
+  const text = String(reason ?? '').slice(0, 200)
+  console.warn('[自愈] 需要重启：', text)
+  try {
+    await callTool('restart_self', { reason: text, delay_seconds: 8 }, env.toolTimeoutMs)
+  } catch (error) {
+    console.error('[自愈] 重启请求失败：', error?.message ?? error)
+  }
+}
+
+// 定时推送发错了要能撤：按 target + message_id 调撤回，不依赖 event
+async function recallSentToTarget(target, ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).map((id) => String(id ?? '')).filter(Boolean)
+  if (list.length === 0) return '没有 message_id，撤不了'
+
+  const event =
+    target?.type === 'group'
+      ? { message_type: 'group', group_id: target.id }
+      : { message_type: 'private', user_id: target.id }
+
+  const notes = []
+  for (const id of list) {
+    try {
+      notes.push(await recallMessages({ event, messageId: id }))
+    } catch (error) {
+      notes.push(`撤 ${id} 失败：${error?.message ?? error}`)
+    }
+  }
+  return notes.join('\n')
+}
+
 function withTimeout(task, ms) {
   return Promise.race([
     Promise.resolve(task).catch(() => {}),
@@ -1644,18 +1733,37 @@ try {
       // 群里被喊安静了就先别推：定时早报也是打扰
       if (target.type === 'group' && isMuted(target.id)) {
         console.log(`[定时] ${target.id.slice(0, 12)}… 静音中，本次推送跳过`)
-        return
+        return []
       }
 
       // 定时任务的日报可能很长：分段发，别用 clip 截断
       const parts = chunkText(text)
+      const ids = []
+      // 撤回要 message_id：这里把发送结果捞出来，既给调度器记账，也写进撤回台账
+      const event =
+        target.type === 'group'
+          ? { message_type: 'group', group_id: target.id }
+          : { message_type: 'private', user_id: target.id }
+
       for (let i = 0; i < parts.length && i < 6; i += 1) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
-        if (target.type === 'group') await bot.group(target.id).send(parts[i])
-        else await bot.user(target.id).send(parts[i])
+        const result =
+          target.type === 'group'
+            ? await bot.group(target.id).send(parts[i])
+            : await bot.user(target.id).send(parts[i])
+        const id = pickMessageId(result)
+        if (id) {
+          ids.push(id)
+          noteSent(event, id, parts[i], 'text')
+        }
       }
+
+      return ids
     },
     runTask: runScheduledTask,
+    selfHeal: runSelfHeal,
+    recallSent: recallSentToTarget,
+    requestRestart: requestSchedulerRestart,
   })
 
   try {
