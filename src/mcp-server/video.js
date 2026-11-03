@@ -26,6 +26,12 @@ function commonArgs(url) {
   if (/bilibili\.com/i.test(String(url ?? ''))) {
     args.push('--add-header', 'Referer:https://www.bilibili.com/')
   }
+
+  // 有的站点按 TLS 指纹认爬虫（B 站就是这样，光有 cookies 也 412）。
+  // 设 YTDLP_IMPERSONATE=chrome 让 yt-dlp 伪装成真浏览器，需要额外装 curl_cffi
+  const impersonate = process.env.YTDLP_IMPERSONATE?.trim()
+  if (impersonate) args.push('--impersonate', impersonate)
+
   return args
 }
 
@@ -241,11 +247,13 @@ async function fetchVideo({ url = '', seconds = 10, startAt = 0, maxHeight = 360
     if (/Unsupported URL/i.test(stderr)) {
       throw new Error('这个站不支持解析。B 站、YouTube 这类可以；小众站和需要登录的解析不了')
     }
-    if (/412|403|风控|risk|blocked/i.test(stderr)) {
+    if (/412|403|风控|risk|blocked|Failed to extract play info/i.test(stderr)) {
       throw new Error(
-        '站点把这个服务器的 IP 拦了（常见 412/403 风控）。' +
-          '解决办法：从浏览器导出 cookies 存成 data/cookies.txt（Netscape 格式），' +
-          '工具会自动带上；如果还没有，让对方直接把视频发过来更快。',
+        '站点把服务器拦了（412 / Failed to extract play info），光有 cookies 不够，' +
+          '它还在按 TLS 指纹认爬虫。可以让管理员做两件事：\n' +
+          '1) pip3 install -U yt-dlp curl_cffi\n' +
+          '2) .env 里加一行 YTDLP_IMPERSONATE=chrome，然后 pm2 restart dafeiyu\n' +
+          '做完还不行，就是 IP 段被封了，让对方直接把视频发过来。',
       )
     }
     throw new Error(`下载失败：${stderr.slice(0, 200)}`)
