@@ -10,6 +10,8 @@ const registryFile = path.join(projectRoot, 'data', 'mcp-registry.json')
 
 const SAFE_ENV_KEYS = [
   'PATH', 'Path', 'SYSTEMROOT', 'SystemRoot', 'TEMP', 'TMP',
+  // 视频解析用：yt-dlp 的路径和伪装开关，子进程要靠这两个
+  'YTDLP_PATH', 'YTDLP_IMPERSONATE',
   'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'NODE_OPTIONS',
 ]
 
