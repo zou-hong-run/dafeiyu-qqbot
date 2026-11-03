@@ -1397,6 +1397,18 @@ export async function summarizeTask({ goal = '', tools = [], answer = '' } = {})
   }
 }
 
+// 用户这句话是在要一个动作（去查、去发、去改），而不是问概念。
+// 用来给模型加一句「现在就动手」的提醒 —— 它很容易先回「我这就去」然后等下一轮。
+const ACTION_WORDS = /(查|搜|下载|生成|画|发|写|改|装|部署|跑|统计|总结|整理|删|建|创建|上传|转换|翻译|分析)/
+const QUESTION_WORDS = /[？?]|吗|呢|能不能|可不可以|是否|怎么|如何|哪里|哪个/
+const CONCEPT_WORDS = /(是什么|为什么|怎么理解|有什么区别|介绍一下|讲讲|聊聊|原理|概念|区别)/
+
+export function looksLikeActionRequest(text) {
+  const value = String(text ?? '')
+  if (!value) return false
+  return !QUESTION_WORDS.test(value) && ACTION_WORDS.test(value) && !CONCEPT_WORDS.test(value)
+}
+
 export async function chat(sessionKey, userText, options = {}) {
   usageKey = sessionKey
 
@@ -1431,12 +1443,19 @@ export async function chat(sessionKey, userText, options = {}) {
     .slice(0, MAX_IMAGES)
 
   const userIndex = history(sessionKey).length + 1
+  const needsAction = looksLikeActionRequest(userText)
+  const userContent = needsAction
+    ? `${userText}
+
+（提醒：这条是要我动手做的事，这一轮就调用工具，别先回「我这就去」等下一轮）`
+    : userText
+
   const messages = [
     { role: 'system', content: buildSystemPrompt(sessionKey, userText) },
     ...history(sessionKey),
     imageParts.length > 0
-      ? { role: 'user', content: [{ type: 'text', text: userText }, ...imageParts] }
-      : { role: 'user', content: userText },
+      ? { role: 'user', content: [{ type: 'text', text: userContent }, ...imageParts] }
+      : { role: 'user', content: userContent },
   ]
 
   // 本地工具也要过权限：start_task / schedule_task 这类高危的，不配白名单就别让模型看见
@@ -1476,7 +1495,6 @@ export async function chat(sessionKey, userText, options = {}) {
 
   let answer = ''
   let autoPushes = 0
-  let forceToolChoice = false
   const callHistory = []
   const budget = Math.floor(env.contextWindowTokens * env.contextBudgetRatio)
 
@@ -1487,8 +1505,10 @@ export async function chat(sessionKey, userText, options = {}) {
 
     if (usableTools.length > 0) {
       payload.tools = usableTools
-      payload.tool_choice = forceToolChoice ? 'required' : 'auto'
-      forceToolChoice = false
+      // 注意：不要用 tool_choice: 'required'。deepseek-flash 的 thinking 模式不支持，
+      // 会直接返回 400「Thinking mode does not support this tool_choice」，整轮对话就挂了。
+      // 推模型动手只能靠提示词 + 重试。
+      payload.tool_choice = 'auto'
     }
 
     if (env.toolDebug) {
@@ -1522,14 +1542,18 @@ export async function chat(sessionKey, userText, options = {}) {
         )
 
         completion = await createCompletion(payload)
-      } else if (imageParts.length > 0 && /image|vision|multimodal|invalid.*content/i.test(reason)) {
-        // 当前模型不认识图片：去掉图片再来一次，别让整条消息直接失败
+      } else if (imageParts.length > 0 && /image|vision|multimodal|invalid.*content/i.test(reason)) {        // 当前模型不认识图片：去掉图片再来一次，别让整条消息直接失败
         console.warn(`[视觉] ${env.model} 不支持图片输入，去掉图片重试：${reason.slice(0, 100)}`)
         imageParts.length = 0
         messages[userIndex] = { role: 'user', content: userText }
 
         if (env.toolDebug) console.log('[视觉] 已降级为纯文本，图片内容这次读不到')
         round -= 1
+      } else if (/tool_choice/i.test(reason)) {
+        // 防御：有些模型（deepseek-flash 的 thinking 模式）不接受指定 tool_choice
+        console.warn(`[工具] 模型不支持指定的 tool_choice，去掉后重试：${reason.slice(0, 100)}`)
+        delete payload.tool_choice
+        completion = await createCompletion(payload)
       } else {
         throw error
       }
@@ -1563,23 +1587,50 @@ export async function chat(sessionKey, userText, options = {}) {
       }
 
       const hasGoalNow = Boolean(getGoal(sessionKey))
-      const looksDone = /(完成|做好了|已发送|已经发|已生成|发给你|搞定|弄好了)/.test(answer)
-      const noActionUnderGoal =
-        hasGoalNow && !looksDone && answer.length > 0 && answer.length < 400
+      const looksDone = /(完成|做好了|已发送|已经发|已生成|发给你|搞定|弄好了|已经查到|结果如下)/.test(answer)
 
-      if (noActionUnderGoal && autoPushes < 2) {
+      // 「我这就去 / 马上 / 正在查」这类承诺：说了却没调工具，就是空头支票
+      const promisePattern =
+        /(我这就|马上(去|查|做|处理)|立刻(去|查|做)|现在就(去|查|做)|稍等|等我(查|看|找)|正在(查|处理|做|跑|执行|找)|我去(查|看|找|做|跑)|让我(查|看|找)|开始(处理|执行|查|做)|这就去|先去(查|看|找))/
+      const wantsAction = looksLikeActionRequest(userText)
+      const promisedAction = promisePattern.test(answer)
+      // 说「搞定了」但这一轮一次工具都没调过：假完成
+      const fakeDone = looksDone && callHistory.length === 0
+
+      // 关键：只有整轮对话一次工具都没调过才推。
+      // 调过工具之后的总结回答是正常收尾，再推就成了逼它重复劳动
+      const noToolYet = callHistory.length === 0
+      // 已经调过工具、却还在说「稍等/马上」就停了：活没干完就收尾，也推一次
+      const stalledAfterTools = !noToolYet && promisedAction && answer.length < 60
+
+      const shouldPush =
+        answer.length > 0 &&
+        answer.length < 400 &&
+        (noToolYet ? hasGoalNow || promisedAction || wantsAction || fakeDone : stalledAfterTools)
+
+      if (shouldPush && autoPushes < 2) {
         autoPushes += 1
-        forceToolChoice = true
+
+        const reason = fakeDone
+          ? '说完成但没有实际执行'
+          : promisedAction
+            ? '只承诺要去做，没有调用工具'
+            : hasGoalNow
+              ? '有目标但没推进'
+              : '这条请求是要动手做事'
+
         console.warn(
-          `[空承诺] ${sessionKey} 第${round + 1}轮有目标却没调工具，下一轮强制 required（${autoPushes}/2）`,
+          `[空承诺] ${sessionKey} 第${round + 1}轮${reason}，下一轮强制 required（${autoPushes}/2）`,
         )
 
         messages.push({ role: 'assistant', content: answer })
         messages.push({
           role: 'user',
           content:
-            '（系统提示）目标还没完成。你刚才只回了文字、没有产生任何动作，用户什么都收不到。' +
-            '下一轮必须调用工具推进；要多步完成就用 start_task 交给后台。',
+            '（系统提示）你刚才只回了文字，这一轮没有调用任何工具，用户那边什么都没发生。' +
+            '现在必须立刻调用工具把事情做掉：查资料用 search 或 fetch，算东西用 calc，跑命令用 shell，' +
+            '多步任务用 start_task 交给后台。' +
+            '如果确实做不了（没权限、缺参数、平台不支持），就直接说清做不了和真实原因，别再写「我这就去」。',
         })
 
         answer = ''

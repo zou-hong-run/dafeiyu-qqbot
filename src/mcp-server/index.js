@@ -219,12 +219,25 @@ function calc({ expression }) {
     throw new Error('只支持数字和 + - * / % ( ) ^，不支持变量和函数名')
   }
 
+  // 纯整数四则（没有小数点、没有 / 和 ^）用 BigInt 算，避免 2^53 之后丢精度。
+  // 之前 123456789*987654321 会算成 121932631113000000，差好几百，模型自己都发现不对
+  const integersOnly = !/[.eE/^]/.test(clean)
+  if (integersOnly) {
+    try {
+      const withBigInt = clean.replace(/\d+/g, (digits) => `${digits}n`)
+      const value = Function(`"use strict"; return (${withBigInt})`)()
+      if (typeof value === 'bigint') return `${raw.trim()} = ${value.toString()}`
+    } catch {
+      // 转 BigInt 失败就退回浮点，不影响别的表达式
+    }
+  }
+
   const normalized = clean.replace(/\^/g, '**')
   const value = Function(`"use strict"; return (${normalized})`)()
 
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('计算结果无效（可能除以 0）')
 
-  const pretty = Number(value.toPrecision(12))
+  const pretty = Number(value.toPrecision(15))
   return `${raw.trim()} = ${pretty}`
 }
 
