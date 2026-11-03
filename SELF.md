@@ -52,6 +52,10 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - 站点风控（412 / Failed to extract play info）先查这三样，别急着下「IP 被封」的结论：
   `data/cookies.txt` 在不在、`.env` 里有没有 `YTDLP_IMPERSONATE=chrome`、改完重启过没有
 - 这三样都对的还是失败，才是真的 IP 段被拦；换 BV 号也可能是某条视频本身解析不了，不等于整站不通
+- **整条视频**（不是片段）用 shell 后台跑 yt-dlp，别用 fetch_video——它单次只有 45 秒，长视频必然超时：
+  `nohup yt-dlp -f "bv*+ba/b" -S "res:360" -o downloads/xxx.mp4 "<链接>" > /tmp/dl.log 2>&1 &`
+  然后用 `ls -l downloads/xxx.mp4` 轮询大小，下完再 send_video。清晰度优先 360p，720p 体积翻三倍
+- 先试 yt-dlp；只有它报 412 才改用 view + wbi 签名的 playurl 拿直链。别一上来就手工调接口
 
 ### 转发别人发来的视频/图片
 
