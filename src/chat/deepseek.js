@@ -469,17 +469,25 @@ const LOCAL_TOOLS = [
     function: {
       name: 'send_to_group',
       description:
-        '主动往指定的群发一条消息，不需要那个群有人 @ 我。' +
-        '私聊里也能用——这就是「把话带到群里」的办法，别说自己做不到。' +
-        'groupId 传 list_groups 查到的群 openid，当前群可以传 current。' +
+        '主动往指定的群发消息或文件，不需要那个群有人 @ 我。' +
+        '两种用法：只传 text 发文字；传 path 发文件（图片/视频/语音/其他，按扩展名自动判断）。' +
+        '私聊里收到对方发的视频/图片想转到群里，就用 path 传提示词里给的那个附件路径，' +
+        '它会把附件从会话目录提升到 downloads 再发出去。' +
+        'groupId 只能传 list_groups 查到的群 openid（形如 206309398B037A4DC0D07DA18C6997FB），' +
+        '不是 QQ 群号——纯数字群号平台不认；当前群可以传 current。' +
         '主动消息有频控：同一个群别连发太多条。',
       parameters: {
         type: 'object',
         properties: {
-          groupId: { type: 'string', description: '目标群 openid，或 current 表示当前群' },
-          text: { type: 'string', description: '要发的正文，2000 字以内' },
+          groupId: { type: 'string', description: '目标群 openid（不是 QQ 群号），或 current 表示当前群' },
+          text: { type: 'string', description: '要发的正文，2000 字以内；发文件时不用传' },
+          path: {
+            type: 'string',
+            description: '要发的文件：提示词里的附件路径（downloads/incoming/...）或 downloads 里的文件名',
+          },
+          fileName: { type: 'string', description: '文件显示名（可选，只在 path 是普通文件时有用）' },
         },
-        required: ['groupId', 'text'],
+        required: ['groupId'],
       },
     },
   },
@@ -993,7 +1001,13 @@ async function runTool(
     }
     if (typeof groupSender !== 'function') return '当前场景不能主动发消息。'
     try {
-      const sent = await groupSender({ groupId: args.groupId, text: args.text })
+      const sent = await groupSender({
+        groupId: args.groupId,
+        text: args.text,
+        path: args.path,
+        fileName: args.fileName,
+      })
+      if (sent.kind) return `已把${sent.kind}「${sent.name}」（${sent.sizeMB}MB）发到群 ${sent.groupId}`
       return `已发往群 ${sent.groupId}（${sent.chars} 字）`
     } catch (error) {
       return `发群失败：${error?.message ?? error}`

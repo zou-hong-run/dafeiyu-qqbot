@@ -56,6 +56,7 @@ import {
   cardSenderFor,
   fileSenderFor,
   imageSenderFor,
+  sendMediaToGroup,
   speakSenderFor,
   videoSenderFor,
 } from './channel/media.js'
@@ -193,8 +194,22 @@ function groupSenderFor(event) {
   return async (input) => {
     const target = String(input?.groupId ?? '').trim()
     const text = String(input?.text ?? '').trim()
+    const mediaPath = String(input?.path ?? '').trim()
 
-    if (!text) throw new Error('缺少要发送的内容')
+    // 带 path 就是发文件（图片/视频/语音/其他），不带就是发文本
+    if (mediaPath) {
+      const groupId = !target || target === 'current' ? currentGroup : target
+      if (!groupId) throw new Error('没指定群：私聊里发文件要传 groupId（群 openid，不是 QQ 群号）')
+
+      const result = await sendMediaToGroup(groupId, mediaPath, { fileName: input?.fileName })
+      console.log(
+        `[主动发送] 已发${result.kind}到群 ${groupId.slice(0, 12)}…（${result.name}，${result.sizeMB}MB）`,
+      )
+      audit(auditKeyOf(event), 'send_to_group', { groupId, media: result.name }, `已发送${result.kind}`)
+      return { groupId, kind: result.kind, name: result.name, sizeMB: result.sizeMB }
+    }
+
+    if (!text) throw new Error('缺少要发送的内容：文字放 text，文件放 path')
     if (text.length > 2000) throw new Error(`内容 ${text.length} 字，太长了，压到 2000 字以内`)
 
     const groupId = !target || target === 'current' ? currentGroup : target

@@ -330,6 +330,63 @@ function assertSameScope(resolved, event) {
   )
 }
 
+// 把收到的附件（或 downloads 里的文件）发到指定群。
+// 附件默认按会话隔离，跨群发之前要把它「提升」到 downloads 根目录，
+// 这一步等于解除隔离，所以上层只给管理员开放。
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+const VIDEO_EXT = new Set(['.mp4'])
+const AUDIO_EXT = new Set(['.silk', '.mp3', '.wav', '.ogg', '.flac'])
+
+export async function sendMediaToGroup(groupId, inputPath, options = {}) {
+  const resolved = resolveSendableFile(inputPath)
+  if (!resolved) throw new Error(`找不到文件：${inputPath}。路径要么相对 downloads/，要么是提示词里给的那个 attachments 路径`)
+
+  const group = String(groupId ?? '').trim()
+  if (!group) throw new Error('要指定群')
+
+  const stat = fs.statSync(resolved)
+  if (!stat.isFile()) throw new Error('这不是文件')
+
+  // 跨会话发送：先把附件复制到 downloads 根，脱离原会话目录
+  let filePath = resolved
+  const inIncoming = path.relative(path.join(projectRoot, 'downloads', 'incoming'), resolved)
+  if (!inIncoming.startsWith('..') && !path.isAbsolute(inIncoming)) {
+    const base = `${Date.now()}-${path.basename(resolved)}`
+    const promoted = path.join(projectRoot, 'downloads', base)
+    fs.copyFileSync(resolved, promoted)
+    filePath = promoted
+  }
+
+  const ext = path.extname(filePath).toLowerCase()
+  const size = fs.statSync(filePath).size
+  const mb = size / 1048576
+
+  let payload
+  let kind
+  if (VIDEO_EXT.has(ext)) {
+    if (mb > 30) throw new Error(`视频 ${mb.toFixed(1)}MB，超过 30MB 会降级成文件；要保预览先压小`)
+    payload = segment.video(filePath)
+    kind = '视频'
+  } else if (IMAGE_EXT.has(ext)) {
+    if (mb > 10) throw new Error(`图片 ${mb.toFixed(1)}MB，超过 10MB 发不了`)
+    payload = segment.image(filePath)
+    kind = '图片'
+  } else if (AUDIO_EXT.has(ext)) {
+    if (mb > 20) throw new Error(`音频 ${mb.toFixed(1)}MB，超过 20MB 发不上去`)
+    const playable = await ensurePlayableAudio(filePath)
+    payload = segment.audio(playable)
+    kind = '语音'
+  } else {
+    if (mb > 50) throw new Error(`文件 ${mb.toFixed(1)}MB，超过 50MB 上限`)
+    payload = segment.file(filePath, { name: String(options.fileName ?? path.basename(filePath)).slice(0, 120) })
+    kind = '文件'
+  }
+
+  await bot.group(group).send(payload)
+
+  return { groupId: group, kind, name: path.basename(filePath), sizeMB: Number(mb.toFixed(2)) }
+}
+
 export function resolveSendableFile(target) {
   const roots = [path.join(projectRoot, 'downloads'), projectRoot]
   const cleaned = String(target ?? '')
