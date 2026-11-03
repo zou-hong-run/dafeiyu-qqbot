@@ -43,19 +43,41 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - 下完会按文件头校验类型；返回「是网页（HTML）不是文件」就说明那不是直链，换地址，别硬试
 - 找免费音乐优先 CC 授权的公共音乐站，直链一般以 .mp3 结尾；带登录墙、防盗链的站点下不动
 
-### 发别人平台的视频片段
+### 视频（B 站 / YouTube / 其他平台）
 
-- `fetch_video`：给链接和时段，用 yt-dlp 截一段下来（默认 10 秒 360p），自动合并成 mp4
-- 8 秒片段约 600KB，这台机器几十秒能下完；**整部电影下不动**，别试
-- 下完用 `send_video` 发；要别的片段改 `startAt` 再调一次
-- 依赖三样：`yt-dlp`（新版，2024 年的旧版解析不了 B 站）、`curl_cffi`（TLS 伪装）、`ffmpeg`（合并切片）
-- 站点风控（412 / Failed to extract play info）先查这三样，别急着下「IP 被封」的结论：
-  `data/cookies.txt` 在不在、`.env` 里有没有 `YTDLP_IMPERSONATE=chrome`、改完重启过没有
-- 这三样都对的还是失败，才是真的 IP 段被拦；换 BV 号也可能是某条视频本身解析不了，不等于整站不通
-- **整条视频**（不是片段）用 shell 后台跑 yt-dlp，别用 fetch_video——它单次只有 45 秒，长视频必然超时：
-  `nohup yt-dlp -f "bv*+ba/b" -S "res:360" -o downloads/xxx.mp4 "<链接>" > /tmp/dl.log 2>&1 &`
-  然后用 `ls -l downloads/xxx.mp4` 轮询大小，下完再 send_video。清晰度优先 360p，720p 体积翻三倍
-- 先试 yt-dlp；只有它报 412 才改用 view + wbi 签名的 playurl 拿直链。别一上来就手工调接口
+**要片段（首选，快）**
+
+- `fetch_video(url, seconds, startAt, maxHeight)`：让 yt-dlp 只下指定时段再合并成 mp4
+- 6-10 秒 360p 约 0.5-1MB，几十秒能发出去；30 秒约 2MB，两三分钟
+- 单次只有 45 秒预算，超时说明片段太长：缩到 5-8 秒，或把 maxHeight 降到 240
+
+**要整条**
+
+- 用 shell 后台跑 yt-dlp（命令末尾加 `&`），选 360p，再用 `ls -l` 轮询文件大小，下完 `send_video`
+- 别用 `fetch_video`——它单次只有 45 秒，长视频必然超时
+- 720p 体积是 360p 的三倍，这台机器要多等三分钟，别贪清晰度
+
+**找某个 UP 主的最新视频**
+
+- 先搜名字拿到 mid（空间页 `space.bilibili.com/<mid>`），再用 yt-dlp 的 `--flat-playlist` 列出视频号
+- 列表默认按最新排序，但**发布时间常常读不到**（接口 412）。读不到就直说「按列表顺序判断，没拿到发布时间佐证」，
+  不要假装知道日期
+- 别「先发一个不确定的版本、再补一个正确的」：确认了再发，一次一条
+
+**B 站 412 的排查顺序（按顺序，别跳步）**
+
+1. `yt-dlp --version` 必须是 2025 年以后（2024 版解析不了现在的接口，报的就是 Failed to extract）
+2. `data/cookies.txt` 存在，且第一行是 `# Netscape HTTP Cookie File`
+3. `.env` 里有 `YTDLP_IMPERSONATE=chrome`（配合 `curl_cffi` 伪装浏览器 TLS 指纹）
+4. 改过 `.env` 必须 `pm2 restart`，运行中的进程不会自动重读
+5. 以上都对还报 412，才改用手工：view 接口拿 cid → wbi 签名调 playurl 拿直链 → curl 后台下载
+6. 单条视频报 `Unable to extract` 是**这条视频本身**解析不了（会员 / 已删 / 仅登录可见），换 BV 号即可，不要归因到整站
+
+**别再说这三种话**
+
+- 「没装 yt-dlp」→ 先看 `/usr/local/bin/yt-dlp` 在不在，它可能软链到 pipx 装的新版
+- 「IP 被封了」→ 先把上面 1-4 项查一遍
+- 「以后都走手工签名」→ 错，yt-dlp 仍是首选，412 只是例外
 
 ### 转发别人发来的视频/图片
 
