@@ -10,6 +10,7 @@ const dataDir = path.join(projectRoot, 'data')
 const todoFile = path.join(dataDir, 'todos.json')
 
 const MAX_ITEMS = 20
+const MAX_SESSIONS = 80
 const MAX_TITLE = 60
 const STALE_STEPS = 5
 const STALE_REMIND_EVERY = 6
@@ -32,8 +33,15 @@ function load() {
 function persist() {
   try {
     fs.mkdirSync(dataDir, { recursive: true })
+
+    // 只留最近活跃的会话，否则聊过的每个群/私聊都会留一份空清单
+    const keys = Object.keys(state)
+      .sort((a, b) => (state[b]?.updatedAt ?? 0) - (state[a]?.updatedAt ?? 0))
+      .slice(0, MAX_SESSIONS)
+    const trimmed = Object.fromEntries(keys.map((key) => [key, state[key]]))
+
     const tmp = `${todoFile}.tmp`
-    fs.writeFileSync(tmp, JSON.stringify(state))
+    fs.writeFileSync(tmp, JSON.stringify(trimmed))
     fs.renameSync(tmp, todoFile)
   } catch (error) {
     console.error('[清单] 落盘失败：', error?.message ?? error)

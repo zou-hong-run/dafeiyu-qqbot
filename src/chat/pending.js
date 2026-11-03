@@ -34,6 +34,8 @@ function save() {
 }
 
 export function keyOf(event) {
+  // 也接受直接传会话 key（如 'group:xxx'），清状态时不用再拼一个假 event
+  if (typeof event === 'string') return event
   return event?.message_type === 'group' ? `group:${event.group_id}` : `user:${event.user_id}`
 }
 

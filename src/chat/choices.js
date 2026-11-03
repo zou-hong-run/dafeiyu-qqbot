@@ -15,6 +15,13 @@ export function putChoice(sessionKey, { question = '', options = [] } = {}) {
 
   const entry = { question: String(question ?? '').trim(), options: list, at: Date.now() }
   pending.set(sessionKey, entry)
+
+  if (pending.size > 200) {
+    for (const [key, item] of pending) {
+      if (Date.now() - item.at > TTL_MS) pending.delete(key)
+    }
+  }
+
   return entry
 }
 

@@ -9,6 +9,7 @@ import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
+import { resetSession } from './session-reset.js'
 import { readSkill, skillsPrompt } from '../skills/skills.js'
 import { selfDoc } from '../skills/self-doc.js'
 import { setGoal, getGoal, clearGoal, goalPrompt } from '../memory/goal.js'
@@ -20,7 +21,6 @@ import {
   setMidTerm,
   midTerm,
   history,
-  reset as resetMemory,
 } from '../memory/memory.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -917,8 +917,8 @@ async function runTool(
     if (!isToolAllowed('clear_memory', scope, actor)) {
       return `${denyReason('clear_memory', scope, actor)}。`
     }
-    resetMemory(sessionKey)
-    return '当前会话的记忆已清空，从现在开始是全新的对话。'
+    resetSession(sessionKey)
+    return '当前会话的记忆、任务清单、待选状态都清空了，从现在开始是全新的对话。'
   }
 
   if (name === 'git_sync') {
@@ -1528,7 +1528,6 @@ export async function chat(sessionKey, userText, options = {}) {
     .filter(Boolean)
     .slice(0, MAX_IMAGES)
 
-  const userIndex = history(sessionKey).length + 1
   const needsAction = looksLikeActionRequest(userText)
   const userContent = needsAction
     ? `${userText}
@@ -1631,7 +1630,8 @@ export async function chat(sessionKey, userText, options = {}) {
       } else if (imageParts.length > 0 && /image|vision|multimodal|invalid.*content/i.test(reason)) {        // 当前模型不认识图片：去掉图片再来一次，别让整条消息直接失败
         console.warn(`[视觉] ${env.model} 不支持图片输入，去掉图片重试：${reason.slice(0, 100)}`)
         imageParts.length = 0
-        messages[userIndex] = { role: 'user', content: userText }
+        // 当前这条用户消息永远在最后：压缩后 history 会变短，用固定下标会改错条目
+        messages[messages.length - 1] = { role: 'user', content: userText }
 
         if (env.toolDebug) console.log('[视觉] 已降级为纯文本，图片内容这次读不到')
         round -= 1

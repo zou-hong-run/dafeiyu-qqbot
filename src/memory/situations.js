@@ -181,6 +181,13 @@ export function formatSituations(sessionKey) {
     .join('\n')
 }
 
+export function clearSituations(sessionKey) {
+  if (!state[sessionKey]) return false
+  delete state[sessionKey]
+  scheduleSave()
+  return true
+}
+
 export function flushSituations() {
   clearTimeout(saveTimer)
   persist()

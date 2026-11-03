@@ -9,7 +9,7 @@ import { cleanWorkspace, workspaceStats } from './ops/workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
 import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './config/policy.js'
 import { ensureSkillsDir } from './skills/skills.js'
-import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, flush } from './memory/memory.js'
+import { evictIdleSessions, forget, listLongTerm, recentSessions, stats, flush } from './memory/memory.js'
 import { flushTickets } from './tasks/ticket.js'
 import { startWatchdog, stopWatchdog } from './tasks/watchdog.js'
 import { commitAndPush, describeStatus, pullLatest } from './ops/sync.js'
@@ -27,13 +27,13 @@ import { flushTodos } from './chat/todos.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
 import { putChoice, resolveChoice, choiceText } from './chat/choices.js'
 import { mergeMessage } from './chat/merge.js'
+import { resetSession } from './chat/session-reset.js'
 import {
   QUIET_MS,
   flushQuiet,
   isMuted,
   isUnmuteCommand,
   muteGroup,
-  muteRemainingMinutes,
   oncePer,
   parseMuteCommand,
   unmuteGroup,
@@ -972,8 +972,8 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
 
   if (text === '/reset' || text === '重置对话' || text === '清空记忆' || text === '重新开始') {
     if (await denyNonAdmin()) return
-    reset(key)
-    await sendReply(event, '记忆已清空，我们重新开始吧。')
+    resetSession(key)
+    await sendReply(event, '记忆、任务清单、待选状态都清空了，我们重新开始吧。')
     return
   }
 
