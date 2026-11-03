@@ -115,10 +115,10 @@ export function audioSenderFor(event, send = (payload) => deliver(event, payload
       return target
     }
 
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
+    // 提示词里给的附件路径形如 downloads/incoming/<会话>/x.mp4，
+    // 这里的 resolveSendableFile 会同时按 downloads/ 和项目根两种写法去解析
+    const resolved = resolveSendableFile(target)
+    if (!resolved) throw new Error(mediaMissingHint(downloadDir, path.resolve(downloadDir, target)))
     assertSameScope(resolved, event)
     if (!/\.(silk|mp3|wav|ogg|flac)$/i.test(resolved)) {
       throw new Error('只接受 QQ 支持的语音格式（silk/mp3/wav/ogg/flac）')
@@ -279,10 +279,8 @@ export function videoSenderFor(event, send = (payload) => deliver(event, payload
       return target
     }
 
-    const resolved = path.resolve(downloadDir, target)
-    if (!resolved.startsWith(downloadDir + path.sep)) {
-      throw new Error('只能发送 downloads 目录下的文件')
-    }
+    const resolved = resolveSendableFile(target)
+    if (!resolved) throw new Error(mediaMissingHint(downloadDir, path.resolve(downloadDir, target)))
     assertSameScope(resolved, event)
     if (!/\.mp4$/i.test(resolved)) {
       throw new Error('只接受 mp4 格式，QQ 视频消息不支持其他容器')

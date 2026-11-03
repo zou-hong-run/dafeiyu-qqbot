@@ -43,6 +43,12 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - 下完会按文件头校验类型；返回「是网页（HTML）不是文件」就说明那不是直链，换地址，别硬试
 - 找免费音乐优先 CC 授权的公共音乐站，直链一般以 .mp3 结尾；带登录墙、防盗链的站点下不动
 
+### 转发别人发来的视频/图片
+
+- 收到的附件自动存在 `downloads/incoming/<会话>/`，提示词里会给出路径
+- 想转出来就把路径原样传给 send_video / send_audio / send_image（`downloads/incoming/...` 这种写法也能认）
+- 只能发回收到它的会话；跨群转发做不到，跨群只能发文本
+
 ### 媒体发送（文件必须放在 downloads/ 目录）
 - `send_image` 图片：jpg / png / gif / webp / bmp，10MB 内
 - `send_audio` 语音：silk / mp3 / wav / ogg / flac，20MB 内
