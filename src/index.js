@@ -1,32 +1,32 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { env } from './env.js'
-import { chat, proactiveReply, summarizeGroup, runTaskAgent, testVision, followUpMessage } from './deepseek.js'
-import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './task-runner.js'
-import { initScheduler, addSchedule, listSchedules, removeSchedule, cronMatches } from './scheduler.js'
-import { cleanWorkspace, workspaceStats } from './workspace.js'
+import { env } from './config/env.js'
+import { chat, proactiveReply, summarizeGroup, runTaskAgent, testVision, followUpMessage } from './chat/deepseek.js'
+import { startTask as launchTask, taskStatus, describeTool, killTask, submitInput, takeInterruptedTasks } from './tasks/task-runner.js'
+import { initScheduler, addSchedule, listSchedules, removeSchedule, cronMatches } from './tasks/scheduler.js'
+import { cleanWorkspace, workspaceStats } from './ops/workspace.js'
 import { startMcp, getTools, syncRegistry, toDeepSeekTools, callTool, stopMcp } from './mcp/client.js'
-import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './policy.js'
-import { ensureSkillsDir } from './skills.js'
-import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, flush } from './memory.js'
-import { flushTickets } from './ticket.js'
-import { startWatchdog, stopWatchdog } from './watchdog.js'
-import { commitAndPush, describeStatus, pullLatest } from './sync.js'
-import { noteSent, noteSentToGroup, recallMessages } from './recall.js'
-import { flushUsage, formatUsage } from './usage.js'
-import * as groupLog from './group-log.js'
-import * as observe from './observe.js'
-import { formatProfile } from './profiles.js'
-import { flushKnowledge, knowledgePrompt, rebuildAll } from './knowledge.js'
-import { findCandidates, formatCandidates, noteProactive, shouldProactive } from './proactive.js'
-import { dueFollowUps, flushSituations, markFollowedUp } from './situations.js'
-import { generateHotTake } from './hot-takes.js'
-import { listBackups, runBackup } from './backup.js'
-import { flushTodos } from './todos.js'
-import { cleanupIncoming, describeInbound, extractInbound } from './incoming.js'
-import { putChoice, resolveChoice, choiceText } from './choices.js'
-import { mergeMessage } from './merge.js'
+import { filterTools, isAdmin, isToolAllowed, describePolicy, describeAdminPolicy } from './config/policy.js'
+import { ensureSkillsDir } from './skills/skills.js'
+import { evictIdleSessions, forget, listLongTerm, recentSessions, reset, stats, flush } from './memory/memory.js'
+import { flushTickets } from './tasks/ticket.js'
+import { startWatchdog, stopWatchdog } from './tasks/watchdog.js'
+import { commitAndPush, describeStatus, pullLatest } from './ops/sync.js'
+import { noteSent, noteSentToGroup, recallMessages } from './channel/recall.js'
+import { flushUsage, formatUsage } from './ops/usage.js'
+import * as groupLog from './memory/group-log.js'
+import * as observe from './channel/observe.js'
+import { formatProfile } from './memory/profiles.js'
+import { flushKnowledge, knowledgePrompt, rebuildAll } from './memory/knowledge.js'
+import { findCandidates, formatCandidates, noteProactive, shouldProactive } from './engage/proactive.js'
+import { dueFollowUps, flushSituations, markFollowedUp } from './memory/situations.js'
+import { generateHotTake } from './engage/hot-takes.js'
+import { listBackups, runBackup } from './ops/backup.js'
+import { flushTodos } from './chat/todos.js'
+import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
+import { putChoice, resolveChoice, choiceText } from './chat/choices.js'
+import { mergeMessage } from './chat/merge.js'
 import {
   QUIET_MS,
   flushQuiet,
@@ -37,7 +37,7 @@ import {
   oncePer,
   parseMuteCommand,
   unmuteGroup,
-} from './quiet.js'
+} from './engage/quiet.js'
 import { bot } from './bot.js'
 import {
   chunkText,
@@ -49,8 +49,8 @@ import {
   sendLongReply,
   sendReply,
   withSendRetry,
-} from './sender.js'
-import { pendingCount, takePending } from './pending.js'
+} from './channel/sender.js'
+import { pendingCount, takePending } from './chat/pending.js'
 import {
   audioSenderFor,
   cardSenderFor,
@@ -58,7 +58,7 @@ import {
   imageSenderFor,
   speakSenderFor,
   videoSenderFor,
-} from './media.js'
+} from './channel/media.js'
 import {
   claim,
   coolingDown,
@@ -71,7 +71,7 @@ import {
   scheduleJudge,
   touch,
   worthJudging,
-} from './trigger.js'
+} from './channel/trigger.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = path.join(projectRoot, 'data')

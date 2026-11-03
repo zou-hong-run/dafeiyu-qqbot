@@ -1,9 +1,9 @@
 import fs from 'node:fs'
 import OpenAI from 'openai'
-import { env } from '../src/env.js'
+import { env } from '../src/config/env.js'
 import { startMcp, getTools, toDeepSeekTools, callTool, stopMcp } from '../src/mcp/client.js'
-import { filterTools } from '../src/policy.js'
-import { chat } from '../src/deepseek.js'
+import { filterTools } from '../src/config/policy.js'
+import { chat } from '../src/chat/deepseek.js'
 
 const IMAGE_URL = 'https://www.python.org/static/img/python-logo.png'
 

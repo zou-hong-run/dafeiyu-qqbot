@@ -1,5 +1,5 @@
 import { Bot, ReceiverMode } from 'qq-official-bot'
-import { env } from './env.js'
+import { env } from './config/env.js'
 
 // QQ 网关只建一次连接：发送层、媒体发送器、巡检都共用这一个实例
 export const bot = new Bot({

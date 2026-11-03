@@ -77,57 +77,81 @@
 
 ## 目录结构
 
+按「干哪一类事」分目录，不按技术分层。一个功能要改，基本落在一个目录里。
+
 ```
 src/
-  index.js         Router：收消息、判断要不要干、建工单、命令处理、统一对外说话
-  bot.js           QQ 网关单例，各层共用
-  sender.js        发送层：被动回复配额、引用气泡、Markdown 降级
-  media.js         媒体发送器：图片 / 语音 / 视频 / 文件 / 卡片 / 文字转语音
-  incoming.js      入站附件：语音 / 图片 / 文件的下载与说明（按会话分目录）
-  pending.js       长回复分段后的尾巴暂存，等用户说「接着发」
-  sync.js          代码自同步：git add/commit/push（异步，带密钥拦截）
-  observe.js       观察模式的记录（JUDGE_MODE=observe 时写这里）
-  trigger.js       触发层：两级过滤（程序规则 → 语义判断）、插话预算、观察模式
-  deepseek.js      模型调用、工具定义与执行、记忆注入、后台子 agent
-  env.js           环境变量解析与校验（缺失直接退出）
-  persona.js       人格提示词
-  policy.js        工具权限表（哪个场景能用哪个工具）
-  memory.js        三层记忆：短期/中期/长期 + 落盘 data/memory.json
-  group-log.js     群聊记录（每群保留最近若干条，供插话判断和 /总结 用）
-  profiles.js      群成员画像：从群记录实时聚合出「谁常来、什么时段、倾向问什么」
-  knowledge.js     群知识沉淀：每小时重建 data/knowledge.json，注入提示词
-  proactive.js     主动接话：找没人答的问题 + 四道抑制（冷却/静默/上限/重复）
-  situations.js    情绪记忆：谁在为什么事发愁，隔几小时回访一次
-  hot-takes.js     热点吐槽：搜当天新闻 + 黑名单过滤 + 话题去重
-  templates.js     任务模板：成功的工单沉淀成「目标 → 路子 → 要点」
-  choices.js       选择题：编号选项 + 回数字选中（替代需要平台预建的按钮）
-  usage.js         token 用量与花费统计（data/usage.json，/cost 查看）
-  backup.js        每天把 data/ 和 skills/ 备份到 backups/，保留 7 份
-  quiet.js         降噪：群内节流 + 「安静」静音状态
-  merge.js         连发合并：同一个人连着几句合成一次理解
-  pitfalls.js      失败复盘：同一工具连续失败 3 次写进 skills/pitfalls.md
-  ticket.js        工单：一项工作的授权、进展、交付全记在这里，落盘可恢复
-  worker.js        Worker：上下文隔离的执行单元，只干活、不直接对外说话
-  watchdog.js      外部巡检：停滞检测 + 无效循环判定
-  task-runner.js   兼容层：老接口转发到 ticket + worker
-  scheduler.js     定时任务：cron 解析、到点执行、结果推群
-  skills.js        技能目录加载（skills/*.md 注入系统提示词）
-  self-doc.js      把 SELF.md 注入提示词，机器人可以自己改这份能力说明
-  goal.js          跨轮目标跟踪
-  workspace.js     tmp/ 清理与占用统计
+  index.js          入口与装配：收消息、判断要不要干、命令处理、定时器挂载、关停
+  bot.js            QQ 网关单例，各层共用
+
+  config/           配置与权限
+    env.js          环境变量解析与校验（缺失直接退出）
+    policy.js       工具权限表：哪个场景能用哪个工具、哪些要管理员
+
+  chat/             对话本体
+    deepseek.js     模型调用、工具定义与执行、提示词组装、后台子 agent
+    persona.js      人格提示词
+    merge.js        连发合并：同一个人连着几句合成一次理解
+    choices.js      选择题：编号选项 + 回数字选中
+    todos.js        任务清单：拆步骤、打勾、过期提醒
+    pending.js      长回复分段后的尾巴暂存，等用户说「接着发」
+
+  memory/           记得住的部分
+    memory.js       三层记忆：短期 / 中期 / 长期 + 落盘 data/memory.json
+    goal.js         跨轮目标跟踪
+    situations.js   情绪记忆：谁在为什么事发愁，隔几小时回访一次
+    knowledge.js    群知识沉淀：每小时重建 data/knowledge.json
+    profiles.js     群成员画像：谁常来、什么时段、倾向问什么
+    group-log.js    群聊记录（每群保留最近若干条）
+
+  skills/           技能与自我说明
+    skills.js       技能加载：小技能全文注入，大的只挂摘要 + read_skill
+    self-doc.js     把 SELF.md 注入提示词，机器人可以自己改这份说明
+    templates.js    任务模板：成功的工单沉淀成「目标 → 路子 → 要点」
+
+  tasks/            长任务
+    ticket.js       工单：授权、进展、交付全记下来，落盘可恢复
+    worker.js       Worker：上下文隔离的执行单元，只干活、不直接对外说话
+    task-runner.js  兼容层：老接口转发到 ticket + worker
+    scheduler.js    定时任务：cron 解析、到点执行、结果推群
+    watchdog.js     外部巡检：停滞检测 + 无效循环判定
+    heal.js         自愈节流：定时任务挂了自己去查去改，但有次数上限
+    outbox.js       推送台账：补跑 / 重试 / 重启补跑都可能重发，发前先查这里
+
+  channel/          QQ 这一侧
+    sender.js       发送层：被动回复配额、引用气泡、Markdown 降级、限流重试
+    media.js        图片 / 语音 / 视频 / 文件 / 卡片 / 文字转语音
+    incoming.js     入站附件下载（按会话分目录）
+    trigger.js      触发层：两级过滤、插话预算、观察模式
+    recall.js       撤回：记下发出去的消息 id，能撤自己的
+    observe.js      观察模式的记录
+
+  engage/           主动开口
+    proactive.js    主动接话：找没人答的问题 + 四道抑制
+    hot-takes.js    热点吐槽：搜当天新闻 + 黑名单过滤 + 话题去重
+    quiet.js        降噪：群内节流 + 「安静」静音状态
+
+  ops/              运维
+    sync.js         代码自同步：git add/commit/push
+    backup.js       每天把 data/ 和 skills/ 备份到 backups/，保留 7 份
+    usage.js        token 用量与花费统计（/cost）
+    pitfalls.js     失败复盘：同一工具连续失败 3 次写进 skills/pitfalls.md
+    workspace.js    tmp/ 清理与占用统计
+
   mcp/
-    client.js      MCP 客户端：启动内置服务、热加载 data/mcp-registry.json 里注册的外部服务
-  mcp-server/
-    index.js       内置工具服务：搜索、抓网页、时间、天气、汇率、计算、时区、DNS
-    shell.js       shell 执行与 run_script（黑名单 + 重试 + 后台运行）
-    fs-tools.js    文件读写、列目录
-    evolve.js      写技能、注册 MCP、装包
-    download.js    下载网络文件
-tools/
-  mcp-server-template.js  自建 MCP 服务的模板（复制改名即可）
-scripts/
-  diagnose.js      自检脚本：配置、MCP 工具、裸 API 调用逐层验证
-SELF.md            机器人的自我能力说明（会注入提示词，可被机器人自己改写）
+    client.js       MCP 客户端：启动内置服务、热加载 data/mcp-registry.json 里的外部服务
+  mcp-server/       内置 MCP 工具服务（独立子进程）
+    index.js        搜索、抓网页、时间、天气、汇率、计算、时区、DNS
+    shell.js        shell 执行与 run_script（黑名单 + 重试 + 后台运行）
+    fs-tools.js     读写文件、编辑、列目录
+    doc-tools.js    PDF / Word / Excel 解析
+    draw-pixel.js   像素画
+    evolve.js       写技能、注册 MCP、装包
+    download.js     下载网络文件
+
+tools/              自己注册的 MCP 服务（模板在 mcp-server-template.js）
+scripts/            自检与发布脚本（diagnose.js 逐层验证配置 / 依赖 / MCP / API）
+SELF.md             机器人的自我能力说明（注入提示词，可被机器人自己改写）
 ```
 
 ## 快速开始
