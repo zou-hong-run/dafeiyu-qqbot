@@ -247,6 +247,14 @@ async function fetchVideo({ url = '', seconds = 10, startAt = 0, maxHeight = 360
     if (/Unsupported URL/i.test(stderr)) {
       throw new Error('这个站不支持解析。B 站、YouTube 这类可以；小众站和需要登录的解析不了')
     }
+    // 单个视频解析不了：已删除、要会员、仅登录可见、直播回放过期之类。
+    // 这和「整站风控」要分开说，否则容易误判成 IP 被封然后放弃。
+    if (/Unable to extract|No video formats|This video is (unavailable|private)|premium|会员/i.test(stderr)) {
+      throw new Error(
+        '这个视频本身解析不了——可能已删除、需要会员、或者只对登录用户开放。' +
+          '换一个视频（别的 BV 号）再试；同一个链接别反复重试。',
+      )
+    }
     if (/412|403|风控|risk|blocked|Failed to extract play info/i.test(stderr)) {
       throw new Error(
         '站点把服务器拦了（412 / Failed to extract play info），光有 cookies 不够，' +
