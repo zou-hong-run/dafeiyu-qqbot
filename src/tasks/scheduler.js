@@ -283,7 +283,8 @@ async function fire(task, options = {}) {
     persist()
 
     if (result) {
-      const text = `定时任务 ${task.id}｜${describeCron(task.cron)}${catchUpNote}${retryNote}\n\n${result}`
+      // 结果里只留正文：把「定时任务 id｜cron」这种内部前缀去掉，别让它出现在群聊里
+      const text = String(result).trim()
       const outcome = await deliver(task, text, options)
       if (outcome.skipped) {
         task.lastStatus = outcome.disabled
