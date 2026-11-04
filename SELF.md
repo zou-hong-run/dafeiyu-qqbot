@@ -285,3 +285,4 @@ logs/                 pm2 日志
 ## 踩坑记录（自己总结的，别删）
 
 - B 站报 412 无法解析 → yt-dlp 是 2024 旧版，且没开 TLS 伪装 → 先查 yt-dlp 版本和 cookies，再试 --impersonate chrome
+- fetch_video 报「服务器上没装 yt-dlp」，但 /usr/local/bin/yt-dlp 软链明明在 → 软链指向 /root/.local/bin/yt-dlp，而沙箱里 /root 被遮蔽成空目录，目标不存在；python3 也没装 yt_dlp 模块，所以是真执行不到 → 先 which -a yt-dlp 和 ls -l 软链目标两件事都查：软链在但目标是 /root 下的就说明被沙箱遮了，直接说「二进制在沙箱里不可见」并让管理员重装（pip3 install yt-dlp 装到非 /root 路径）
