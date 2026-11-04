@@ -62,19 +62,20 @@ export function sandboxCommand(command, cwd) {
   if (!status.available) return null
 
   const network = NEEDS_NETWORK.test(command)
+  const isRoot = process.getuid?.() === 0
 
   const argv = [
     'bwrap',
-    // 命名空间隔离：用户、PID、IPC、UTS；网络按需
-    '--unshare-user',
+    // 不用 --unshare-user：bwrap 的 userns 只映射一个 uid，/qq 属 www 的 inode
+    // 不在映射里，CAP_DAC_OVERRIDE 对它们不生效（实测 touch 报 Permission denied）。
+    // 改成丢掉除 DAC 越权之外的所有 capability：能写工作目录，
+    // 但拿不到 mount / ptrace / bpf 这些能把只读根和遮蔽拆掉的能力。
+    ...(isRoot ? ['--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_OVERRIDE'] : []),
+    // 其余命名空间照常隔离；网络按需
     '--unshare-pid',
     '--unshare-ipc',
     '--unshare-uts',
     ...(network ? [] : ['--unshare-net']),
-    // bwrap 默认不给任何 capability：沙箱内虽然 uid=0，却写不了属 www 的 /qq
-    // （other 位只有 r-x），下载和生成文件全都会失败。只补回 DAC 越权这一项，
-    // 读取面靠下面的遮蔽挡住，拿不到 mount 之类的其他能力。
-    ...(process.getuid?.() === 0 ? ['--cap-add', 'CAP_DAC_OVERRIDE'] : []),
     // 整个根只读挂载
     '--ro-bind', '/', '/',
     // 工作目录单独给读写

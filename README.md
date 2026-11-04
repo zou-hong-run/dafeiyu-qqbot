@@ -397,7 +397,7 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 **shell 子进程不继承密钥**：只传 `PATH / HOME / LANG` 这几个，`DEEP_SEEK_API_KEY`、`QQ_APP_SECRET` 一律不进子进程，`env` 里看不到。
 
-**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许 user namespace 时，shell 命令会被包进 `bwrap`——整个根只读、只有工作目录可写、默认断网（装包/拉代码这类才放行网络）、`--clearenv`、父进程死了跟着死。只读根挡不住读，所以密钥文件（`APP_ENV_FILE`、项目根 `.env`）和 SSH 私钥会额外用 `--ro-bind-try /dev/null` 盖成空设备，沙箱里 `cat` 出来是空的。启动日志会如实写「bwrap 沙箱已启用」或「未隔离（原因）」。**没装或跑不起来就是裸跑，不会假装有隔离**。
+**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许建命名空间时，shell 命令会被包进 `bwrap`——整个根只读、只有工作目录可写、默认断网（装包/拉代码这类才放行网络）、`--clearenv`、父进程死了跟着死，capability 只保留 `CAP_DAC_OVERRIDE`（够写工作目录，拿不到 mount / ptrace 这些能把只读根拆掉的能力）。只读根挡不住读，所以密钥目录 `/etc/dafeiyu`、`/root/.ssh` 会挂成空 tmpfs，项目根 `.env` 和 `pm2` 的 env 快照会盖成 `/dev/null`。启动日志会如实写「沙箱已启用」或「未隔离（原因）」，并且是真的跑一遍读写探针，不是只看命令在不在。
 
 **`add_mcp` 有白名单**：只允许 `node tools/*.js` 或已安装的 `npx`（禁止 `-y` 联网拉包），env 字段不接受自定义值。`install_package` 固定带 `--ignore-scripts`，防 postinstall 执行任意代码。
 

@@ -92,10 +92,11 @@ export function sandboxStatus() {
   }
 
   try {
-    // 空跑一次：能建出 namespace 才算真的可用，光有二进制不够
+    // 空跑一次：能建出 namespace 才算真的可用，光有二进制不够。
+    // 参数要和 sandboxCommand 保持一致（不再 unshare-user），否则探测通过不代表真能跑。
     execFileSync(
       'bwrap',
-      ['--unshare-user', '--unshare-pid', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--', '/bin/true'],
+      ['--unshare-pid', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--', '/bin/true'],
       { stdio: 'pipe', timeout: 5000 },
     )
   } catch (error) {
@@ -103,7 +104,7 @@ export function sandboxStatus() {
     sandboxProbe = {
       available: false,
       kind: 'none',
-      reason: `bwrap 装了但跑不起来（常见是内核禁了 user namespace）：${raw.slice(0, 100)}`,
+      reason: `bwrap 装了但跑不起来（常见是内核禁了命名空间）：${raw.slice(0, 100)}`,
     }
     return sandboxProbe
   }
