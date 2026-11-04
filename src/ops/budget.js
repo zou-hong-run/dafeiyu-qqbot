@@ -5,7 +5,7 @@ import { memoryInfo, platform } from './platform.js'
 // 按机器实际内存算「能力边界」，别把 2G 机器的参数写死到所有机器上。
 // 环境变量始终优先：用户显式设了就听用户的，没设才用这里按内存档位算出来的值。
 const PROFILES = {
-  tiny: { maxMB: 2300, mainHeapMB: 320, mcpHeapMB: 160, shellUlimitMB: 512, maxSendFileMB: 50, taskConcurrency: 2, heavyNeedMB: 300, rescueBelowMB: 300 },
+  tiny: { maxMB: 2300, mainHeapMB: 320, mcpHeapMB: 160, shellUlimitMB: 512, maxSendFileMB: 50, taskConcurrency: 2, heavyNeedMB: 450, rescueBelowMB: 300 },
   small: { maxMB: 5000, mainHeapMB: 512, mcpHeapMB: 224, shellUlimitMB: 768, maxSendFileMB: 80, taskConcurrency: 2, heavyNeedMB: 400, rescueBelowMB: 350 },
   medium: { maxMB: 11000, mainHeapMB: 768, mcpHeapMB: 320, shellUlimitMB: 1536, maxSendFileMB: 150, taskConcurrency: 3, heavyNeedMB: 600, rescueBelowMB: 450 },
   large: { maxMB: Infinity, mainHeapMB: 1024, mcpHeapMB: 384, shellUlimitMB: 2048, maxSendFileMB: 200, taskConcurrency: 4, heavyNeedMB: 800, rescueBelowMB: 600 },

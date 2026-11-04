@@ -151,7 +151,8 @@ src/
     download.js     下载网络文件
 
 tools/              自己注册的 MCP 服务（模板在 mcp-server-template.js）
-scripts/            自检与发布脚本（diagnose.js 逐层验证配置 / 依赖 / MCP / API）
+scripts/            自检与发布脚本（diagnose 逐层验证配置 / 依赖 / MCP / API，check-refs 静态引用检查，release 发版）
+tests/              单元测试（node:test，零依赖，pnpm test）
 SELF.md             机器人的自我能力说明（注入提示词，可被机器人自己改写）
 ```
 
@@ -466,6 +467,19 @@ cd /qq && git ls-remote origin main
 | 自动提交报 `Permission denied (publickey)` | 服务器没配 GitHub SSH key，或者 Deploy Key 没勾 write access |
 | 机器人说「不在白名单里」 | 发 `/id` 拿到自己的 openid，填进 `.env` 的 `ADMIN_OPENIDS` 后重启 |
 | 机器人接话太频繁 | 默认只在 @ 和提到关键字时回复；想要自动插话设 `JUDGE_MODE=auto`，只想先观察设 `observe`（用 `/observe` 看记录） |
+
+## 测试
+
+用 Node 内置的 `node:test`，**零依赖**，不用装 vitest / jest。
+
+```bash
+pnpm test          # 43 个用例，约 1.5 秒
+pnpm test:watch    # 改代码自动重跑
+```
+
+覆盖纯逻辑层：连发合并、命令注册表、权限判断、内存档位、任务清单、选择题、静音节流，以及「`/clean` 不许动源码目录」这类回归用例。
+
+约定和明细见 [`tests/README.md`](./tests/README.md)。涉及模型调用、QQ 接口、外部命令的部分不写单测，靠 `pnpm diagnose` 和真机验证。
 
 ## 开发与自检
 
