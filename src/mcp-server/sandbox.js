@@ -13,30 +13,43 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 // 装包、拉代码这类必须有网，其余一律断网
 const NEEDS_NETWORK = /\b(pnpm|npm|yarn|npx|pip3?|apt|apt-get|yum|dnf|apk|brew|git|curl|wget)\b/
 
-// `--ro-bind / /` 只能挡写，挡不住读：沙箱内是 uid=0，600 权限的文件照样读得出来。
-// 这些路径统一盖成 /dev/null，读到的是空。
-export const SHIELDED_PATHS = [
-  process.env.APP_ENV_FILE?.trim() || '/etc/dafeiyu/env',
-  path.join(projectRoot, '.env'),
-  '/root/.ssh/id_rsa',
-  '/root/.ssh/id_ed25519',
-  '/root/.ssh/id_ecdsa',
-  '/root/.ssh/config',
+// `--ro-bind / /` 只能挡写，挡不住读。bwrap 默认一个 capability 都不给，
+// 但下面要补 DAC 越权让 root 能写属 www 的项目目录，所以读取面得单独挡住：
+// 目录挂空 tmpfs（整个目录变空），文件盖成 /dev/null（读到 0 字节）。
+export const SHIELDED_DIRS = [
+  '/etc/dafeiyu', // 外部密钥文件所在目录
+  '/root/.ssh', // SSH 私钥
 ]
 
-/** 生成遮蔽参数：把敏感文件在沙箱内盖成 /dev/null */
-export function shieldArgs(targets = SHIELDED_PATHS) {
-  return targets
-    .filter((target) => {
-      // --ro-bind-try 只忽略「源不存在」；目标不存在时 bwrap 会尝试创建挂载点，
-      // 而根是只读的，创建失败整条命令就起不来。所以这里先筛掉不存在的路径。
-      try {
-        return fs.existsSync(target)
-      } catch {
-        return false
-      }
-    })
-    .flatMap((target) => ['--ro-bind-try', '/dev/null', target])
+export const SHIELDED_FILES = [
+  process.env.APP_ENV_FILE?.trim() || '/etc/dafeiyu/env',
+  path.join(projectRoot, '.env'),
+  '/root/.pm2/dump.pm2', // pm2 保存的进程列表，里面是启动时的 env 快照
+]
+
+function exists(target) {
+  try {
+    return fs.existsSync(target)
+  } catch {
+    return false
+  }
+}
+
+function coveredByDir(target, dirs) {
+  return dirs.some((dir) => target === dir || target.startsWith(dir + path.sep))
+}
+
+/** 生成遮蔽参数：目录挂空 tmpfs，文件盖成 /dev/null */
+export function shieldArgs({ dirs = SHIELDED_DIRS, files = SHIELDED_FILES } = {}) {
+  // 两条参数都要求目标存在：--tmpfs 挂不上不存在的目录，
+  // --ro-bind-try 只忽略「源不存在」，目标不存在时会去只读根上创建挂载点而失败。
+  const usingDirs = dirs.filter(exists)
+  const usingFiles = files.filter((file) => exists(file) && !coveredByDir(file, usingDirs))
+
+  return [
+    ...usingDirs.flatMap((dir) => ['--tmpfs', dir]),
+    ...usingFiles.flatMap((file) => ['--ro-bind-try', '/dev/null', file]),
+  ]
 }
 
 /**
@@ -58,6 +71,10 @@ export function sandboxCommand(command, cwd) {
     '--unshare-ipc',
     '--unshare-uts',
     ...(network ? [] : ['--unshare-net']),
+    // bwrap 默认不给任何 capability：沙箱内虽然 uid=0，却写不了属 www 的 /qq
+    // （other 位只有 r-x），下载和生成文件全都会失败。只补回 DAC 越权这一项，
+    // 读取面靠下面的遮蔽挡住，拿不到 mount 之类的其他能力。
+    ...(process.getuid?.() === 0 ? ['--cap-add', 'CAP_DAC_OVERRIDE'] : []),
     // 整个根只读挂载
     '--ro-bind', '/', '/',
     // 工作目录单独给读写
@@ -66,7 +83,7 @@ export function sandboxCommand(command, cwd) {
     '--tmpfs', '/tmp',
     '--dev', '/dev',
     '--proc', '/proc',
-    // 密钥和 SSH 私钥盖成空设备，读出来是空的（对应上面的 SHIELDED）
+    // 密钥、SSH 私钥、pm2 env 快照统一遮掉（对应上面的 SHIELDED_DIRS / FILES）
     ...shieldArgs(),
     // 干净环境：不继承宿主的密钥
     '--clearenv',
@@ -105,7 +122,9 @@ export function sandboxSelfTest() {
     return selfTest
   }
 
-  const boxed = sandboxCommand('true', projectRoot)
+  // 光跑 true 只能证明参数合法，证明不了能不能写工作目录 ——
+  // 而「写不了 /qq」正是没补 CAP_DAC_OVERRIDE 时的症状，下载和生成文件全废。
+  const boxed = sandboxCommand('touch .sbx-probe && rm -f .sbx-probe', projectRoot)
   if (!boxed) {
     selfTest = status
     return selfTest
