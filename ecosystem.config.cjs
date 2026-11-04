@@ -35,6 +35,21 @@ function loadEnvFile(file) {
 const externalEnv = loadEnvFile(process.env.APP_ENV_FILE || defaultEnvFile())
 const localEnv = loadEnvFile(require('node:path').join(__dirname, '.env'))
 
+// Debian 给 root 非登录 shell 的 PATH 往往不含 /usr/local/bin。
+// pm2 继承下来以后，装在 /usr/local/bin 的工具（yt-dlp、edge-tts 这些）
+// 在 MCP 子进程里就「明明装了却找不到」。这里补齐，已有的顺序不动。
+const PATH_FALLBACK =
+  process.platform === 'win32' ? [] : ['/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin']
+
+function mergedPath() {
+  if (PATH_FALLBACK.length === 0) return process.env.PATH ?? ''
+  const separator = require('node:path').delimiter
+  const current = String(process.env.PATH ?? '')
+    .split(separator)
+    .filter(Boolean)
+  return [...new Set([...current, ...PATH_FALLBACK])].join(separator)
+}
+
 function heapFor(totalMB) {
   if (totalMB < 2300) return 320
   if (totalMB < 5000) return 512
@@ -81,6 +96,8 @@ module.exports = {
 
       env: {
         NODE_ENV: 'production',
+        // 放最前面，外部 env 文件里如果自己写了 PATH 仍以它为准
+        PATH: mergedPath(),
         // 项目外的密钥优先，项目根的兜底（都没有就靠进程已有环境变量）
         ...localEnv,
         ...externalEnv,
