@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
+// 只清临时产物，绝不动源码目录：scripts/ 里是正式脚本，删了就等于删代码
 const CLEAN_RULES = [
   { dir: 'tmp', keep: [] },
-  { dir: 'scripts', keep: ['diagnose.js'] },
   { dir: 'downloads/tmp', keep: [] },
   { dir: 'downloads/frames', keep: [] },
 ]
