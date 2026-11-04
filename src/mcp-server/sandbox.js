@@ -20,12 +20,17 @@ const envFile = process.env.APP_ENV_FILE?.trim() || defaultEnvFile()
 
 export const SHIELDED_DIRS = [
   path.dirname(envFile), // 外部密钥文件所在目录
-  '/root/.ssh', // SSH 私钥
+  '/root', // 家目录：SSH 私钥、云凭据、bash_history、.pm2 快照都在这
+  '/home', // 其他用户的家目录
+  '/www', // 宝塔的站点目录：网站源码和 wp-config 这类配置文件
+  '/etc/sudoers.d',
 ]
 
 export const SHIELDED_FILES = [
   path.join(projectRoot, '.env'),
-  '/root/.pm2/dump.pm2', // pm2 保存的进程列表，里面是启动时的 env 快照
+  '/etc/shadow',
+  '/etc/gshadow',
+  '/etc/sudoers',
 ]
 
 function exists(target) {

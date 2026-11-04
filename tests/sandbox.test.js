@@ -54,9 +54,12 @@ test('已被目录遮住的文件不重复生成参数', () => {
   }
 })
 
-test('默认名单覆盖密钥目录、SSH 私钥、项目根 .env、pm2 快照', () => {
+test('默认名单覆盖密钥目录、家目录、站点目录、系统凭据', () => {
   assert.ok(SHIELDED_DIRS.includes(path.dirname(defaultEnvFile())), '外部密钥目录')
-  assert.ok(SHIELDED_DIRS.includes('/root/.ssh'), 'SSH 私钥目录')
+  assert.ok(SHIELDED_DIRS.includes('/root'), 'root 家目录')
+  assert.ok(SHIELDED_DIRS.includes('/home'), '其他用户家目录')
+  assert.ok(SHIELDED_DIRS.includes('/www'), '站点目录')
   assert.ok(SHIELDED_FILES.includes(path.join(projectRoot, '.env')), '项目根 .env')
-  assert.ok(SHIELDED_FILES.includes('/root/.pm2/dump.pm2'), 'pm2 env 快照')
+  assert.ok(SHIELDED_FILES.includes('/etc/shadow'), '密码哈希')
+  assert.ok(SHIELDED_FILES.includes('/etc/sudoers'), 'sudo 配置')
 })

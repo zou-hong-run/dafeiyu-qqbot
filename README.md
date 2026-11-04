@@ -566,8 +566,10 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 - 整个根只读，**只有 `tmp/` 和 `downloads/` 可写**——`data/`、`src/`、`skills/`、`node_modules/` 全只读，沙箱里的进程改不了自己的配置、日志和代码
 - 默认断网（装包/拉代码这类才放行）、`--clearenv`、父进程死了跟着死
-- capability 默认全清；只有当可写目录的属主和运行用户不一致时，才补 `CAP_DAC_OVERRIDE`。**把项目目录 `chown` 给运行用户后，这个 capability 就完全不需要了**
-- 只读根挡不住读，所以密钥所在目录（默认 `/etc/dafeiyu`）和 `/root/.ssh` 挂成空 tmpfs，项目根 `.env` 和 pm2 的 env 快照盖成 `/dev/null`
+- capability 默认全清；只有当可写目录的属主和运行用户不一致时，才补 `CAP_DAC_OVERRIDE`。**把项目目录 `chown` 给运行用户后，这个 capability 就完全不需要了**（可选，见下）
+- 只读根挡不住读，所以敏感位置一律遮空：`/root`、`/home`、`/www`（站点源码）和密钥目录挂成空 tmpfs，`/etc/shadow`、`/etc/gshadow`、`/etc/sudoers` 盖成空设备，项目根 `.env` 也盖上
+
+**跑在 root 下时还剩什么风险**：`CAP_DAC_OVERRIDE` 让沙箱内能读全盘，上面那批路径虽然遮了，`/etc` 下其他服务配置和 `/var/log` 仍在外面。想彻底解决就用非 root 用户跑 pm2，代码会自动少加这个 capability。
 
 启动日志会如实写「沙箱已启用」或「未隔离（原因）」，并且是真的跑一遍读写探针。**装了 bwrap 但自检没通过时，命令会被直接拒绝执行**——不会悄悄降级成裸跑。
 
