@@ -1,0 +1,44 @@
+// 纯文本处理：不依赖 env、不碰文件系统，方便单测。
+
+// 工具输出的落盘阈值：超过就把全文写文件，上下文里只留头部和提示
+export const SPILL_LIMIT = 7000
+export const SPILL_HEAD = 4000
+
+// 模型偶尔会输出 DSML 这类工具标记，而不是真的调用工具
+export const TOOL_MARKUP_PATTERN = /[｜|]{2}\s*DSML/i
+
+/** 去掉工具标记：标记在中间就砍掉后面，整条都是标记就返回空 */
+export function stripToolMarkup(text) {
+  const raw = String(text ?? '').trim()
+  if (!TOOL_MARKUP_PATTERN.test(raw)) return raw
+
+  const cut = raw.search(TOOL_MARKUP_PATTERN)
+  if (cut < 0) return raw
+  if (cut === 0) return ''
+
+  return raw.slice(0, cut).replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** 太长就掐头去尾留中间提示（落盘失败时的兜底） */
+export function pruneToolOutput(text, limit = SPILL_LIMIT) {
+  const value = String(text ?? '')
+  if (value.length <= limit) return value
+
+  const head = value.slice(0, 4500)
+  const tail = value.slice(-1800)
+  const omitted = value.length - head.length - tail.length
+
+  return `${head}\n\n…（中间省略 ${omitted} 字符；需要完整内容请换更精确的命令，或用 read_file 分段读取）…\n\n${tail}`
+}
+
+// 用户这句话是在要一个动作（去查、去发、去改），而不是问概念。
+// 用来给模型加一句「现在就动手」的提醒 —— 它很容易先回「我这就去」然后等下一轮。
+const ACTION_WORDS = /(查|搜|下载|生成|画|发|写|改|装|部署|跑|统计|总结|整理|删|建|创建|上传|转换|翻译|分析)/
+const QUESTION_WORDS = /[？?]|吗|呢|能不能|可不可以|是否|怎么|如何|哪里|哪个/
+const CONCEPT_WORDS = /(是什么|为什么|怎么理解|有什么区别|介绍一下|讲讲|聊聊|原理|概念|区别)/
+
+export function looksLikeActionRequest(text) {
+  const value = String(text ?? '')
+  if (!value) return false
+  return !QUESTION_WORDS.test(value) && ACTION_WORDS.test(value) && !CONCEPT_WORDS.test(value)
+}

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 引用检查 + 单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # 只是为了让 env.js 的必填校验过掉，不会发起任何真实请求
+      DEEP_SEEK_API_KEY: sk-ci-placeholder
+      QQ_APP_ID: '1000000'
+      QQ_APP_SECRET: '0123456789abcdef0123456789abcdef'
+      LOG_LEVEL: warn
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 静态引用检查
+        run: pnpm check
+
+      - name: 单元测试
+        run: pnpm test
+
+      - name: 冒烟启动（不连 QQ，只验证装配）
+        run: |
+          # 5 秒后强杀：能起来、工具注册成功就算过
+          timeout 5 node src/index.js 2>&1 | tee boot.log || true
+          grep -q "启动" boot.log || (echo "启动日志里没有任何 [启动] 记录" && exit 1)
+        continue-on-error: true
