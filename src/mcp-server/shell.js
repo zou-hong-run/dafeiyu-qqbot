@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
+import { caps, isWindows, memoryInfo } from '../ops/platform.js'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -35,7 +36,7 @@ const BLOCKED_PATTERNS = [
   { pattern: /(echo|printf|cat)[^|;]*\$\{?(DEEP_SEEK|DEEPSEEK|QQ_APP)/i, reason: '禁止打印密钥变量' },
 ]
 
-const isLinux = process.platform === 'linux'
+const isLinux = caps.canUlimit // 只有 Linux 能靠 ulimit 限内存，其余平台自动跳过
 
 const HEAVY_COMMAND =
   /\b(apt|apt-get|dpkg)\s+(install|upgrade|dist-upgrade|--configure)|\b(pnpm|npm|yarn)\s+(add|install|i)\b|\bpip3?\s+install\b|\bdocker\s+(build|pull)\b|\bcargo\s+build\b|\bgo\s+build\b|\bmake\s+-j/i
@@ -50,25 +51,6 @@ const DEFAULT_ULIMIT_MB = Number(process.env.SHELL_ULIMIT_MB || 512)
 const MEMORY_RESCUE =
   /\b(swapon|swapoff|mkswap|fallocate|fstab|sysctl|free|df|du|ps|top|htop|kill|pkill|reboot)\b/i
 
-function readLinuxMemory() {
-  try {
-    const raw = fs.readFileSync('/proc/meminfo', 'utf8')
-    const pick = (key) => {
-      const match = raw.match(new RegExp(`^${key}:\\s+(\\d+)`, 'm'))
-      return match ? Number(match[1]) / 1024 : null
-    }
-
-    const totalMB = pick('MemTotal')
-    const availableMB = pick('MemAvailable') ?? pick('MemFree')
-    if (!totalMB || !availableMB) return null
-
-    const swapTotalMB = pick('SwapTotal') ?? 0
-
-    return { totalMB, availableMB, swapTotalMB }
-  } catch {
-    return null
-  }
-}
 
 
 // ── 脚本资源预估 ──
@@ -176,7 +158,7 @@ export function estimateResourceUsage(text, cwd) {
 }
 
 function assertEstimate(estimate, text) {
-  const mem = readLinuxMemory()
+  const mem = memoryInfo()
   if (!mem) return estimate
 
   const { memMB, notes } = estimate
@@ -202,7 +184,7 @@ function assertEstimate(estimate, text) {
 }
 
 function assertMemory(command) {
-  const mem = readLinuxMemory()
+  const mem = memoryInfo()
   if (!mem) return
 
   if (MEMORY_RESCUE.test(command)) return
@@ -309,13 +291,15 @@ function runInBackground(command, cwd) {
   fs.mkdirSync(logDir, { recursive: true })
   const logFile = path.join(logDir, `bg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.log`)
 
-  // 让命令自己把输出重定向到日志文件，比继承 fd 更可靠（父子进程、跨平台都稳）
-  // 括号包起来是必须的：不然 `a && b >> log` 只有 b 会进日志
-  const child = spawn(`( ${command} ) >> "${logFile}" 2>&1`, {
+  // 用文件描述符接输出，不拼 `( ) >> log`：那是 POSIX 语法，Windows 的 cmd 不认。
+  // 顺带解决 `a && b >> log` 只有 b 进日志的老问题。
+  const logFd = fs.openSync(logFile, 'a')
+  const child = spawn(command, {
     shell: true,
     cwd,
-    detached: true,
-    stdio: 'ignore',
+    // Windows 上 detached 会另开控制台，反而留不干净，用默认行为
+    detached: !isWindows,
+    stdio: ['ignore', logFd, logFd],
   })
 
   child.on('error', (error) => {

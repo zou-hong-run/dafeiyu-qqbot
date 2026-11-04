@@ -235,6 +235,21 @@ node --check src/index.js
 | `PROGRESS_MAX` | 私聊一轮最多报几次进度（3），群里固定 1 次 |
 | `TOOL_DEBUG` | 打每轮请求和工具调用的详细日志（默认关，排查时开） |
 
+## 跨平台
+
+能力按平台自动降级，不用改代码：
+
+| 能力 | Linux | macOS | Windows |
+|---|---|---|---|
+| Node 运行 | ✓ | ✓ | ✓ |
+| 内存检测 | `/proc/meminfo`（精确） | `os.freemem()` | `os.freemem()` |
+| 单进程内存上限（ulimit） | ✓ | ✗ 自动跳过 | ✗ 自动跳过 |
+| OS 级沙箱 | bwrap | Seatbelt | 无 |
+| 后台 shell | ✓ | ✓ | ✓（用文件描述符接输出） |
+| ffmpeg / yt-dlp | apt / pipx | `brew install` | 手动装并加进 PATH |
+
+平台差异都收在 `src/ops/platform.js`，启动时打一行 `[平台]` 说明当前能力。macOS 上跑要注意别让电脑睡眠，否则连接会断。
+
 ## 部署（pm2）
 
 `ecosystem.config.cjs` 已经配好单实例、崩溃重启、`wait_ready`（连上网关才算启动成功）、优雅退出（落盘记忆 + 关 MCP 子进程）。

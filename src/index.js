@@ -23,6 +23,7 @@ import { findCandidates, formatCandidates, noteProactive, shouldProactive } from
 import { dueFollowUps, flushSituations, markFollowedUp } from './memory/situations.js'
 import { generateHotTake } from './engage/hot-takes.js'
 import { listBackups, runBackup } from './ops/backup.js'
+import { caps, describePlatform, memoryInfo } from './ops/platform.js'
 import { flushTodos } from './chat/todos.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
 import { putChoice, resolveChoice, choiceText } from './chat/choices.js'
@@ -1672,26 +1673,20 @@ if (env.toolsEnabled) {
 // 2C2G 小机器：启动时把内存账算清楚，出问题好对照
 function reportMemory() {
   try {
-    const raw = fs.readFileSync('/proc/meminfo', 'utf8')
-    const lines = raw.split('\n')
-
-    const pick = (key) => {
-      const line = lines.find((item) => item.startsWith(`${key}:`))
-      if (!line) return 0
-      return Math.round(parseInt(line.split(':')[1], 10) / 1024)
-    }
-
-    const total = pick('MemTotal')
-    const available = pick('MemAvailable')
-    const swap = pick('SwapTotal')
+    const info = memoryInfo()
+    const total = Math.round(info.totalMB)
+    const available = Math.round(info.availableMB)
+    const swap = Math.round(info.swapTotalMB ?? 0)
     if (!total) return
 
     console.log(
-      `[内存] 总计 ${(total / 1024).toFixed(1)}G｜可用 ${available}MB｜swap ${(swap / 1024).toFixed(1)}G`,
+      `[内存] 总计 ${(total / 1024).toFixed(1)}G｜可用 ${available}MB｜swap ${(swap / 1024).toFixed(1)}G` +
+        `${info.precise ? '' : '（非 Linux，用系统余量估算）'}`,
     )
+    console.log(`[平台] ${describePlatform()}`)
     console.log(
       `[内存] 预算：主进程堆 ${process.env.MAIN_HEAP_MB || 320}MB + MCP ${process.env.MCP_HEAP_MB || 160}MB，` +
-        `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB，命令预估安全线 ${Math.max(120, Math.floor(available * 0.75))}MB，` +
+        `${caps.canUlimit ? `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB` : '不限制单条命令内存（该平台无 ulimit）'}，命令预估安全线 ${Math.max(120, Math.floor(available * 0.75))}MB，` +
         `同时最多 ${env.taskConcurrency} 个工单`,
     )
 
@@ -1700,7 +1695,8 @@ function reportMemory() {
     } else if (available < 500) {
       console.warn(`[内存] 可用 ${available}MB，偏紧：重命令会被预估拦截，先腾内存或加 swap`)
     }
-    if (swap < 512) {
+    if (swap < 512 && caps.canUlimit) {
+      // 只有 Linux 才有这套 swap 玩法，macOS/Windows 用系统自己的虚拟内存
       console.warn(
         '[内存] 没有 swap，一个大命令就可能把整机 OOM 掉。建议：' +
           'fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile',
