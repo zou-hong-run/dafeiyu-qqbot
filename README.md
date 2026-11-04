@@ -171,16 +171,25 @@ SELF.md             机器人的自我能力说明（注入提示词，可被机
 git clone https://github.com/zou-hong-run/dafeiyu-qqbot.git
 cd dafeiyu-qqbot
 pnpm install
-cp .env.example .env
+
+# 密钥放项目外，权限收紧到只有 root 能读
+sudo mkdir -p /etc/dafeiyu
+sudo cp .env.example /etc/dafeiyu/env
+sudo chmod 600 /etc/dafeiyu/env
+sudo chown root:root /etc/dafeiyu/env
 ```
 
-编辑 `.env`，至少填三项：
+编辑 `/etc/dafeiyu/env`，至少填三项：
 
 ```env
 DEEP_SEEK_API_KEY=sk-xxxx
 QQ_APP_ID=102xxxxx
 QQ_APP_SECRET=xxxx（32 位）
 ```
+
+放项目外的原因：项目根目录要留给机器人自己读写（改源码、下文件、跑 shell），密钥混在里面迟早被带出去；`/etc/dafeiyu/env` 不在项目里，沙箱会把它整个挂成空目录。
+
+想换位置就设 `APP_ENV_FILE`，`pm2` 启动时会按它找。项目根的 `.env` 只做兜底，建议别放。
 
 **3. 启动**
 
