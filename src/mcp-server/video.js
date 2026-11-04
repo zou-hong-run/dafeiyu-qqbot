@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { assertPublicUrl } from './net-guard.js'
 
 const run = promisify(execFile)
 
@@ -167,35 +168,12 @@ async function findVideo({ url = '', maxSizeMB = DEFAULT_MAX_MB } = {}) {
   ].join('\n')
 }
 
-function assertPublicLink(raw) {
-  let parsed
-  try {
-    parsed = new URL(String(raw ?? '').trim())
-  } catch {
-    throw new Error('链接格式不对，需要完整的 http:// 或 https://')
-  }
-  if (!/^https?:$/.test(parsed.protocol)) throw new Error('只支持 http/https 链接')
-
-  const host = parsed.hostname.toLowerCase()
-  const blocked =
-    host === 'localhost' ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal') ||
-    /^(10|127)\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-    /^169\.254\./.test(host)
-
-  if (blocked) throw new Error('不允许解析内网地址')
-  return parsed
-}
-
 /**
  * 下载视频的一段（不是整部）。整部电影几百 MB，这台机器下不动；
  * 十几秒的片段只有几百 KB，几十秒就能下完。
  */
 async function fetchVideo({ url = '', seconds = 10, startAt = 0, maxHeight = 360, fileName = '' } = {}) {
-  assertPublicLink(url)
+  assertPublicUrl(url)
   if (!(await checkYtdlp())) {
     throw new Error('服务器上没装 yt-dlp。让管理员在项目目录跑一次 pip3 install yt-dlp，重启后就能用')
   }
@@ -407,7 +385,7 @@ function stamp(seconds) {
 }
 
 async function readVideoSubtitle({ url = '', lang = 'zh-Hans,zh-CN,zh,en', startAt = 0, endAt = 0, maxChars = 6000 } = {}) {
-  assertPublicLink(url)
+  assertPublicUrl(url)
   if (!(await checkYtdlp())) {
     throw new Error('服务器上没装 yt-dlp。让管理员跑一次 pipx install yt-dlp（或 pip3 install yt-dlp）')
   }
@@ -569,7 +547,7 @@ export const VIDEO_TOOLS_EXTRA = [
 // 拿视频元数据（标题/时长/UP 主/简介）。比抓网页可靠：
 // 网页几百 KB 还容易被风控超时，这个走 yt-dlp 的结构化接口，几 KB 就够。
 async function videoMeta({ url = '' } = {}) {
-  assertPublicLink(url)
+  assertPublicUrl(url)
   if (!(await checkYtdlp())) throw new Error('服务器上没装 yt-dlp')
 
   const args = [

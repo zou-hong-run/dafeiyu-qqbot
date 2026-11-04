@@ -295,9 +295,13 @@ bwrap
 
 ### 4. 主进程侧的工具不受沙箱约束
 
-### 5. 主进程侧的工具不受沙箱约束
+`write_file`、`edit_file`、`install_package`、`git_sync`、`download` 都在主进程里执行，因为它们本来就要改项目目录或出网。所以「高危工具只给白名单」是这层的唯一门槛——白名单没配好，沙箱再严也没用。
 
-`write_file`、`edit_file`、`install_package`、`git_sync` 都在主进程里执行，因为它们本来就要改项目目录。所以「高危工具只给白名单」是这层的唯一门槛——白名单没配好，沙箱再严也没用。
+`download` 是唯一不需要管理员的出网工具（群聊里谁都能触发），所以它的地址校验单独做在 `src/mcp-server/net-guard.js`：内网和云元数据段一律拒，重定向逐跳复核。
+
+### 5. 审计没覆盖所有调用路径
+
+`AUDITED_TOOLS` 的检查放在 `index.js` 的对话循环里，所以 `timers.js`、`worker.js`、`commands.js` 里直接 `callTool()` 的地方不记审计。彻底的做法是把审计下沉到 `client.js` 的 `callTool()`，一次做掉。
 
 ---
 
@@ -317,7 +321,7 @@ bwrap
 | `downloads/` 整块可写 | 收成只有 `tmp/` 可写，附件会话隔离不再被绕 |
 | `list_groups` / `broadcast` / 主动接话扫描 / `/config` 内存显示全部静默失效 | 四个文件各自漏了 `import fs`（或 `path`），`ReferenceError` 被 `catch` 吞掉；抽 `groupLog.listGroups()` 单一真源，`pnpm check` 补上「Node 模块别名未 import」的检查 |
 | `SHELL_UNRESTRICTED` 逃生开关 | 整个删掉，连 `inspectCommand` 的 `unrestricted` 参数一起删 |
-| 工作目录整块可写 | 只放开 `tmp/` 和 `downloads/`，`data/`、`src/`、`skills/` 只读 |
+| 工作目录整块可写 | 只放开 `tmp/`，`data/`、`src/`、`skills/`、`downloads/` 全只读 |
 | 自检失败仍报「- 已启用」 | 自检结果区分「没装」和「装了跑不起来」，后者直接拒绝执行命令 |
 | 审计集合漏 `git_sync` / `write_file` / `edit_file` | 补齐 |
 | 后台进程只在起新任务时回收 | 挂 5 分钟定时器，并按进程组杀 |

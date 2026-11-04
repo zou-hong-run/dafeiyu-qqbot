@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertPublicUrl, fetchPublic } from './net-guard.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const downloadDir = path.join(projectRoot, 'downloads')
@@ -11,46 +12,6 @@ const KEEP_FILES = 50
 // 下不完不要紧，进度留在 .part 里，下次调用用 Range 接着下。
 const DEFAULT_BUDGET_SECONDS = 40
 const MAX_BUDGET_SECONDS = 50
-
-function assertPublicUrl(raw) {
-  let url
-  try {
-    url = new URL(String(raw ?? '').trim())
-  } catch {
-    throw new Error('网址格式不对，需要完整的 http:// 或 https:// 链接')
-  }
-
-  if (!/^https?:$/.test(url.protocol)) throw new Error('只支持 http 和 https 链接')
-
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  const blockedNames = ['localhost', 'metadata.google.internal', 'metadata']
-
-  if (blockedNames.includes(host) || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
-    throw new Error('不允许访问内网或云元数据地址')
-  }
-
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (ipv4) {
-    const a = Number(ipv4[1])
-    const b = Number(ipv4[2])
-    const blocked =
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127)
-
-    if (blocked) throw new Error('不允许访问内网或云元数据地址')
-  }
-
-  if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
-    throw new Error('不允许访问内网或云元数据地址')
-  }
-
-  return url
-}
 
 function safeFileName(name) {
   const base = path
@@ -157,7 +118,8 @@ async function download({ url, filename, seconds }) {
 
   let response
   try {
-    response = await fetch(target, { redirect: 'follow', headers, signal: controller.signal })
+    // 逐跳校验：redirect: 'follow' 只校验第一跳，302 到元数据地址就绕过去了
+    response = await fetchPublic(target, { headers, signal: controller.signal })
   } catch (error) {
     clearTimeout(timer)
     if (controller.signal.aborted) {

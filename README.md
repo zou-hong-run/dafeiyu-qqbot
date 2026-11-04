@@ -586,7 +586,7 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 - 命令黑名单只拦真正危险的：删项目外绝对路径、关机、磁盘操作、读 `.env`、导出环境变量、打印密钥、系统账号、SSH 密钥。它挡不住所有绕过写法，真正的边界是白名单
 - shell 子进程的环境变量只透传 `PATH` 等基础变量，**模型 key 和 QQ 密钥都不会进**（`background:true` 和 `install_package` 同样）
 - `.env`、`data/` 对模型的文件写入工具不可写；`.env` 读取被 shell 黑名单拦住
-- **沙箱里只有 `tmp/` 和 `downloads/` 可写**，所以装包走 `install_package`、改代码走 `write_file`、拉代码走 `git_sync`、重启用 `restart_self`——这几条走主进程，不经过沙箱
+- **沙箱里只有 `tmp/` 可写**，所以装包走 `install_package`、改代码走 `write_file`、拉代码走 `git_sync`、重启用 `restart_self`、下载走 `download`——这几条走主进程，不经过沙箱
 - 审计日志在 `data/audit.log`，出问题先看它
 - 别把 `.env` 提交上去，`.gitignore` 已经忽略；仓库里只有 `.env.example`
 
