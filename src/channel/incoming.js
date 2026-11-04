@@ -26,20 +26,68 @@ const KIND_LABEL = {
   file: '文件',
 }
 
+// QQ 发的图不一定是 <image> 元素：手机相册里选「以文件发送」、或者 webp 这类格式，
+// 平台给的是 <file file_type=4001 filename="IMG_9275.WEBP">，SDK 按 content_type 切出来就是 file。
+// 只信 elem.type 的话这些图永远进不了多模态，所以扩展名和文件头都得参与判断。
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+
+function extOf(name) {
+  const ext = path.extname(String(name ?? '')).toLowerCase()
+  return IMAGE_EXTS.has(ext) ? ext : ''
+}
+
+function extFromUrl(url) {
+  try {
+    const pathname = new URL(url).pathname
+    return extOf(decodeURIComponent(pathname.split('/').pop() ?? ''))
+  } catch {
+    return ''
+  }
+}
+
+// 按「声明的类型 + 文件名扩展名」定最终类型，file 元素里的图会被认成 image
+function kindOf(type, name, url) {
+  if (type === 'image') return 'image'
+  if (KIND_LABEL[type] && type !== 'file') return type
+
+  const ext = extOf(name) || extFromUrl(url)
+  if (ext) return 'image'
+  return KIND_LABEL[type] ? type : ''
+}
+
+// 文件头嗅探：扩展名缺失也能认出来（QQ 偶尔给无扩展名的直链）
+function sniffImageExt(buffer) {
+  if (!buffer || buffer.length < 12) return ''
+
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return '.png'
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return '.jpg'
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return '.gif'
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) {
+    return '.webp'
+  }
+  if (buffer[0] === 0x42 && buffer[1] === 0x4d) return '.bmp'
+  return ''
+}
+
 export function extractInbound(event) {
   const items = []
 
   for (const elem of event?.message ?? []) {
-    const type = elem?.type
-    if (!KIND_LABEL[type]) continue
-
     const url = elem.data?.url
     if (!url) continue
 
+    const name = String(elem.data?.name ?? '').slice(0, 80)
+    const fullUrl = String(url).startsWith('http') ? String(url) : `https://${url}`
+    const type = kindOf(elem?.type, name, fullUrl)
+    if (!type) continue
+
     items.push({
       type,
-      url: String(url).startsWith('http') ? String(url) : `https://${url}`,
-      name: String(elem.data?.name ?? '').slice(0, 80),
+      url: fullUrl,
+      name,
       size: Number(elem.data?.size) || 0,
     })
 
@@ -51,7 +99,7 @@ export function extractInbound(event) {
 
 function safeName(item, index) {
   const raw = item.name || ''
-  const ext = path.extname(raw).slice(0, 6)
+  const ext = path.extname(raw).toLowerCase().slice(0, 6)
   const base = raw.replace(/\.[^.]+$/, '').replace(/[^\w\u4e00-\u9fa5-]/g, '').slice(0, 20)
   return `${Date.now()}-${index}-${base || item.type}${ext || ''}`
 }
@@ -70,10 +118,17 @@ async function downloadOne(item, index, dir) {
     const buffer = Buffer.from(await response.arrayBuffer())
     if (buffer.length > MAX_BYTES) return { ...item, error: '下载后超过大小上限' }
 
-    const file = path.join(dir, safeName(item, index))
+    // 扩展名和文件头都不像图片却声明成 image：说明对方发的是别的东西，别硬喂给模型
+    let type = item.type
+    const sniffed = sniffImageExt(buffer)
+    if (sniffed && type !== 'image') type = 'image'
+    if (!sniffed && type === 'image' && buffer.length > 0) type = 'file'
+
+    const finalItem = { ...item, type, name: item.name || `${item.type}${sniffed || ''}` }
+    const file = path.join(dir, safeName(finalItem, index))
     fs.writeFileSync(file, buffer)
 
-    return { ...item, file: path.relative(projectRoot, file).split(path.sep).join('/') }
+    return { ...finalItem, file: path.relative(projectRoot, file).split(path.sep).join('/') }
   } catch (error) {
     return { ...item, error: String(error?.message ?? error).slice(0, 80) }
   }
