@@ -393,6 +393,9 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 ## 安全须知
 
+**shell 命令先归一化再校验**：全角字符（`ｒｍ`）、引号拼接（`r''m`）、反斜杠（`r\m`）、零宽字符都会先被压平成标准形态再匹配黑名单，绕不过去。另外「敏感路径 + 外传工具」同时出现（比如 `cat data/memory.json | nc ...`）会被直接拦下。
+
+
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 
 - **高危工具走白名单**：`shell`、`run_script`、`write_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`、`restart_self`、`send_to_group`、`broadcast`、`git_sync` 这 12 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。

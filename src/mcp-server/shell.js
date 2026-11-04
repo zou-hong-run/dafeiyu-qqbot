@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { caps, isWindows, memoryInfo } from '../ops/platform.js'
 import { budgetFor } from '../ops/budget.js'
+import { inspectCommand } from './shell-guard.js'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -15,27 +16,6 @@ const MAX_SCRIPT = 40_000
 // SHELL_UNRESTRICTED=true 时只保留最基本的非空校验，命令完全交给模型
 const UNRESTRICTED = process.env.SHELL_UNRESTRICTED === 'true'
 
-const BLOCKED_PATTERNS = [
-  { pattern: /rm\s+(-[a-zA-Z]+\s+)*\/(\s|$|\*)/, reason: '禁止删除根目录' },
-  { pattern: /rm\s+(-[a-zA-Z]+\s+)*(~|\$HOME)(\/|\s|$)/, reason: '禁止删除用户主目录' },
-  // 只允许删项目内的相对路径和 /tmp，别把宝塔站点、系统目录一起带走
-  {
-    pattern: /rm\s+(-[a-zA-Z]+\s+)*\/(?!tmp\/)[^\s]*/,
-    reason: '禁止删除项目目录以外的绝对路径（只能删项目内相对路径或 /tmp 下的东西）',
-  },
-  { pattern: /:\(\)\s*\{.*\};\s*:/, reason: '禁止 fork 炸弹' },
-  { pattern: /\b(shutdown|reboot|halt|poweroff|init\s+0)\b/i, reason: '禁止关机或重启' },
-  { pattern: /\b(mkfs|fdisk|dd\s+if=|dd\s+of=\/dev)/i, reason: '禁止磁盘操作' },
-  { pattern: /(cat|less|more|head|tail|grep|strings|awk|sed)[^|;]*\.env(\s|$|['"])/i, reason: '禁止读取 .env' },
-  { pattern: /\.env\b[^'"]*$/, reason: '禁止直接操作 .env' },
-  { pattern: /\/etc\/(passwd|shadow|sudoers)/i, reason: '禁止读取系统账号文件' },
-  { pattern: /\b(ssh-keygen|authorized_keys|id_rsa)\b/i, reason: '禁止操作 SSH 密钥' },
-  { pattern: /\bchmod\s+(-R\s+)?777\s+\//i, reason: '禁止递归改根目录权限' },
-  { pattern: /\bchown\s+(-R\s+)?[^\s]+\s+\//i, reason: '禁止递归改根目录属主' },
-  { pattern: /^\s*(env|printenv)\s*$/i, reason: '禁止导出全部环境变量（会泄露密钥）' },
-  { pattern: /\b(env|printenv)\s*\|\s*/i, reason: '禁止管道导出环境变量（会泄露密钥）' },
-  { pattern: /(echo|printf|cat)[^|;]*\$\{?(DEEP_SEEK|DEEPSEEK|QQ_APP)/i, reason: '禁止打印密钥变量' },
-]
 
 const isLinux = caps.canUlimit // 只有 Linux 能靠 ulimit 限内存，其余平台自动跳过
 
@@ -245,8 +225,10 @@ function assertSafeCommand(command, { script = false } = {}) {
   if (command.includes('\0')) throw new Error('内容包含非法字符')
   if (UNRESTRICTED) return
 
-  for (const { pattern, reason } of BLOCKED_PATTERNS) {
-    if (pattern.test(command)) throw new Error(`已拦截：${reason}。换成安全的写法再试，或在 .env 设 SHELL_UNRESTRICTED=true 彻底放开。`)
+  // 归一化后再匹配：全角、引号拼接、反斜杠这类写法绕不过去
+  const verdict = inspectCommand(command, { unrestricted: UNRESTRICTED })
+  if (!verdict.ok) {
+    throw new Error(`已拦截：${verdict.reason}。换成安全的写法再试，或在 .env 设 SHELL_UNRESTRICTED=true 彻底放开。`)
   }
 }
 

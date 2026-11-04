@@ -21,6 +21,7 @@ tests/
   commands.test.js       命令注册表：匹配顺序、权限拦截、不误吞
   session-state.test.js  任务清单、选择题、静音与节流
   text-utils.test.js     工具标记清理、动作意图判断、输出截断
+  shell-guard.test.js    shell 命令安全检查：全角/引号拼接绕过、敏感路径外传
 ```
 
 ## 写测试的几条约定
