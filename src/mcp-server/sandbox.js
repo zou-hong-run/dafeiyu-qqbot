@@ -150,9 +150,17 @@ export function sandboxSelfTest() {
     return selfTest
   }
 
-  // 光跑 true 只能证明参数合法，证明不了能不能写工作目录 ——
-  // 而「写不了目录」正是没补 CAP_DAC_OVERRIDE 时的症状，下载和生成文件全废。
-  const boxed = sandboxCommand('touch .sbx-probe && rm -f .sbx-probe', projectRoot)
+  // 光跑 true 只能证明参数合法，证明不了能不能写目录。
+  // 探针要落在真正可写的 tmp/ 里：项目根现在是只读的，写在那儿必然失败，
+  // 自检会把好好的沙箱判成不可用。
+  const probeDir = path.join(projectRoot, 'tmp')
+  try {
+    fs.mkdirSync(probeDir, { recursive: true })
+  } catch {
+    // 建不了就让后面老实报错
+  }
+
+  const boxed = sandboxCommand('touch .sbx-probe && rm -f .sbx-probe', probeDir)
   if (!boxed) {
     selfTest = status
     return selfTest
