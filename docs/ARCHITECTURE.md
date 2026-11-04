@@ -315,6 +315,7 @@ bwrap
 | 所有 MCP 服务都拿到模型 key | 只有内置服务注入 `baseEnv`，注册进来的第三方服务拿不到 |
 | 断网按命令文本判断 | 删掉 `NEEDS_NETWORK`，`--unshare-net` 无条件加 |
 | `downloads/` 整块可写 | 收成只有 `tmp/` 可写，附件会话隔离不再被绕 |
+| `list_groups` / `broadcast` / 主动接话扫描 / `/config` 内存显示全部静默失效 | 四个文件各自漏了 `import fs`（或 `path`），`ReferenceError` 被 `catch` 吞掉；抽 `groupLog.listGroups()` 单一真源，`pnpm check` 补上「Node 模块别名未 import」的检查 |
 | `SHELL_UNRESTRICTED` 逃生开关 | 整个删掉，连 `inspectCommand` 的 `unrestricted` 参数一起删 |
 | 工作目录整块可写 | 只放开 `tmp/` 和 `downloads/`，`data/`、`src/`、`skills/` 只读 |
 | 自检失败仍报「- 已启用」 | 自检结果区分「没装」和「装了跑不起来」，后者直接拒绝执行命令 |
@@ -333,6 +334,8 @@ bwrap
 | 哪些工具算高危 | `src/config/policy.js` 的 `DANGEROUS_TOOLS` |
 | 命令黑名单 | `src/mcp-server/shell-guard.js` |
 | 沙箱参数 | `src/mcp-server/sandbox.js` |
+| MCP 服务启动白名单 | `src/mcp/mcp-guard.js` |
+| 子进程能拿到的环境变量 | `src/mcp-server/shell-env.js` |
 | 内存预算档位 | `src/ops/budget.js` |
 | 平台差异 | `src/ops/platform.js` |
 | 加一个新工具 | `src/mcp-server/` 下新建模块 → 在 `index.js` 注册 |

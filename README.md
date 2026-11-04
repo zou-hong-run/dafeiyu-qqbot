@@ -659,11 +659,11 @@ cd /qq && git ls-remote origin main
 用 Node 内置的 `node:test`，**零依赖**，不用装 vitest / jest。
 
 ```bash
-pnpm test          # 43 个用例，约 1.5 秒
+pnpm test          # 81 个用例，约 1.5 秒
 pnpm test:watch    # 改代码自动重跑
 ```
 
-覆盖纯逻辑层：连发合并、命令注册表、权限判断、内存档位、任务清单、选择题、静音节流，以及「`/clean` 不许动源码目录」这类回归用例。
+覆盖纯逻辑层：连发合并、命令注册表、权限判断、内存档位、任务清单、选择题、静音节流，以及这些安全相关的：命令黑名单归一化、MCP 启动白名单（含路径穿越）、沙箱遮蔽参数、`/clean` 不许动源码目录。
 
 约定和明细见 [`tests/README.md`](./tests/README.md)。涉及模型调用、QQ 接口、外部命令的部分不写单测，靠 `pnpm diagnose` 和真机验证。
 
@@ -672,9 +672,17 @@ pnpm test:watch    # 改代码自动重跑
 ```bash
 pnpm start                   # 前台跑，直接看日志
 pnpm dev                     # --watch 热重载
-pnpm check                   # 静态引用检查：未定义的调用、import 了不存在的导出
+pnpm check                   # 静态引用检查
 pnpm diagnose                # 逐层体检：配置 → MCP 工具 → 裸 API 调用
 ```
+
+`pnpm check` 抓三类问题，都是 `node --check` 看不出来的：
+
+1. 调用了但当前文件没定义的名字（改名、搬函数时最容易漏）
+2. `import` 了但目标模块没导出的名字
+3. 用了 `fs.` / `path.` 这类 Node 模块别名却没 `import`
+
+第 3 条是补上去的——之前 `list_groups`、`broadcast`、主动接话扫描、`/config` 的内存显示全都因为漏了 `import fs` 而静默失效：`ReferenceError` 被 `catch` 吞掉，表现成「功能不存在」而不是报错。这种最难查，所以交给工具盯。
 
 `TOOL_DEBUG=false` 可以关掉每轮的 `[请求]` `[执行]` `[结果]` 日志，日志量会小很多。
 
