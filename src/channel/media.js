@@ -144,8 +144,9 @@ export function audioSenderFor(event, send = (payload) => deliver(event, payload
 const TTS_VOICE = process.env.TTS_VOICE?.trim() || 'zh-CN-XiaoxiaoNeural'
 const TTS_MAX_CHARS = 500
 
-// edge-tts 的音色名形如 zh-CN-XiaoyiNeural；只放行这个格式，别把任意字符串塞给命令行
-const VOICE_PATTERN = /^[a-zA-Z]{2,3}-[a-zA-Z]{2,4}-[a-zA-Z]+Neural$/
+// edge-tts 的音色名形如 zh-CN-XiaoyiNeural，方言音色多一段地区（zh-CN-liaoning-XiaobeiNeural）；
+// 只放行字母和连字符这个格式，别把任意字符串塞给命令行
+const VOICE_PATTERN = /^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,10}){1,2}-[a-zA-Z]+Neural$/
 
 export const TTS_VOICES = {
   'zh-CN-XiaoxiaoNeural': '晓晓 · 温和女声（默认）',
