@@ -5,7 +5,18 @@ const fs = require('node:fs')
 const os = require('node:os')
 
 // 密钥文件放在项目外，pm2 启动时读进来注入环境变量。
-// 项目根的 .env 只做兜底，推荐只保留 /etc/dafeiyu/env。
+// 项目根的 .env 只做兜底，推荐只保留外部那份。
+// 默认位置要和 src/ops/platform.js 的 defaultEnvFile() 保持一致（这里不能用 ESM）。
+function defaultEnvFile() {
+  if (process.platform === 'win32') {
+    return require('node:path').join(process.env.APPDATA || os.homedir(), 'dafeiyu', 'env')
+  }
+  if (process.platform === 'darwin') {
+    return require('node:path').join(os.homedir(), '.config', 'dafeiyu', 'env')
+  }
+  return '/etc/dafeiyu/env'
+}
+
 function loadEnvFile(file) {
   try {
     const text = fs.readFileSync(file, 'utf8')
@@ -21,7 +32,7 @@ function loadEnvFile(file) {
   }
 }
 
-const externalEnv = loadEnvFile(process.env.APP_ENV_FILE || '/etc/dafeiyu/env')
+const externalEnv = loadEnvFile(process.env.APP_ENV_FILE || defaultEnvFile())
 const localEnv = loadEnvFile(require('node:path').join(__dirname, '.env'))
 
 function heapFor(totalMB) {

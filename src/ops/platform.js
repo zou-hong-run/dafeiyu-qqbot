@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 // 平台差异都收在这里，别散在业务代码里。
@@ -21,6 +22,28 @@ export const caps = {
   sandbox: 'pending',
   // /proc 只有 Linux 有
   hasProcfs: isLinux,
+}
+
+/**
+ * 密钥文件的默认位置。放项目外，避免跟着项目目录被读走。
+ * 想换位置就设 APP_ENV_FILE。
+ * 注意：ecosystem.config.cjs 里有一份等价实现（它不能 import ESM），改这里要同步。
+ */
+export function defaultEnvFile() {
+  if (isWindows) {
+    return path.join(process.env.APPDATA || os.homedir(), 'dafeiyu', 'env')
+  }
+  if (isMac) {
+    return path.join(os.homedir(), '.config', 'dafeiyu', 'env')
+  }
+  return '/etc/dafeiyu/env'
+}
+
+/** 当前是不是 root / 管理员，装系统依赖和配自启要用 */
+export function isElevated() {
+  // Windows 装包走 winget，不需要管理员；这里只用来决定 apt 要不要加 sudo
+  if (isWindows) return false
+  return process.getuid?.() === 0
 }
 
 const MB = 1024 * 1024
@@ -80,7 +103,13 @@ export function sandboxStatus() {
   if (sandboxProbe) return sandboxProbe
 
   if (!isLinux) {
-    sandboxProbe = { available: false, kind: 'none', reason: `非 Linux（${platform}）` }
+    sandboxProbe = {
+      available: false,
+      kind: 'none',
+      reason: isMac
+        ? 'macOS 无可用沙箱（Seatbelt 已被弃用，不当作安全边界）'
+        : 'Windows 无 OS 级沙箱（只靠权限表和内存预算）',
+    }
     return sandboxProbe
   }
 

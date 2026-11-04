@@ -1,14 +1,16 @@
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { config } from 'dotenv'
 import { personaName, personaPrompt } from '../chat/persona.js'
 import { budgetFor } from '../ops/budget.js'
+import { defaultEnvFile } from '../ops/platform.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-// 密钥文件优先从项目外读（/etc/dafeiyu/env），项目根的 .env 只做兜底。
-// 这样即使有人拿到项目目录的读写权限，也读不到密钥。
-const EXTERNAL_ENV = process.env.APP_ENV_FILE?.trim() || '/etc/dafeiyu/env'
+// 密钥文件优先从项目外读（Linux 是 /etc/dafeiyu/env，macOS/Windows 各有默认位置），
+// 项目根的 .env 只做兜底。这样即使有人拿到项目目录的读写权限，也读不到密钥。
+const EXTERNAL_ENV = process.env.APP_ENV_FILE?.trim() || defaultEnvFile()
 config({ path: [EXTERNAL_ENV, path.join(projectRoot, '.env')], quiet: true })
 
 function pick(...names) {

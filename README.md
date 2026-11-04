@@ -159,27 +159,33 @@ SELF.md             机器人的自我能力说明（注入提示词，可被机
 
 ## 快速开始
 
-前置：Node.js ≥ 20.12、pnpm（或 npm）、一个已加入沙箱群的 QQ 机器人。
+前置：Node.js ≥ 20.12、一个已加入沙箱群的 QQ 机器人。pnpm 不用自己装，脚本会用 corepack 打开。
+
+支持 Linux / macOS / Windows，但**只有 Linux 有命令沙箱**，差异见 [docs/PLATFORMS.md](docs/PLATFORMS.md)。
 
 **1. 在 [QQ 开放平台](https://q.qq.com/) 创建机器人**
 
 拿到 `AppID` 和 `AppSecret`，并在「开发管理」里开启群聊能力、把机器人拉进一个测试群。
 
-**2. 装依赖、填配置**
+**2. 一条命令初始化**
 
 ```bash
 git clone https://github.com/zou-hong-run/dafeiyu-qqbot.git
 cd dafeiyu-qqbot
-pnpm install
-
-# 密钥放项目外，权限收紧到只有 root 能读
-sudo mkdir -p /etc/dafeiyu
-sudo cp .env.example /etc/dafeiyu/env
-sudo chmod 600 /etc/dafeiyu/env
-sudo chown root:root /etc/dafeiyu/env
+node scripts/bootstrap.js
 ```
 
-编辑 `/etc/dafeiyu/env`，至少填三项：
+脚本自己判断平台，依次做：查 Node 版本 → 开 pnpm → 装依赖 → 建运行目录 → 生成密钥文件 → 装 yt-dlp / ffmpeg（Linux 再加 bubblewrap）。缺什么直接说，能自动装的自动装。
+
+它会告诉你密钥文件生成在哪：
+
+| 系统 | 默认路径 |
+|---|---|
+| Linux | `/etc/dafeiyu/env` |
+| macOS | `~/.config/dafeiyu/env` |
+| Windows | `%APPDATA%\dafeiyu\env` |
+
+打开填三项：
 
 ```env
 DEEP_SEEK_API_KEY=sk-xxxx
@@ -187,9 +193,13 @@ QQ_APP_ID=102xxxxx
 QQ_APP_SECRET=xxxx（32 位）
 ```
 
-放项目外的原因：项目根目录要留给机器人自己读写（改源码、下文件、跑 shell），密钥混在里面迟早被带出去；`/etc/dafeiyu/env` 不在项目里，沙箱会把它整个挂成空目录。
+放项目外的原因：项目根目录要留给机器人自己读写（改源码、下文件、跑 shell），密钥混在里面迟早被带出去。想换位置就设 `APP_ENV_FILE`，pm2 启动时按它找。项目根的 `.env` 只做兜底，建议别放。
 
-想换位置就设 `APP_ENV_FILE`，`pm2` 启动时会按它找。项目根的 `.env` 只做兜底，建议别放。
+填完再确认一遍，没有红叉就能启动：
+
+```bash
+node scripts/bootstrap.js --check
+```
 
 **3. 启动**
 
@@ -198,6 +208,14 @@ pnpm start
 ```
 
 看到 `[启动] 已连接` 就说明连上网关了，私聊直接发消息，群里 @ 它。
+
+长期跑用 pm2，开机自启的做法各平台不同：
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup      # Linux/macOS；Windows 用 pm2-installer，见 docs/PLATFORMS.md
+```
 
 改完代码想自检：
 
@@ -255,11 +273,17 @@ node --check src/index.js
 | Node 运行 | ✓ | ✓ | ✓ |
 | 内存检测 | `/proc/meminfo`（精确） | `os.freemem()` | `os.freemem()` |
 | 单进程内存上限（ulimit） | ✓ | ✗ 自动跳过 | ✗ 自动跳过 |
-| OS 级沙箱 | bwrap | Seatbelt | 无 |
-| 后台 shell | ✓ | ✓ | ✓（用文件描述符接输出） |
-| ffmpeg / yt-dlp | apt / pipx | `brew install` | 手动装并加进 PATH |
+| OS 级沙箱 | bwrap（真隔离） | ✗ 无 | ✗ 无 |
+| 后台 shell | POSIX sh | POSIX sh | `cmd.exe` |
+| 依赖安装 | apt / pipx | Homebrew | winget |
+| 开机自启 | `pm2 startup`（systemd） | `pm2 startup`（launchd） | `pm2-installer` / 任务计划程序 |
+| 密钥默认位置 | `/etc/dafeiyu/env` | `~/.config/dafeiyu/env` | `%APPDATA%\dafeiyu\env` |
+
+一张表装不完的部分——三个平台各自怎么装、怎么配自启、Windows 的 shell 为什么要用 `dir` 而不是 `ls`、沙箱缺失意味着什么——在 **[docs/PLATFORMS.md](docs/PLATFORMS.md)**。
 
 平台差异都收在 `src/ops/platform.js`，启动时打一行 `[平台]` 说明当前能力。macOS 上跑要注意别让电脑睡眠，否则连接会断。
+
+> 只有 Linux 有真沙箱。macOS 的 Seatbelt 已被 Apple 弃用，Windows 没有同类机制，这两个平台靠权限表和内存预算兜底，适合自用，别拿来跑公开群。
 
 ## 部署（pm2）
 
@@ -406,7 +430,7 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 **shell 子进程不继承密钥**：只传 `PATH / HOME / LANG` 这几个，`DEEP_SEEK_API_KEY`、`QQ_APP_SECRET` 一律不进子进程，`env` 里看不到。
 
-**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许建命名空间时，shell 命令会被包进 `bwrap`——整个根只读、只有工作目录可写、默认断网（装包/拉代码这类才放行网络）、`--clearenv`、父进程死了跟着死，capability 只保留 `CAP_DAC_OVERRIDE`（够写工作目录，拿不到 mount / ptrace 这些能把只读根拆掉的能力）。只读根挡不住读，所以密钥目录 `/etc/dafeiyu`、`/root/.ssh` 会挂成空 tmpfs，项目根 `.env` 和 `pm2` 的 env 快照会盖成 `/dev/null`。启动日志会如实写「沙箱已启用」或「未隔离（原因）」，并且是真的跑一遍读写探针，不是只看命令在不在。
+**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许建命名空间时，shell 命令会被包进 `bwrap`——整个根只读、只有工作目录可写、默认断网（装包/拉代码这类才放行网络）、`--clearenv`、父进程死了跟着死，capability 只保留 `CAP_DAC_OVERRIDE`（够写工作目录，拿不到 mount / ptrace 这些能把只读根拆掉的能力）。只读根挡不住读，所以密钥所在目录（默认 `/etc/dafeiyu`）和 `/root/.ssh` 会挂成空 tmpfs，项目根 `.env` 和 `pm2` 的 env 快照会盖成 `/dev/null`。启动日志会如实写「沙箱已启用」或「未隔离（原因）」，并且是真的跑一遍读写探针，不是只看命令在不在。macOS 和 Windows 没有这层。
 
 **`add_mcp` 有白名单**：只允许 `node tools/*.js` 或已安装的 `npx`（禁止 `-y` 联网拉包），env 字段不接受自定义值。`install_package` 固定带 `--ignore-scripts`，防 postinstall 执行任意代码。
 

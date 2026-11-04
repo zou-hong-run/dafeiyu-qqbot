@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shieldArgs, SHIELDED_DIRS, SHIELDED_FILES } from '../src/mcp-server/sandbox.js'
+import { defaultEnvFile } from '../src/ops/platform.js'
 
 // bwrap 参数构造：Windows 上跑不了 bwrap，只测纯参数生成
 
@@ -54,7 +55,7 @@ test('已被目录遮住的文件不重复生成参数', () => {
 })
 
 test('默认名单覆盖密钥目录、SSH 私钥、项目根 .env、pm2 快照', () => {
-  assert.ok(SHIELDED_DIRS.includes('/etc/dafeiyu'), '外部密钥目录')
+  assert.ok(SHIELDED_DIRS.includes(path.dirname(defaultEnvFile())), '外部密钥目录')
   assert.ok(SHIELDED_DIRS.includes('/root/.ssh'), 'SSH 私钥目录')
   assert.ok(SHIELDED_FILES.includes(path.join(projectRoot, '.env')), '项目根 .env')
   assert.ok(SHIELDED_FILES.includes('/root/.pm2/dump.pm2'), 'pm2 env 快照')

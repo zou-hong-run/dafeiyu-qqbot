@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { sandboxStatus } from '../ops/platform.js'
+import { sandboxStatus, defaultEnvFile } from '../ops/platform.js'
 
 // 把命令包进 bwrap：只读挂整个根，只有工作目录和一个临时 /tmp 可写。
 // 没网（除非命令明确需要联网），看不到宿主的环境变量和家目录。
@@ -16,13 +16,14 @@ const NEEDS_NETWORK = /\b(pnpm|npm|yarn|npx|pip3?|apt|apt-get|yum|dnf|apk|brew|g
 // `--ro-bind / /` 只能挡写，挡不住读。bwrap 默认一个 capability 都不给，
 // 但下面要补 DAC 越权让 root 能写属 www 的项目目录，所以读取面得单独挡住：
 // 目录挂空 tmpfs（整个目录变空），文件盖成 /dev/null（读到 0 字节）。
+const envFile = process.env.APP_ENV_FILE?.trim() || defaultEnvFile()
+
 export const SHIELDED_DIRS = [
-  '/etc/dafeiyu', // 外部密钥文件所在目录
+  path.dirname(envFile), // 外部密钥文件所在目录
   '/root/.ssh', // SSH 私钥
 ]
 
 export const SHIELDED_FILES = [
-  process.env.APP_ENV_FILE?.trim() || '/etc/dafeiyu/env',
   path.join(projectRoot, '.env'),
   '/root/.pm2/dump.pm2', // pm2 保存的进程列表，里面是启动时的 env 快照
 ]
