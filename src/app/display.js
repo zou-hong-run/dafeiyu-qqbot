@@ -2,6 +2,7 @@ import { getTools } from '../mcp/client.js'
 import { env } from '../config/env.js'
 import { listBackups } from '../ops/backup.js'
 import { caps, describePlatform, memoryInfo } from '../ops/platform.js'
+import { sandboxSelfTest } from '../mcp-server/sandbox.js'
 import { budgetFor } from '../ops/budget.js'
 
 // /config：把当前生效的配置列出来，不配 .env 时也能看清自己在跑什么
@@ -88,7 +89,7 @@ export function reportMemory() {
       `[内存] 总计 ${(total / 1024).toFixed(1)}G｜可用 ${available}MB｜swap ${(swap / 1024).toFixed(1)}G` +
         `${info.precise ? '' : '（非 Linux，用系统余量估算）'}`,
     )
-    console.log(`[平台] ${describePlatform()}`)
+    console.log(`[平台] ${describePlatform(sandboxSelfTest())}`)
     console.log(
       `[内存] 预算（${budget.profile} 档）：主进程堆 ${process.env.MAIN_HEAP_MB || budget.mainHeapMB}MB + MCP ${process.env.MCP_HEAP_MB || budget.mcpHeapMB}MB，` +
         `${caps.canUlimit ? `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB` : '不限制单条命令内存（该平台无 ulimit）'}，命令预估安全线 ${Math.max(120, Math.floor(available * 0.75))}MB，` +

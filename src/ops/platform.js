@@ -63,10 +63,9 @@ export function memoryInfo() {
 }
 
 /** 一句话描述当前平台能力，启动日志用 */
-export function describePlatform() {
+export function describePlatform(sandbox = sandboxStatus()) {
   const parts = [platform]
   parts.push(caps.canUlimit ? 'ulimit 可用' : '不限制单进程内存')
-  const sandbox = sandboxStatus()
   parts.push(sandbox.available ? `${sandbox.kind} 沙箱已启用` : `未隔离（${sandbox.reason}）`)
   return parts.join('｜')
 }
