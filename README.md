@@ -9,11 +9,11 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D20.12-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
----
 
-![群聊演示](assets/demo.png)
+![alt text](image.png)
+![alt text](image-1.png)
 
-> 真实群聊截屏，只截了聊天这一面。只有 @ 它或提到「大肥鱼」时才会接话；上图里的引用气泡是旧版本行为，现在默认关闭。
+
 > 动手能力（跑命令、发媒体、定时任务、自我扩展）看下面的[能力一览](#能力一览)。
 
 ## 安全边界
