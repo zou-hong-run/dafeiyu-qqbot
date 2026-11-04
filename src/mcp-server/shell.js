@@ -4,8 +4,8 @@ import { execFile, spawn } from 'node:child_process'
 import { caps, isWindows, memoryInfo } from '../ops/platform.js'
 import { budgetFor } from '../ops/budget.js'
 import { inspectCommand } from './shell-guard.js'
-import { sandboxCommand } from './sandbox.js'
-import { sandboxStatus } from '../ops/platform.js'
+import { sandboxCommand, sandboxSelfTest } from './sandbox.js'
+import { shellSafeEnv } from './shell-env.js'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -14,10 +14,6 @@ const logDir = path.join(projectRoot, 'logs')
 const MAX_OUTPUT = 3000
 const MAX_COMMAND = 4000
 const MAX_SCRIPT = 40_000
-
-// SHELL_UNRESTRICTED=true 时只保留最基本的非空校验，命令完全交给模型
-const UNRESTRICTED = process.env.SHELL_UNRESTRICTED === 'true'
-
 
 const isLinux = caps.canUlimit // 只有 Linux 能靠 ulimit 限内存，其余平台自动跳过
 
@@ -225,12 +221,29 @@ function assertSafeCommand(command, { script = false } = {}) {
   const limit = script ? MAX_SCRIPT : MAX_COMMAND
   if (command.length > limit) throw new Error(`内容太长（${command.length} 字符），上限 ${limit}`)
   if (command.includes('\0')) throw new Error('内容包含非法字符')
-  if (UNRESTRICTED) return
 
-  // 归一化后再匹配：全角、引号拼接、反斜杠这类写法绕不过去
-  const verdict = inspectCommand(command, { unrestricted: UNRESTRICTED })
+  // 归一化后再匹配：全角、引号拼接、反斜杠这类写法绕不过去。
+  // 没有「跳过校验」的开关——之前那个 SHELL_UNRESTRICTED 等于给模型留了个后门。
+  const verdict = inspectCommand(command)
   if (!verdict.ok) {
     throw new Error(`已拦截：${verdict.reason}。换成安全的写法再试。`)
+  }
+}
+
+function assertSandboxUsable() {
+  const box = sandboxSelfTest()
+
+  // 没装 bwrap 是「明确降级」：用户知道自己没有隔离，照常裸跑
+  if (!box.installed) return
+
+  // 装了却跑不起来：绝不降级成裸跑。那等于把隔离悄悄关掉，
+  // 而且日志里还写着「沙箱已启用」，比完全没装更危险。
+  if (!box.available) {
+    throw new Error(
+      `沙箱自检没通过，命令已拒绝执行：${box.reason}\n` +
+        '这是有意的——装了 bwrap 却跑不起来时降级成裸跑，等于把隔离静默关掉。\n' +
+        '排查：先看启动日志的 [平台] 那行，再手动跑一次 bwrap --ro-bind / / --dev /dev --proc /proc -- echo ok',
+    )
   }
 }
 
@@ -253,25 +266,11 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// shell 里跑的东西不需要任何密钥：只传最基本的几个环境变量。
-// 这样即使没有 bwrap，`env` 也看不到 DEEP_SEEK_API_KEY / QQ_APP_SECRET。
-const SAFE_CHILD_ENV = {
-  PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
-  HOME: process.env.HOME ?? '/tmp',
-  LANG: process.env.LANG ?? 'C.UTF-8',
-  TERM: process.env.TERM ?? 'dumb',
-  TMPDIR: process.env.TMPDIR ?? '/tmp',
-  // pnpm / npm 需要这两个才能找到缓存和配置
-  ...(process.env.XDG_CACHE_HOME ? { XDG_CACHE_HOME: process.env.XDG_CACHE_HOME } : {}),
-  ...(process.env.PNPM_HOME ? { PNPM_HOME: process.env.PNPM_HOME } : {}),
-  ...(process.env.NODE_PATH ? { NODE_PATH: process.env.NODE_PATH } : {}),
-}
-
 function runOnce(command, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const startedAt = Date.now()
 
-    const opts = { cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024, env: SAFE_CHILD_ENV }
+    const opts = { cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024, env: shellSafeEnv() }
 
     // 有 bwrap 就包一层：只读根、工作目录可写、默认断网、不继承宿主环境变量
     const boxed = sandboxCommand(command, cwd)
@@ -305,8 +304,15 @@ function reapBackground() {
   for (const [pid, info] of bgProcs) {
     if (now - info.at < BG_MAX_AGE_MS) continue
     try {
-      process.kill(pid, 'SIGTERM')
-      console.log(`[后台] 回收超龄进程 ${pid}（跑了 ${Math.round((now - info.at) / 60000)} 分钟）：${info.command.slice(0, 60)}`)
+      // 连同子进程一起收：ffmpeg/yt-dlp 这类会自己 fork
+      try {
+        process.kill(-pid, 'SIGTERM')
+      } catch {
+        process.kill(pid, 'SIGTERM')
+      }
+      console.log(
+        `[后台] 回收超龄进程 ${pid}（跑了 ${Math.round((now - info.at) / 60000)} 分钟）：${info.command.slice(0, 60)}`,
+      )
     } catch {
       // 已经自己退了
     }
@@ -314,7 +320,16 @@ function reapBackground() {
   }
 }
 
-function runInBackground(command, cwd) {
+// 光靠「起新任务时顺手回收」不够：没有新任务就一直不清。
+// 挂个定时器，进程活着就每 5 分钟扫一遍。
+const reapTimer = setInterval(reapBackground, 5 * 60_000)
+reapTimer.unref?.()
+
+/**
+ * 后台执行。默认也包沙箱——不然模型只要加个 background:true 就能绕过全部隔离。
+ * restart_self 是唯一例外：它要在 bwrap 的 --unshare-pid 之外才能操作 pm2（见调用处）。
+ */
+function runInBackground(command, cwd, { sandbox = true, env } = {}) {
   fs.mkdirSync(logDir, { recursive: true })
   reapBackground()
 
@@ -323,13 +338,22 @@ function runInBackground(command, cwd) {
   // 用文件描述符接输出，不拼 `( ) >> log`：那是 POSIX 语法，Windows 的 cmd 不认。
   // 顺带解决 `a && b >> log` 只有 b 进日志的老问题。
   const logFd = fs.openSync(logFile, 'a')
-  const child = spawn(command, {
-    shell: true,
+  const childEnv = env ?? shellSafeEnv()
+
+  // 后台同样要走沙箱，否则 background:true 就成了绕过隔离的开关
+  const boxed = sandbox ? sandboxCommand(command, cwd) : null
+
+  const spawnOptions = {
     cwd,
+    env: childEnv,
     // Windows 上 detached 会另开控制台，反而留不干净，用默认行为
     detached: !isWindows,
     stdio: ['ignore', logFd, logFd],
-  })
+  }
+
+  const child = boxed
+    ? spawn(boxed.argv[0], boxed.argv.slice(1), spawnOptions)
+    : spawn(command, { ...spawnOptions, shell: true })
 
   child.on('error', (error) => {
     try {
@@ -351,6 +375,7 @@ async function shell({ command, cwd, timeout_ms: timeoutMs, retries, background 
   if (!cmd) throw new Error('命令不能为空')
 
   assertSafeCommand(cmd)
+  assertSandboxUsable()
   assertMemory(cmd)
   const workDir = resolveCwd(cwd)
   const estimate = assertEstimate(estimateResourceUsage(cmd, workDir), cmd)
@@ -442,7 +467,13 @@ async function restartSelf({ delay_seconds: delaySeconds = 6, reason = '' }) {
     // 写不进去就算了，播报会退回默认文案
   }
 
-  const { pid, logFile } = runInBackground(`sleep ${delay} && pm2 restart ${PM2_APP}`, projectRoot)
+  // restart_self 是唯一不走沙箱的后台命令：pm2 要连 ~/.pm2 的 daemon，
+  // 而沙箱里 --unshare-pid 和 HOME=/tmp 都会让它找不到那个 socket。
+  // 这里只保留 HOME，其余凭据仍然不传。
+  const { pid, logFile } = runInBackground(`sleep ${delay} && pm2 restart ${PM2_APP}`, projectRoot, {
+    sandbox: false,
+    env: shellSafeEnv({ HOME: process.env.HOME || '/root' }),
+  })
 
   return [
     `已安排 ${delay} 秒后重启 ${PM2_APP}（调度进程 PID ${pid}）。`,
@@ -472,6 +503,7 @@ async function runScript({ code, language = 'bash', cwd, timeout_ms: timeoutMs, 
   if (!spec) throw new Error(`不支持的语言 ${language}，可选：${Object.keys(INTERPRETERS).join(' / ')}`)
 
   assertSafeCommand(source, { script: true })
+  assertSandboxUsable()
   assertMemory(source)
 
   const workDirForEstimate = resolveCwd(cwd)
@@ -537,7 +569,10 @@ export const SHELL_TOOLS = [
   {
     name: 'shell',
     description:
-      '在服务器上执行 shell 命令，用于跑脚本、装依赖、git 操作、查看文件、运行测试、管理进程（pm2 也可以）。' +
+      '在服务器上执行 shell 命令，用于跑脚本、查看文件、跑测试、处理数据这类一次性操作。' +
+      '沙箱里只有 tmp/ 和 downloads/ 可写，项目其他目录（data/、src/、skills/、node_modules/）都是只读：' +
+      '装包用 install_package，改代码用 write_file / edit_file，拉代码用 git_sync，重启用 restart_self，' +
+      '别用这条命令硬来——写不进去会直接报 Permission denied。' +
       '命令失败（退出码非 0）时会自动重试，默认最多 3 次。' +
       '长任务（转码、大文件下载、装大包）传 background:true，会在后台跑并返回 PID 和日志文件，用 tail 看进度。' +
       '执行前会预估内存（按命令里引用的文件大小和类型系数），超了直接拒绝。' +

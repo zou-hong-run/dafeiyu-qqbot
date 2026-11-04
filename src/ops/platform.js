@@ -105,6 +105,7 @@ export function sandboxStatus() {
   if (!isLinux) {
     sandboxProbe = {
       available: false,
+      installed: false,
       kind: 'none',
       reason: isMac
         ? 'macOS 无可用沙箱（Seatbelt 已被弃用，不当作安全边界）'
@@ -116,7 +117,7 @@ export function sandboxStatus() {
   try {
     execFileSync('bwrap', ['--version'], { stdio: 'pipe', timeout: 3000 })
   } catch {
-    sandboxProbe = { available: false, kind: 'none', reason: '没装 bwrap' }
+    sandboxProbe = { available: false, installed: false, kind: 'none', reason: '没装 bwrap' }
     return sandboxProbe
   }
 
@@ -132,12 +133,13 @@ export function sandboxStatus() {
     const raw = String(error?.stderr ?? error?.message ?? error).replace(/\s+/g, ' ').trim()
     sandboxProbe = {
       available: false,
+      installed: true,
       kind: 'none',
       reason: `bwrap 装了但跑不起来（常见是内核禁了命名空间）：${raw.slice(0, 100)}`,
     }
     return sandboxProbe
   }
 
-  sandboxProbe = { available: true, kind: 'bwrap', reason: '' }
+  sandboxProbe = { available: true, installed: true, kind: 'bwrap', reason: '' }
   return sandboxProbe
 }

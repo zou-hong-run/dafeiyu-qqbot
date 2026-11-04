@@ -82,9 +82,10 @@ test('空命令不算通过', () => {
   assert.equal(inspectCommand('   ').ok, false)
 })
 
-test('unrestricted 模式全放行', () => {
-  assert.equal(inspectCommand('rm -rf /', { unrestricted: true }).ok, true)
-  assert.equal(inspectCommand('cat .env', { unrestricted: true }).ok, true)
+test('没有可以跳过校验的开关', () => {
+  // 以前有个 unrestricted 参数能全放行，等于给模型留后门，已删除
+  assert.equal(inspectCommand.length, 1)
+  assert.equal(inspectCommand('rm -rf /').ok, false)
 })
 
 test('归一化会把全角和引号压平', () => {

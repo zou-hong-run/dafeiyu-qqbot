@@ -51,10 +51,9 @@ export function normalizeForMatch(raw) {
  * 检查一条命令能不能跑。
  * @returns {{ ok: boolean, reason?: string }}
  */
-export function inspectCommand(raw, { unrestricted = false } = {}) {
+export function inspectCommand(raw) {
   const original = String(raw ?? '')
   if (!original.trim()) return { ok: false, reason: '命令为空' }
-  if (unrestricted) return { ok: true }
 
   const text = normalizeForMatch(original)
 

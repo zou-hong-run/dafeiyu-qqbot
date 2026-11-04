@@ -201,11 +201,12 @@ NFKC（ｒｍ → rm）→ 去引号（r''m → rm）→ 去反斜杠 → 去零
 
 ```
 bwrap
-  --cap-drop ALL --cap-add CAP_DAC_OVERRIDE   只留「能写工作目录」
+  --cap-drop ALL [--cap-add CAP_DAC_OVERRIDE]  默认不给任何能力
   --unshare-pid --unshare-ipc --unshare-uts   看不见宿主其他进程
   [--unshare-net]                             命令里没 curl/git/pnpm 就断网
   --ro-bind / /                               整个根只读
-  --bind <cwd> <cwd>                          只有工作目录可写
+  --bind <项目根>/tmp <项目根>/tmp              只有这两个目录可写
+  --bind <项目根>/downloads <项目根>/downloads
   --tmpfs /tmp --dev /dev --proc /proc
   --tmpfs <密钥目录>                           变成空目录
   --ro-bind-try /dev/null <项目根 .env>        读出来是空
@@ -216,11 +217,21 @@ bwrap
   -- /bin/sh -c "<命令>"
 ```
 
+`CAP_DAC_OVERRIDE` 是有条件的：只有当可写目录的属主和运行用户不一致时才补。把项目目录 `chown` 给运行用户后，这个 capability 完全不需要——也就去掉了「沙箱内能读全盘」这个面。
+
+`data/`、`src/`、`skills/`、`node_modules/` 全部只读，是因为它们都是能形成逃逸链的东西：
+
+- `data/mcp-registry.json` 改掉，下一轮 `syncRegistry()` 就会在宿主侧 spawn 它指定命令
+- `data/audit.log` 擦掉，审计失效
+- `src/` 改掉再叠加 `restart_self`，代码就换掉了
+
+装包、改代码、拉仓库都走主进程（`install_package` / `write_file` / `git_sync`），不经过沙箱，所以功能没丢。
+
 ### 为什么不用 `--unshare-user`
 
 试过，不行。bwrap 的 user namespace 只映射一个 uid，而项目目录属主是 `www`。那个 uid 在 namespace 里没有映射，`CAP_DAC_OVERRIDE` 对它的 inode 直接失效——`touch` 报 Permission denied。
 
-改成真 namespace + 只留 `CAP_DAC_OVERRIDE`，写权限正常，`mount` / `ptrace` / `bpf` 这些能把只读根拆掉的能力一个没有。
+改成真 namespace + 按需补 `CAP_DAC_OVERRIDE`，写权限正常，`mount` / `ptrace` / `bpf` 这些能把只读根拆掉的能力一个没有。
 
 ### 探测不会撒谎
 
@@ -256,15 +267,19 @@ bwrap
 
 ## 七、已知缺口
 
-### 1. `background: true` 的命令不走沙箱
+### 1. `CAP_DAC_OVERRIDE` 让沙箱内能读全盘
 
-`runInBackground()` 是直接 `spawn`，没有经过 `sandboxCommand()`。所以模型加一个 `background: true`，命令就在宿主上裸跑——只受命令黑名单约束，没有只读根、没有断网、没有密钥遮蔽。
+`--ro-bind / /` 只挡写不挡读。当可写目录的属主和运行用户不一致时（默认部署就是这样：项目属 `www`，进程跑 `root`），必须补 `CAP_DAC_OVERRIDE` 才能写得进去，而这个能力同时意味着**读全盘不受 DAC 限制**——`/etc/shadow`、`~/.aws`、systemd 的 EnvironmentFile 都读得到。
 
-不能简单地把后台也包进 bwrap：`restart_self` 依赖这条路径，而 `pm2 restart` 在 `--unshare-pid` 里会出问题。合理改法是让 `background` 也走沙箱、只对 `restart_self` 单开例外，但要处理 `--die-with-parent` 和 detached 的冲突。
+遮蔽只能点几个路径（密钥目录、`.ssh`、pm2 快照），点名单永远补不齐。
+
+**根治方式**：把项目目录 `chown` 给运行用户，然后用该用户启动 pm2。代码会自动检测属主，不需要这个 capability 就不加。
 
 ### 2. 断网是按命令文本判断的
 
-`NEEDS_NETWORK` 正则只要在命令里看到 `curl`、`git`、`pnpm` 就放行网络。所以「读密钥 + 外传」这条路实际靠的是遮蔽和命令黑名单，不是网络隔离。
+`NEEDS_NETWORK` 正则只要在命令里看到 `curl`、`git`、`pnpm` 就放行网络。所以「读数据 + 外传」这条路实际靠的是遮蔽和命令黑名单，不是网络隔离。
+
+放到云服务器上还有个具体风险：`169.254.169.254`（阿里云是 `100.100.100.200`）暴露实例角色临时凭证。这条**必须堵在宿主机防火墙**，沙箱管不了。
 
 ### 3. macOS / Windows 没有 OS 级沙箱
 
@@ -273,6 +288,28 @@ bwrap
 ### 4. 密钥副本在 pm2 的快照里
 
 `pm2 save` 会把启动时的 env 写进 `/root/.pm2/dump.pm2`，里面有明文密钥。沙箱里已把它盖成 `/dev/null`，宿主侧靠文件权限（600 root）保护。
+
+### 5. 主进程侧的工具不受沙箱约束
+
+`write_file`、`edit_file`、`install_package`、`git_sync` 都在主进程里执行，因为它们本来就要改项目目录。所以「高危工具只给白名单」是这层的唯一门槛——白名单没配好，沙箱再严也没用。
+
+---
+
+## 已修复的历史问题
+
+记在这里，免得以后有人照旧实现一遍：
+
+| 问题 | 怎么修的 |
+|---|---|
+| `background: true` 绕过沙箱 | 后台命令同样走 `sandboxCommand()`；只有 `restart_self` 单开例外（它要连 pm2 daemon） |
+| 后台命令继承模型 key | 所有子进程统一用 `shell-env.js` 的 `shellSafeEnv()` |
+| `install_package` 继承模型 key | 显式传 `env: shellSafeEnv()` |
+| 注册表热加载不校验 command | `syncRegistry()` 复用 `assertMcpCommand()`，env 字段一律清空 |
+| `SHELL_UNRESTRICTED` 逃生开关 | 整个删掉，连 `inspectCommand` 的 `unrestricted` 参数一起删 |
+| 工作目录整块可写 | 只放开 `tmp/` 和 `downloads/`，`data/`、`src/`、`skills/` 只读 |
+| 自检失败仍报「- 已启用」 | 自检结果区分「没装」和「装了跑不起来」，后者直接拒绝执行命令 |
+| 审计集合漏 `git_sync` / `write_file` / `edit_file` | 补齐 |
+| 后台进程只在起新任务时回收 | 挂 5 分钟定时器，并按进程组杀 |
 
 ---
 

@@ -48,6 +48,10 @@ const AUDITED_TOOLS = new Set([
   'restart_self',
   'broadcast',
   'send_to_group',
+  // 能改代码、能推仓库的，同样要留痕
+  'write_file',
+  'edit_file',
+  'git_sync',
 ])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 

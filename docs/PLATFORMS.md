@@ -73,7 +73,7 @@ pipx install yt-dlp
 
 装了 bubblewrap 且内核允许建命名空间，shell 命令会被包进 `bwrap`：
 
-- 整个根只读，只有工作目录可写
+- 整个根只读，只有 `tmp/` 和 `downloads/` 可写
 - 默认断网，只有装包 / 拉代码 / 下载这类命令放行
 - 不继承宿主环境变量（`--clearenv`）
 - capability 只留 `CAP_DAC_OVERRIDE`，`mount`、`ptrace` 全丢

@@ -43,7 +43,7 @@
 - **观察模式**：`JUDGE_MODE=observe` 时它会评估「这句我本来会接」，但只记一笔不回复，`/observe` 能看到它想插手哪些消息
 - **自我进化**：`write_skill` 写技能、`add_mcp` 注册新 MCP 服务（热加载，不用重启）、`install_package` 装 npm 包
 - **技能按需加载**：技能可以是单文件 `skills/xxx.md`，也可以是目录 `skills/xxx/SKILL.md`（带 `name` / `description` / `when-to-use` 元数据）。正文总量超过 6000 字时只挂摘要 + `read_skill` 提示，避免每轮把几万字技能全塞进上下文
-- **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；子进程只拿 PATH 和模型 key，**不拿 QQ 密钥**
+- **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；执行命令的子进程只拿 `PATH` 这类基础变量，**模型 key 和 QQ 密钥一个都不进**
 - **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` / `run_script` / `restart_self` / `broadcast` / `send_to_group` / `git_sync` 每次调用都记到 `data/audit.log`（tab 分隔：时间、会话、工具、参数、结果）
 - **按 1.6G 实测内存做了内存预算**：主进程堆 320MB、MCP 子进程 160MB、每条 shell 命令 `ulimit -v 512MB`、`send_file` 单文件 50MB、pm2 RSS 超 420MB 自动重启；命令预估超过「可用 × 75%」直接拒绝，可用低于 300MB 时全部停摆只留救援命令
 
@@ -377,7 +377,6 @@ node --check src/index.js
 | `TTS_VOICE` | `speak` 工具用的 edge-tts 音色（`zh-CN-XiaoxiaoNeural`） |
 | `ADMIN_OPENIDS` | 高危工具白名单（逗号分隔 openid）。机器人里发 `/id` 查自己的 openid |
 | `SHELL_GROUP_ENABLED` | 没配白名单时，`true` 才允许群里用高危工具（默认关闭） |
-| `SHELL_UNRESTRICTED` | `true` 时彻底放开命令黑名单，连读 `.env`、打印密钥都不拦（危险） |
 | `AUTO_SYNC_INTERVAL_MINUTES` | 代码自动提交间隔（30 分钟），`0` = 只靠退出时提交 |
 | `AUTO_SYNC_ON_EXIT` | 设 `false` 关掉「退出前自动提交」 |
 | `MEDIA_TTL_HOURS` | `downloads/incoming/` 附件保留时长（24 小时） |
@@ -559,11 +558,20 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 **shell 命令先归一化再校验**：全角字符（`ｒｍ`）、引号拼接（`r''m`）、反斜杠（`r\m`）、零宽字符都会先被压平成标准形态再匹配黑名单，绕不过去。另外「敏感路径 + 外传工具」同时出现（比如 `cat data/memory.json | nc ...`）会被直接拦下。
 
-**shell 子进程不继承密钥**：只传 `PATH / HOME / LANG` 这几个，`DEEP_SEEK_API_KEY`、`QQ_APP_SECRET` 一律不进子进程，`env` 里看不到。
+**shell 子进程不继承密钥**：只传 `PATH / HOME / LANG` 这几个基础变量。前台命令、`background:true` 的后台命令、`install_package` 的 pnpm 一视同仁，`env` 里都看不到 `DEEP_SEEK_API_KEY` 和 `QQ_APP_SECRET`。
 
-**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许建命名空间时，shell 命令会被包进 `bwrap`——整个根只读、只有工作目录可写、默认断网（装包/拉代码这类才放行网络）、`--clearenv`、父进程死了跟着死，capability 只保留 `CAP_DAC_OVERRIDE`（够写工作目录，拿不到 mount / ptrace 这些能把只读根拆掉的能力）。只读根挡不住读，所以密钥所在目录（默认 `/etc/dafeiyu`）和 `/root/.ssh` 会挂成空 tmpfs，项目根 `.env` 和 `pm2` 的 env 快照会盖成 `/dev/null`。启动日志会如实写「沙箱已启用」或「未隔离（原因）」，并且是真的跑一遍读写探针，不是只看命令在不在。macOS 和 Windows 没有这层。
+（模型 key 只存在于 MCP 子进程本身——`search` / `fetch` 要用它调 DeepSeek 的搜索接口。但沙箱里看不到父进程，`/proc/<ppid>/environ` 这条路也断着。）
 
-**`add_mcp` 有白名单**：只允许 `node tools/*.js` 或已安装的 `npx`（禁止 `-y` 联网拉包），env 字段不接受自定义值。`install_package` 固定带 `--ignore-scripts`，防 postinstall 执行任意代码。
+**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许建命名空间时，shell 命令会被包进 `bwrap`：
+
+- 整个根只读，**只有 `tmp/` 和 `downloads/` 可写**——`data/`、`src/`、`skills/`、`node_modules/` 全只读，沙箱里的进程改不了自己的配置、日志和代码
+- 默认断网（装包/拉代码这类才放行）、`--clearenv`、父进程死了跟着死
+- capability 默认全清；只有当可写目录的属主和运行用户不一致时，才补 `CAP_DAC_OVERRIDE`。**把项目目录 `chown` 给运行用户后，这个 capability 就完全不需要了**
+- 只读根挡不住读，所以密钥所在目录（默认 `/etc/dafeiyu`）和 `/root/.ssh` 挂成空 tmpfs，项目根 `.env` 和 pm2 的 env 快照盖成 `/dev/null`
+
+启动日志会如实写「沙箱已启用」或「未隔离（原因）」，并且是真的跑一遍读写探针。**装了 bwrap 但自检没通过时，命令会被直接拒绝执行**——不会悄悄降级成裸跑。
+
+**`add_mcp` 有白名单**：只允许 `node tools/*.js` 或**已经装好**的 `npx` 包（禁止 `-y` 联网拉包），env 字段不接受自定义值。注册表 `data/mcp-registry.json` 是个文件，所以热加载路径会**再校验一次**同样的规则——不然改了这个文件就能让宿主 spawn 任意命令。`install_package` 固定带 `--ignore-scripts`，且不继承密钥。
 
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
@@ -573,8 +581,9 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
   机器人里发 `/id` 就能拿到自己的 openid。
 - `start_task` / `schedule_task` / `restart_self` 也算高危：前两个能间接调起子 agent 和定时任务去执行命令，后一个能重启服务，不挡住白名单就是摆设
 - 命令黑名单只拦真正危险的：删项目外绝对路径、关机、磁盘操作、读 `.env`、导出环境变量、打印密钥、系统账号、SSH 密钥。它挡不住所有绕过写法，真正的边界是白名单
-- shell 子进程的环境变量只透传 `PATH` 等基础变量和模型 key，**QQ_APP_ID / QQ_APP_SECRET 不会进子进程**
+- shell 子进程的环境变量只透传 `PATH` 等基础变量，**模型 key 和 QQ 密钥都不会进**（`background:true` 和 `install_package` 同样）
 - `.env`、`data/` 对模型的文件写入工具不可写；`.env` 读取被 shell 黑名单拦住
+- **沙箱里只有 `tmp/` 和 `downloads/` 可写**，所以装包走 `install_package`、改代码走 `write_file`、拉代码走 `git_sync`、重启用 `restart_self`——这几条走主进程，不经过沙箱
 - 审计日志在 `data/audit.log`，出问题先看它
 - 别把 `.env` 提交上去，`.gitignore` 已经忽略；仓库里只有 `.env.example`
 

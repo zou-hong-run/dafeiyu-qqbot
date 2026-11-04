@@ -65,13 +65,39 @@ export function sandboxCommand(command, cwd) {
   const network = NEEDS_NETWORK.test(command)
   const isRoot = process.getuid?.() === 0
 
+  // 项目根整体只读，只放开这两个目录。
+  // data/（注册表、审计、记忆）、src/、skills/ 一律只读——
+  // 沙箱里的进程不该有能力改自己的配置、日志和代码，那是目前最短的一条逃逸路。
+  // 装包、改源码请走 install_package / write_file（主进程执行，不受沙箱限制）。
+  const writableDirs = ['tmp', 'downloads']
+    .map((name) => path.join(projectRoot, name))
+    .filter((target) => {
+      try {
+        return fs.existsSync(target)
+      } catch {
+        return false
+      }
+    })
+
+  // 只有当需要写的目录属主不是当前用户时才补 DAC 越权。
+  // 项目目录 chown 给运行用户后，这个 capability 就完全不需要了（更安全）。
+  const needsDacOverride =
+    isRoot &&
+    writableDirs.some((target) => {
+      try {
+        return fs.statSync(target).uid !== process.getuid?.()
+      } catch {
+        return false
+      }
+    })
+
   const argv = [
     'bwrap',
-    // 不用 --unshare-user：bwrap 的 userns 只映射一个 uid，/qq 属 www 的 inode
-    // 不在映射里，CAP_DAC_OVERRIDE 对它们不生效（实测 touch 报 Permission denied）。
-    // 改成丢掉除 DAC 越权之外的所有 capability：能写工作目录，
+    // 不用 --unshare-user：bwrap 的 userns 只映射一个 uid，属主不同的 inode 上
+    // CAP_DAC_OVERRIDE 会失效（实测 touch 报 Permission denied）。
+    // 改成丢掉除 DAC 越权之外的所有 capability：能写指定目录，
     // 但拿不到 mount / ptrace / bpf 这些能把只读根和遮蔽拆掉的能力。
-    ...(isRoot ? ['--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_OVERRIDE'] : []),
+    ...(needsDacOverride ? ['--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_OVERRIDE'] : ['--cap-drop', 'ALL']),
     // 其余命名空间照常隔离；网络按需
     '--unshare-pid',
     '--unshare-ipc',
@@ -79,8 +105,8 @@ export function sandboxCommand(command, cwd) {
     ...(network ? [] : ['--unshare-net']),
     // 整个根只读挂载
     '--ro-bind', '/', '/',
-    // 工作目录单独给读写
-    '--bind', cwd, cwd,
+    // 只有这两个目录可写，其余（含 cwd 本身）都是只读
+    ...writableDirs.flatMap((target) => ['--bind', target, target]),
     // 临时目录、设备、进程信息
     '--tmpfs', '/tmp',
     '--dev', '/dev',
@@ -125,7 +151,7 @@ export function sandboxSelfTest() {
   }
 
   // 光跑 true 只能证明参数合法，证明不了能不能写工作目录 ——
-  // 而「写不了 /qq」正是没补 CAP_DAC_OVERRIDE 时的症状，下载和生成文件全废。
+  // 而「写不了目录」正是没补 CAP_DAC_OVERRIDE 时的症状，下载和生成文件全废。
   const boxed = sandboxCommand('touch .sbx-probe && rm -f .sbx-probe', projectRoot)
   if (!boxed) {
     selfTest = status
@@ -134,10 +160,15 @@ export function sandboxSelfTest() {
 
   try {
     execFileSync(boxed.argv[0], boxed.argv.slice(1), { stdio: 'pipe', timeout: 8000 })
-    selfTest = { available: true, kind: 'bwrap', reason: '' }
+    selfTest = { available: true, installed: true, kind: 'bwrap', reason: '' }
   } catch (error) {
     const raw = String(error?.stderr ?? error?.message ?? error).replace(/\s+/g, ' ').trim()
-    selfTest = { available: false, kind: 'none', reason: `参数自检没通过：${raw.slice(0, 120)}` }
+    selfTest = {
+      available: false,
+      installed: true,
+      kind: 'none',
+      reason: `参数自检没通过：${raw.slice(0, 120)}`,
+    }
   }
 
   return selfTest

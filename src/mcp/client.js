@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { assertMcpCommand } from './mcp-guard.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const builtinServerPath = path.join(projectRoot, 'src', 'mcp-server', 'index.js')
@@ -105,7 +106,6 @@ export async function startMcp({ apiKey, baseURL }) {
     args: [`--max-old-space-size=${Number(process.env.MCP_HEAP_MB || 160)}`, builtinServerPath],
     // 子进程默认只有最小 env，这些开关得显式传
     env: {
-      SHELL_UNRESTRICTED: process.env.SHELL_UNRESTRICTED ?? '',
       PM2_MANAGED: process.env.PM2_MANAGED ?? '',
       PM2_APP_NAME: process.env.PM2_APP_NAME ?? '',
     },
@@ -152,11 +152,21 @@ export async function syncRegistry(force = false) {
     if (!item?.name || !item?.command) continue
     if (connections.has(item.name)) continue
 
+    // 注册表是个可写文件，沙箱里的进程能改它。所以命令必须在这里再校验一次，
+    // 不能只靠 add_mcp 入口那道——热加载路径不校验就等于白名单没做。
+    try {
+      assertMcpCommand(item.command, item.args ?? [], { projectRoot })
+    } catch (error) {
+      console.error(`[mcp] 注册表里的「${item.name}」被拒绝：${error?.message ?? error}`)
+      continue
+    }
+
     const lastFail = failedAt.get(item.name) ?? 0
     if (now - lastFail < FAIL_RETRY_INTERVAL) continue
 
     try {
-      await connect(item.name, item)
+      // env 一律清空：注册表里的 env 字段等于给子进程开任意环境变量
+      await connect(item.name, { ...item, env: {} })
       failedAt.delete(item.name)
     } catch (error) {
       failedAt.set(item.name, Date.now())
