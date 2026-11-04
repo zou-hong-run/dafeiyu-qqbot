@@ -395,6 +395,12 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 **shell 命令先归一化再校验**：全角字符（`ｒｍ`）、引号拼接（`r''m`）、反斜杠（`r\m`）、零宽字符都会先被压平成标准形态再匹配黑名单，绕不过去。另外「敏感路径 + 外传工具」同时出现（比如 `cat data/memory.json | nc ...`）会被直接拦下。
 
+**shell 子进程不继承密钥**：只传 `PATH / HOME / LANG` 这几个，`DEEP_SEEK_API_KEY`、`QQ_APP_SECRET` 一律不进子进程，`env` 里看不到。
+
+**OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许 user namespace 时，shell 命令会被包进 `bwrap`——整个根只读、只有工作目录可写、默认断网（装包/拉代码这类才放行网络）、`--clearenv`、父进程死了跟着死。启动日志会如实写「bwrap 沙箱已启用」或「未隔离（原因）」。**没装或跑不起来就是裸跑，不会假装有隔离**。
+
+**`add_mcp` 有白名单**：只允许 `node tools/*.js` 或已安装的 `npx`（禁止 `-y` 联网拉包），env 字段不接受自定义值。`install_package` 固定带 `--ignore-scripts`，防 postinstall 执行任意代码。
+
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 

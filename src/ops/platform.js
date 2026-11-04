@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import os from 'node:os'
+import { execFileSync } from 'node:child_process'
 
 // 平台差异都收在这里，别散在业务代码里。
 // Linux 上能力最全（ulimit、/proc 精确内存、bwrap 沙箱）；
@@ -15,8 +16,9 @@ export const caps = {
   canUlimit: isLinux,
   // Windows 的 cmd 不认 POSIX 的 `( ) >>` 分组重定向，后台命令要用文件描述符
   posixShell: !isWindows,
-  // OS 级沙箱：Linux 用 bwrap，macOS 用 sandbox-exec，Windows 没有原生的
-  sandbox: isLinux ? 'bwrap' : isMac ? 'seatbelt' : 'none',
+  // OS 级沙箱的实际状态由 sandboxStatus() 探测，这里只留占位。
+  // 之前直接写 isLinux ? 'bwrap' 是错的：那只是「理论上能用」，不是「真的能用」。
+  sandbox: 'pending',
   // /proc 只有 Linux 有
   hasProcfs: isLinux,
 }
@@ -64,6 +66,49 @@ export function memoryInfo() {
 export function describePlatform() {
   const parts = [platform]
   parts.push(caps.canUlimit ? 'ulimit 可用' : '不限制单进程内存')
-  parts.push(caps.sandbox === 'none' ? '无 OS 沙箱' : `${caps.sandbox} 可用`)
+  const sandbox = sandboxStatus()
+  parts.push(sandbox.available ? `${sandbox.kind} 沙箱已启用` : `未隔离（${sandbox.reason}）`)
   return parts.join('｜')
+}
+
+let sandboxProbe = null
+
+/**
+ * 真正探测 OS 级沙箱能不能用：不只看命令在不在，还要真建一次 namespace。
+ * 结果缓存，启动时调一次就够。
+ */
+export function sandboxStatus() {
+  if (sandboxProbe) return sandboxProbe
+
+  if (!isLinux) {
+    sandboxProbe = { available: false, kind: 'none', reason: `非 Linux（${platform}）` }
+    return sandboxProbe
+  }
+
+  try {
+    execFileSync('bwrap', ['--version'], { stdio: 'pipe', timeout: 3000 })
+  } catch {
+    sandboxProbe = { available: false, kind: 'none', reason: '没装 bwrap' }
+    return sandboxProbe
+  }
+
+  try {
+    // 空跑一次：能建出 namespace 才算真的可用，光有二进制不够
+    execFileSync(
+      'bwrap',
+      ['--unshare-user', '--unshare-pid', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--', '/bin/true'],
+      { stdio: 'pipe', timeout: 5000 },
+    )
+  } catch (error) {
+    const raw = String(error?.stderr ?? error?.message ?? error).replace(/\s+/g, ' ').trim()
+    sandboxProbe = {
+      available: false,
+      kind: 'none',
+      reason: `bwrap 装了但跑不起来（常见是内核禁了 user namespace）：${raw.slice(0, 100)}`,
+    }
+    return sandboxProbe
+  }
+
+  sandboxProbe = { available: true, kind: 'bwrap', reason: '' }
+  return sandboxProbe
 }

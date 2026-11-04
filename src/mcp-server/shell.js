@@ -4,6 +4,8 @@ import { execFile, spawn } from 'node:child_process'
 import { caps, isWindows, memoryInfo } from '../ops/platform.js'
 import { budgetFor } from '../ops/budget.js'
 import { inspectCommand } from './shell-guard.js'
+import { sandboxCommand } from './sandbox.js'
+import { sandboxStatus } from '../ops/platform.js'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -228,7 +230,7 @@ function assertSafeCommand(command, { script = false } = {}) {
   // 归一化后再匹配：全角、引号拼接、反斜杠这类写法绕不过去
   const verdict = inspectCommand(command, { unrestricted: UNRESTRICTED })
   if (!verdict.ok) {
-    throw new Error(`已拦截：${verdict.reason}。换成安全的写法再试，或在 .env 设 SHELL_UNRESTRICTED=true 彻底放开。`)
+    throw new Error(`已拦截：${verdict.reason}。换成安全的写法再试。`)
   }
 }
 
@@ -251,11 +253,33 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// shell 里跑的东西不需要任何密钥：只传最基本的几个环境变量。
+// 这样即使没有 bwrap，`env` 也看不到 DEEP_SEEK_API_KEY / QQ_APP_SECRET。
+const SAFE_CHILD_ENV = {
+  PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+  HOME: process.env.HOME ?? '/tmp',
+  LANG: process.env.LANG ?? 'C.UTF-8',
+  TERM: process.env.TERM ?? 'dumb',
+  TMPDIR: process.env.TMPDIR ?? '/tmp',
+  // pnpm / npm 需要这两个才能找到缓存和配置
+  ...(process.env.XDG_CACHE_HOME ? { XDG_CACHE_HOME: process.env.XDG_CACHE_HOME } : {}),
+  ...(process.env.PNPM_HOME ? { PNPM_HOME: process.env.PNPM_HOME } : {}),
+  ...(process.env.NODE_PATH ? { NODE_PATH: process.env.NODE_PATH } : {}),
+}
+
 function runOnce(command, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const startedAt = Date.now()
 
-    execFile(command, { shell: true, cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const opts = { cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024, env: SAFE_CHILD_ENV }
+
+    // 有 bwrap 就包一层：只读根、工作目录可写、默认断网、不继承宿主环境变量
+    const boxed = sandboxCommand(command, cwd)
+    const exec = boxed
+      ? (cb) => execFile(boxed.argv[0], boxed.argv.slice(1), opts, cb)
+      : (cb) => execFile(command, { ...opts, shell: true }, cb)
+
+    exec((error, stdout, stderr) => {
       const elapsed = Date.now() - startedAt
       const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0
 
@@ -271,8 +295,29 @@ function runOnce(command, cwd, timeoutMs) {
   })
 }
 
+// 后台进程回收：background:true 起的进程 unref 之后谁也不管，
+// 一个跑飞的脚本能一直挂着吃内存。超过上限就杀掉。
+const bgProcs = new Map()
+const BG_MAX_AGE_MS = Math.max(5, Number(process.env.BG_MAX_AGE_MINUTES || 60)) * 60_000
+
+function reapBackground() {
+  const now = Date.now()
+  for (const [pid, info] of bgProcs) {
+    if (now - info.at < BG_MAX_AGE_MS) continue
+    try {
+      process.kill(pid, 'SIGTERM')
+      console.log(`[后台] 回收超龄进程 ${pid}（跑了 ${Math.round((now - info.at) / 60000)} 分钟）：${info.command.slice(0, 60)}`)
+    } catch {
+      // 已经自己退了
+    }
+    bgProcs.delete(pid)
+  }
+}
+
 function runInBackground(command, cwd) {
   fs.mkdirSync(logDir, { recursive: true })
+  reapBackground()
+
   const logFile = path.join(logDir, `bg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.log`)
 
   // 用文件描述符接输出，不拼 `( ) >> log`：那是 POSIX 语法，Windows 的 cmd 不认。
@@ -295,6 +340,8 @@ function runInBackground(command, cwd) {
   })
 
   child.unref()
+
+  if (child.pid) bgProcs.set(child.pid, { at: Date.now(), command })
 
   return { pid: child.pid, logFile: path.relative(projectRoot, logFile).split(path.sep).join('/') }
 }
@@ -494,8 +541,8 @@ export const SHELL_TOOLS = [
       '命令失败（退出码非 0）时会自动重试，默认最多 3 次。' +
       '长任务（转码、大文件下载、装大包）传 background:true，会在后台跑并返回 PID 和日志文件，用 tail 看进度。' +
       '执行前会预估内存（按命令里引用的文件大小和类型系数），超了直接拒绝。' +
-      '仍被拦的只有：删根目录、关机、磁盘操作、读 .env / 导出环境变量 / 打印密钥、系统账号与 SSH 密钥。' +
-      '要彻底放开就在 .env 设 SHELL_UNRESTRICTED=true。' +
+      '命令会先归一化再校验（全角、引号拼接、反斜杠都算）：删根目录、关机、磁盘操作、读 .env、' +
+      '导出环境变量、系统账号与 SSH 密钥一律拦下；敏感路径和外传工具同时出现也会拒绝。' +
       '给非零退出码但属正常情况的命令（如 grep 无匹配）建议传 retries: 0。',
     inputSchema: {
       type: 'object',

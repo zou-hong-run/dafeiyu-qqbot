@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { budgetFor, profileName, runtimeState } from '../src/ops/budget.js'
-import { caps, memoryInfo, platform } from '../src/ops/platform.js'
+import { caps, memoryInfo, platform, sandboxStatus } from '../src/ops/platform.js'
 import { cleanWorkspace } from '../src/ops/workspace.js'
 
 test('内存档位按总量划分', () => {
@@ -47,9 +47,18 @@ test('memoryInfo 返回可用的数字', () => {
 test('平台能力探测不抛错', () => {
   assert.ok(['linux', 'darwin', 'win32'].includes(platform) || typeof platform === 'string')
   assert.equal(typeof caps.canUlimit, 'boolean')
-  assert.ok(['bwrap', 'seatbelt', 'none'].includes(caps.sandbox))
   // 只有 Linux 能靠 ulimit 限制内存
   if (platform !== 'linux') assert.equal(caps.canUlimit, false)
+})
+
+test('沙箱状态是探测出来的，不是写死的标签', () => {
+  const sandbox = sandboxStatus()
+  assert.equal(typeof sandbox.available, 'boolean')
+  assert.ok(['bwrap', 'seatbelt', 'none'].includes(sandbox.kind))
+  // 不可用时必须给出原因，不能只说「没有」
+  if (!sandbox.available) assert.ok(sandbox.reason.length > 0, '不可用要给原因')
+  // 非 Linux 一律不可用
+  if (platform !== 'linux') assert.equal(sandbox.available, false)
 })
 
 test('/clean 只清临时目录，绝不动 scripts 和 src', () => {

@@ -58,13 +58,43 @@ async function listSkills() {
   }
 }
 
+// 允许的启动器：node 跑项目内脚本，npx 只能用已装好的包（禁止 -y 联网拉取）
+const ALLOWED_COMMANDS = new Set(['node', 'npx'])
+
+function assertMcpCommand(command, argList) {
+  const cmd = path.basename(String(command ?? '').trim())
+  if (!ALLOWED_COMMANDS.has(cmd)) {
+    throw new Error(
+      `只允许用 node 或 npx 启动 MCP 服务，收到的是「${cmd}」。` +
+        '要跑别的解释器就先写成项目内的 node 脚本。',
+    )
+  }
+
+  if (cmd === 'npx') {
+    if (argList.some((item) => item === '-y' || item === '--yes')) {
+      throw new Error('npx 不允许带 -y/--yes：那会联网下载并执行任意包。请先 install_package 装好，再用 node 启动')
+    }
+  }
+
+  if (cmd === 'node') {
+    const target = argList.find((item) => !item.startsWith('-'))
+    if (!target) throw new Error('node 启动要指定脚本路径，比如 tools/my-tool.js')
+    if (!target.startsWith('tools/') && !target.startsWith('./tools/')) {
+      throw new Error(`node 只能启动项目内 tools/ 下的脚本，收到的是「${target}」`)
+    }
+  }
+}
+
 async function addMcp({ name, command, args = [], env = {} }) {
   const safe = String(name ?? '').trim()
   if (!/^[a-zA-Z0-9_-]{1,40}$/.test(safe)) throw new Error('name 只能包含字母、数字、下划线、短横线，长度 1-40')
-  if (!command) throw new Error('command 必填，比如 npx 或 node')
+  if (!command) throw new Error('command 必填，目前只允许 node 或 npx')
 
   const argList = Array.isArray(args) ? args.map(String) : []
-  const envMap = env && typeof env === 'object' ? Object.fromEntries(Object.entries(env).map(([k, v]) => [String(k), String(v)])) : {}
+  assertMcpCommand(command, argList)
+
+  // env 不让随便塞：外部服务不需要密钥，塞进去等于给子进程开权限
+  const envMap = {}
 
   const registry = readRegistry()
   const entry = { name: safe, command: String(command), args: argList, env: envMap }
@@ -100,7 +130,7 @@ async function installPackage({ package: pkg }) {
   }
 
   try {
-    const { stdout, stderr } = await execFileAsync('pnpm', ['add', name], {
+    const { stdout, stderr } = await execFileAsync('pnpm', ['add', name, '--ignore-scripts'], {
       cwd: projectRoot,
       timeout: 180_000,
       shell: true,
