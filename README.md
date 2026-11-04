@@ -13,7 +13,8 @@
 
 ![群聊演示](assets/demo.png)
 
-> 真实群聊截屏：只有 @ 它或提到「大肥鱼」时才会接话；上图里那个引用气泡是旧版本行为，现在默认关闭。
+> 真实群聊截屏，只截了聊天这一面。只有 @ 它或提到「大肥鱼」时才会接话；上图里的引用气泡是旧版本行为，现在默认关闭。
+> 动手能力（跑命令、发媒体、定时任务、自我扩展）看下面的[能力一览](#能力一览)。
 
 ## 特性
 
@@ -45,6 +46,132 @@
 - **权限隔离**：工具按场景（私聊/群聊）和读写属性管控；子进程只拿 PATH 和模型 key，**不拿 QQ 密钥**
 - **审计日志**：`write_skill` / `add_mcp` / `install_package` / `shell` / `run_script` / `restart_self` / `broadcast` / `send_to_group` / `git_sync` 每次调用都记到 `data/audit.log`（tab 分隔：时间、会话、工具、参数、结果）
 - **按 1.6G 实测内存做了内存预算**：主进程堆 320MB、MCP 子进程 160MB、每条 shell 命令 `ulimit -v 512MB`、`send_file` 单文件 50MB、pm2 RSS 超 420MB 自动重启；命令预估超过「可用 × 75%」直接拒绝，可用低于 300MB 时全部停摆只留救援命令
+
+## 能力一览
+
+从收到一句话到真的动手，中间是这样一条路：
+
+```mermaid
+flowchart LR
+    A["QQ 群 / 私聊"] --> B{"该不该回"}
+    B -->|"@ / 叫名字"| C["组装上下文"]
+    B -->|"自动判断"| C
+    C --> D["DeepSeek"]
+    D -->|"要调工具"| E["权限闸门"]
+    E --> F["本地工具"]
+    E --> G["MCP 子进程"]
+    G --> H["命令校验"]
+    H --> I["内存预估"]
+    I --> J["bwrap 沙箱"]
+    J --> K["结果回模型"]
+    K --> D
+    D -->|"不调工具了"| L["切段发送"]
+    L --> A
+```
+
+它执行一条命令时，各层的分工是这样：
+
+```mermaid
+sequenceDiagram
+    participant U as 群友
+    participant B as 主进程
+    participant M as DeepSeek
+    participant S as MCP 子进程
+    participant X as bwrap
+    U->>B: 大肥鱼，看看日志最后几行
+    B->>M: 上下文 + 工具列表
+    M-->>B: tool_calls shell("tail -20 logs/error.log")
+    B->>B: 权限闸门（白名单）
+    B->>S: MCP 调用
+    S->>S: 命令校验 + 内存预估
+    S->>X: 包裹执行
+    X-->>S: stdout
+    S-->>B: 结果文本
+    B->>M: 工具结果回填
+    M-->>B: 面向用户的回答
+    B->>U: 发送
+```
+
+按维度看它能干什么：
+
+| 维度 | 具体能力 |
+|---|---|
+| **能聊** | 人格化对话、看图（多模态）、连发合并、引用上下文、编号选择题、长回复分段、撤回自己 |
+| **能记** | 短期原文 → 中期摘要 → 长期事实三层，外加情绪记忆、群知识、群画像、目标跟踪、失败复盘，共八种 |
+| **能动手** | 54 个工具：联网搜索、抓网页、跑 shell、读写文件、解析 PDF/Word/Excel、下载、画像素图、搜歌、截视频、发图/语音/视频/文件/卡片 |
+| **能长大** | `write_skill` 写技能、`add_mcp` 热加载新服务、`install_package` 装包、改完自己源码每 30 分钟自动 `git push` |
+| **能主动** | 主动接话（有人问没人答）、回访没结的事、定时任务、后台工单边做边汇报、热点吐槽 |
+| **能自律** | 两道权限闸门、bwrap 沙箱、命令归一化校验、内存预算、审计日志、连续失败自动停下认错 |
+
+### 工具分布
+
+| 分类 | 数量 | 代表 |
+|---|---|---|
+| 本地工具 | 25 | `send_image` `remember` `ask_choice` `start_task` `send_to_group` |
+| 内置 MCP | 29 | `search` `fetch` `shell` `read_document` `find_video` `draw_pixel` |
+| 外部 MCP | 可扩展 | `fortune` `song` `group_recent_speakers`，`add_mcp` 随时加热加载 |
+
+完整清单、每个工具的用途、以及「哪个场景能用哪些」在 **[docs/CAPABILITIES.md](docs/CAPABILITIES.md)**。
+
+### 几个真实用法
+
+示意（不是聊天记录），每种对应一个真实工具：
+
+```
+你：今天北京要带伞吗
+它：北京现在晴，11°C，体感 9°C。今天降水概率 0%，明天 4%，
+    后天 0%——三天都不用带伞，就是早晚温差大，出门多穿一件。
+                                                    ← weather
+
+你：看看服务为什么起不来
+它：（跑了 tail -50 logs/error.log，读出来是端口占用）
+    [ERROR] listen EADDRINUSE :::8080
+    8080 被别的进程占了。要我看是哪个进程吗？
+                                                    ← shell（沙箱内执行）
+
+你：画条鱼送我吧
+它：[图片：像素风的小鱼，64×64]
+                                                    ← draw_pixel
+
+你：这份 PDF 讲了什么
+它：三页，核心是三个结论：……（附页码）
+                                                    ← read_document
+
+你：每天早上八点报一次昨天的群聊
+它：定了，每天 08:00 复盘一次，结果发这个群。
+                                                    ← schedule_task
+
+你：帮我找那首歌
+它：[30 秒试听音频]
+    找到 Night Birds，Sainkho Namtchylak。整首太大，先给你试听段。
+                                                    ← find_music + send_audio
+```
+
+### 斜杠命令
+
+| 命令 | 作用 | 谁能用 |
+|---|---|---|
+| `/id` | 查自己的 openid | 所有人 |
+| `/help` | 命令和工具总览 | 所有人 |
+| `/config` | 当前生效配置（模型、记忆、工具、内存、备份） | 所有人 |
+| `/cost` | token 用量和成本 | 所有人 |
+| `/memory` | 看长期记忆 | 所有人 |
+| `/forget` | 删记忆 | 白名单 |
+| `/tasks` `/task` | 工单列表、详情 | 所有人 |
+| `/kill` | 中止工单 | 白名单 |
+| `/observe` | 看观察模式记下的「本来会插话」 | 所有人 |
+| `/reset` | 清本会话上下文 | 所有人 |
+| `/clean` | 清 tmp 和过期附件 | 白名单 |
+| `/diag` | 依赖和 MCP 连通性自检 | 白名单 |
+| `/总结` `/复盘` | 复盘最近 200 条群消息 | 所有人 |
+
+### 权限边界
+
+54 个工具里有 13 个是高危的，只对 `ADMIN_OPENIDS` 白名单开放（私聊群聊都算）：
+
+`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync`
+
+不在白名单的人，模型连这些工具名都看不见——不是调用被拒，是根本没发过去。
 
 ## 已知限制
 
@@ -264,26 +391,6 @@ node --check src/index.js
 | `PROGRESS_MAX` | 私聊一轮最多报几次进度（3），群里固定 1 次 |
 | `TOOL_DEBUG` | 打每轮请求和工具调用的详细日志（默认关，排查时开） |
 
-## 架构
-
-一句话到一条命令跑完，中间经过哪些层：
-
-```
-QQ WebSocket → 接入层（判断该不该回）→ 预处理（过期/命令/附件）
-  → 对话层（人格+三层记忆+工具列表）→ DeepSeek
-  → 有 tool_calls → 权限闸门 → MCP 子进程 → 命令校验 → 资源预估 → bwrap
-  → 结果回模型 → 回复切段 → 发回 QQ
-```
-
-几个关键设计：
-
-- **工具在独立子进程里**（MCP over stdio），工具崩溃不带走主进程
-- **两道权限闸门**：高危工具不在白名单里，模型连工具列表都看不见；执行前再判一次
-- **沙箱是探测出来的，不是假设的**：启动时用完整参数跑一次读写探针，日志只有「已启用」或「未隔离（原因）」
-- **工单不是子进程**，是主进程里的异步循环，所以并发数直接吃内存预算
-
-完整的调用链、每层边界、数据落盘位置、四个已知缺口，在 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
-
 ## 跨平台
 
 能力按平台自动降级，不用改代码：
@@ -345,7 +452,9 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 
 `data/` 不对外开放读写，cookies 不会被工具读走或发出去。cookies 一般几周过期，失效了就重新导一次。
 
-## 工具清单
+## 工具详解
+
+每个工具的完整参数和限制见 [docs/CAPABILITIES.md](docs/CAPABILITIES.md)，这里说几个容易被误解的行为。
 
 **本地工具**（直接接管当前会话的发送能力）
 
@@ -386,7 +495,9 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 
 群聊里默认以上工具全部可用；要收紧就改 `src/policy.js` 或把 `GROUP_TOOLS=false`。
 
-## 架构
+## 内部机制
+
+逐层的边界、每道闸门的位置、数据落盘在哪、四个已知缺口，都在 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。这里只讲几个设计上值得知道的地方。
 
 **一条消息的旅程**
 
