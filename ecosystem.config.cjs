@@ -1,7 +1,28 @@
 // pm2 部署配置。启动：pm2 start ecosystem.config.cjs
 // 查看状态：pm2 status    日志：pm2 logs dafeiyu
 // 保存开机自启：pm2 save（先执行 pm2 startup）
+const fs = require('node:fs')
 const os = require('node:os')
+
+// 密钥文件放在项目外，pm2 启动时读进来注入环境变量。
+// 项目根的 .env 只做兜底，推荐只保留 /etc/dafeiyu/env。
+function loadEnvFile(file) {
+  try {
+    const text = fs.readFileSync(file, 'utf8')
+    const result = {}
+    for (const line of text.split('\n')) {
+      const matched = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/)
+      if (!matched) continue
+      result[matched[1]] = matched[2].replace(/^["']|["']$/g, '')
+    }
+    return result
+  } catch {
+    return {}
+  }
+}
+
+const externalEnv = loadEnvFile(process.env.APP_ENV_FILE || '/etc/dafeiyu/env')
+const localEnv = loadEnvFile(require('node:path').join(__dirname, '.env'))
 
 function heapFor(totalMB) {
   if (totalMB < 2300) return 320
@@ -49,6 +70,9 @@ module.exports = {
 
       env: {
         NODE_ENV: 'production',
+        // 项目外的密钥优先，项目根的兜底（都没有就靠进程已有环境变量）
+        ...localEnv,
+        ...externalEnv,
       },
     },
   ],

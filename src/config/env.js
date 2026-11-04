@@ -5,7 +5,11 @@ import { personaName, personaPrompt } from '../chat/persona.js'
 import { budgetFor } from '../ops/budget.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-config({ path: path.join(projectRoot, '.env'), quiet: true })
+
+// 密钥文件优先从项目外读（/etc/dafeiyu/env），项目根的 .env 只做兜底。
+// 这样即使有人拿到项目目录的读写权限，也读不到密钥。
+const EXTERNAL_ENV = process.env.APP_ENV_FILE?.trim() || '/etc/dafeiyu/env'
+config({ path: [EXTERNAL_ENV, path.join(projectRoot, '.env')], quiet: true })
 
 function pick(...names) {
   for (const name of names) {
