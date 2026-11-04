@@ -1,3 +1,6 @@
+import dns from 'node:dns/promises'
+import net from 'node:net'
+
 // 出网地址校验：download 和视频工具共用这一份。
 // 目标是「内网和云元数据一律访问不了」——一次 SSRF 就能拿到实例角色的临时凭证，
 // 而 download 是群聊里任何人都能触发的工具。
@@ -73,6 +76,12 @@ function assertHostAllowed(host) {
   }
 }
 
+/** 单个 IP 是否落在内网或元数据段（导出给测试用） */
+export function isBlockedAddress(ip) {
+  const host = normalizeHost(ip)
+  return isBlockedIPv4(host) || isBlockedIPv6(host)
+}
+
 /**
  * 校验一个地址能不能出网。返回 URL 对象，调用方可以直接用。
  * @throws {Error} 格式不对或指向内网时
@@ -94,7 +103,36 @@ export function assertPublicUrl(raw) {
 const DEFAULT_MAX_REDIRECTS = 5
 
 /**
- * 带逐跳校验的 fetch：每一跳都重新过 assertPublicUrl。
+ * 域名解析后逐个 IP 再判一次。
+ * 只校验字面量的话，`127.0.0.1.nip.io`、`localtest.me` 这类解析到内网的域名
+ * 会原样通过——这就是 DNS rebinding。
+ *
+ * 注意：这里和实际建立连接是两次解析，理论上存在 TOCTOU 窗口。
+ * 挡死它需要把连接钉在校验过的 IP 上（自定义 dispatcher），
+ * 或者干脆在宿主机防火墙上封掉元数据地址——那才是硬边界。
+ */
+async function assertResolvesPublic(hostname) {
+  const host = normalizeHost(hostname)
+  if (net.isIP(host)) return // 字面量 IP 已经在 assertHostAllowed 里判过
+
+  let addresses
+  try {
+    addresses = await dns.lookup(host, { all: true })
+  } catch {
+    throw new Error(`域名解析失败：${host}`)
+  }
+
+  if (addresses.length === 0) throw new Error(`域名没有解析结果：${host}`)
+
+  for (const { address } of addresses) {
+    if (isBlockedIPv4(normalizeHost(address)) || isBlockedIPv6(normalizeHost(address))) {
+      throw new Error('不允许访问内网或云元数据地址')
+    }
+  }
+}
+
+/**
+ * 带逐跳校验的 fetch：每一跳都重新过 assertPublicUrl，并检查域名解析结果。
  * 不能直接用 redirect: 'follow'——它只校验第一跳，302 到元数据地址就绕过去了。
  */
 export async function fetchPublic(rawUrl, init = {}, { maxRedirects = DEFAULT_MAX_REDIRECTS } = {}) {
@@ -102,6 +140,8 @@ export async function fetchPublic(rawUrl, init = {}, { maxRedirects = DEFAULT_MA
   const visited = [current.toString()]
 
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    await assertResolvesPublic(current.hostname)
+
     const response = await fetch(current, { ...init, redirect: 'manual' })
 
     if (response.status < 300 || response.status >= 400) return response

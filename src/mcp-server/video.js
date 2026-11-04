@@ -130,9 +130,8 @@ async function findVideo({ url = '', maxSizeMB = DEFAULT_MAX_MB } = {}) {
     throw new Error(
       `这个站给的是分离的音视频流（B 站都是这样），没有能直接播的单文件 mp4，直链发出去会是无声的。\n` +
         `合计约 ${approxMB}MB${minutes ? `，按 15KB/s 下载加合并大约要 ${minutes} 分钟` : ''}。\n` +
-        '要走这条：用 shell 跑 yt-dlp 下载（它会自动合并，需要 ffmpeg），命令示例：\n' +
-        `yt-dlp -f "bv*[height<=480]+ba/b[height<=480]" --merge-output-format mp4 -o "downloads/%(id)s.%(ext)s" "${link}"\n` +
-        '下完再用 send_video 发 downloads 里的 mp4。只有管理员能跑 shell；群友的话让他直接把视频文件发过来。',
+        '这条路现在走不通：shell 在沙箱里，既没有网络也写不了 downloads/。\n' +
+        '可行的做法：让对方把视频文件直接发过来，拿到后再用 ffmpeg 截取片段。',
     )
   }
 
@@ -274,7 +273,7 @@ export const VIDEO_TOOLS = [
       '解析短视频分享链接（B 站 / YouTube / 抖音等 yt-dlp 支持的站点），返回标题、时长、体积和 mp4 直链。' +
       '默认只挑 15MB 以内的版本——这台机器带宽十几 KB/s，大视频要下很久。' +
       '拿到直链先试 send_video 直发；失败再 download 到本地发。' +
-      'B 站这类站点是分离音视频流，会直接报错并给出 yt-dlp 下载合并的命令。' +
+      'B 站这类站点是分离音视频流，会直接报错并说明替代做法。' +
       '用户发来「这个视频发群里」这类链接时用它；需要登录的视频（抖音多数情况）会明确报错。',
     inputSchema: {
       type: 'object',

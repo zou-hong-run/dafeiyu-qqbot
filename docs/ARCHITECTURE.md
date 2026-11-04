@@ -316,6 +316,7 @@ bwrap
 | `install_package` 继承模型 key | 显式传 `env: shellSafeEnv()` |
 | 注册表热加载不校验 command | `syncRegistry()` 复用 `assertMcpCommand()`，env 字段一律清空 |
 | `tools/../../tmp/evil.js` 能过前缀检查 | 改成先 `path.resolve` 再判断是否真在 `tools/` 内 |
+| `redirect: 'follow'` 只校验第一跳，`::ffff:` 地址绕过 | `fetchPublic()` 用 `redirect: 'manual'` 逐跳复核，域名解析结果也过一遍 IP 规则 |
 | 所有 MCP 服务都拿到模型 key | 只有内置服务注入 `baseEnv`，注册进来的第三方服务拿不到 |
 | 断网按命令文本判断 | 删掉 `NEEDS_NETWORK`，`--unshare-net` 无条件加 |
 | `downloads/` 整块可写 | 收成只有 `tmp/` 可写，附件会话隔离不再被绕 |

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { assertPublicUrl } from '../src/mcp-server/net-guard.js'
+import { assertPublicUrl, isBlockedAddress } from '../src/mcp-server/net-guard.js'
 
 // 出网地址校验：一次 SSRF 就能拿到云实例的临时凭证，所以这里只测「该拦的拦住」
 
@@ -58,6 +58,16 @@ test('协议和格式限制', () => {
   blocked('file:///etc/passwd', /只支持/)
   blocked('not a url', /格式不对/)
   blocked('')
+})
+
+test('单个 IP 判定：内网和元数据段', () => {
+  assert.equal(isBlockedAddress('169.254.169.254'), true)
+  assert.equal(isBlockedAddress('100.100.100.200'), true)
+  assert.equal(isBlockedAddress('127.0.0.1'), true)
+  assert.equal(isBlockedAddress('10.1.2.3'), true)
+  assert.equal(isBlockedAddress('::ffff:a9fe:a9fe'), true)
+  assert.equal(isBlockedAddress('8.8.8.8'), false)
+  assert.equal(isBlockedAddress('1.1.1.1'), false)
 })
 
 test('返回的是 URL 对象', () => {
