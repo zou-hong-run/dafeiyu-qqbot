@@ -203,19 +203,21 @@ NFKC（ｒｍ → rm）→ 去引号（r''m → rm）→ 去反斜杠 → 去零
 bwrap
   --cap-drop ALL [--cap-add CAP_DAC_OVERRIDE]  默认不给任何能力
   --unshare-pid --unshare-ipc --unshare-uts   看不见宿主其他进程
-  [--unshare-net]                             命令里没 curl/git/pnpm 就断网
+  --unshare-net                               一律断网，没有例外
   --ro-bind / /                               整个根只读
-  --bind <项目根>/tmp <项目根>/tmp              只有这两个目录可写
-  --bind <项目根>/downloads <项目根>/downloads
+  --bind <项目根>/tmp <项目根>/tmp              只有 tmp/ 可写
   --tmpfs /tmp --dev /dev --proc /proc
   --tmpfs <密钥目录>                           变成空目录
   --ro-bind-try /dev/null <项目根 .env>        读出来是空
-  --ro-bind-try /dev/null /root/.pm2/dump.pm2  pm2 的 env 快照
   --clearenv --setenv PATH ... --setenv HOME /tmp
   --die-with-parent
   --chdir <cwd>
   -- /bin/sh -c "<命令>"
 ```
+
+**断网是无条件的。** 早期版本按命令文本判断（看到 `curl`、`git` 就放行网络），一个 `git status && python3 -c "..."` 就能把整条命令送进宿主网络栈。现在 shell 一律没网——装包走 `install_package`、拉代码走 `git_sync`、下载走 `download`、搜索走 `search`，这些都在宿主侧执行，不需要 shell 联网。
+
+**可写目录只有 `tmp/`。** `downloads/` 也不行：它整块可写就能读别的会话的附件，把「附件按会话隔离」那条承诺打穿。
 
 `CAP_DAC_OVERRIDE` 是有条件的：只有当可写目录的属主和运行用户不一致时才补。把项目目录 `chown` 给运行用户后，这个 capability 完全不需要——也就去掉了「沙箱内能读全盘」这个面。
 
@@ -283,19 +285,15 @@ bwrap
 
 考虑到自建部署的成本，这一步做成可选项，不强制。
 
-### 2. 断网是按命令文本判断的
-
-`NEEDS_NETWORK` 正则只要在命令里看到 `curl`、`git`、`pnpm` 就放行网络。所以「读数据 + 外传」这条路实际靠的是遮蔽和命令黑名单，不是网络隔离。
-
-放到云服务器上还有个具体风险：`169.254.169.254`（阿里云是 `100.100.100.200`）暴露实例角色临时凭证。这条**必须堵在宿主机防火墙**，沙箱管不了。
-
-### 3. macOS / Windows 没有 OS 级沙箱
+### 2. macOS / Windows 没有 OS 级沙箱
 
 只有权限表 + 内存预算。详见 [PLATFORMS.md](PLATFORMS.md)。
 
-### 4. 密钥副本在 pm2 的快照里
+### 3. 密钥副本在 pm2 的快照里
 
-`pm2 save` 会把启动时的 env 写进 `/root/.pm2/dump.pm2`，里面有明文密钥。沙箱里已把它盖成 `/dev/null`，宿主侧靠文件权限（600 root）保护。
+`pm2 save` 会把启动时的 env 写进 `/root/.pm2/dump.pm2`，里面有明文密钥。`/root` 整个被挂成空 tmpfs，沙箱里碰不到；宿主侧靠文件权限（600 root）保护。
+
+### 4. 主进程侧的工具不受沙箱约束
 
 ### 5. 主进程侧的工具不受沙箱约束
 
@@ -313,6 +311,10 @@ bwrap
 | 后台命令继承模型 key | 所有子进程统一用 `shell-env.js` 的 `shellSafeEnv()` |
 | `install_package` 继承模型 key | 显式传 `env: shellSafeEnv()` |
 | 注册表热加载不校验 command | `syncRegistry()` 复用 `assertMcpCommand()`，env 字段一律清空 |
+| `tools/../../tmp/evil.js` 能过前缀检查 | 改成先 `path.resolve` 再判断是否真在 `tools/` 内 |
+| 所有 MCP 服务都拿到模型 key | 只有内置服务注入 `baseEnv`，注册进来的第三方服务拿不到 |
+| 断网按命令文本判断 | 删掉 `NEEDS_NETWORK`，`--unshare-net` 无条件加 |
+| `downloads/` 整块可写 | 收成只有 `tmp/` 可写，附件会话隔离不再被绕 |
 | `SHELL_UNRESTRICTED` 逃生开关 | 整个删掉，连 `inspectCommand` 的 `unrestricted` 参数一起删 |
 | 工作目录整块可写 | 只放开 `tmp/` 和 `downloads/`，`data/`、`src/`、`skills/` 只读 |
 | 自检失败仍报「- 已启用」 | 自检结果区分「没装」和「装了跑不起来」，后者直接拒绝执行命令 |

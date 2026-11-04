@@ -74,7 +74,7 @@ pipx install yt-dlp
 装了 bubblewrap 且内核允许建命名空间，shell 命令会被包进 `bwrap`：
 
 - 整个根只读，只有 `tmp/` 和 `downloads/` 可写
-- 默认断网，只有装包 / 拉代码 / 下载这类命令放行
+- 一律断网：装包走 `install_package`、拉代码走 `git_sync`、下载走 `download`，都在宿主侧执行
 - 不继承宿主环境变量（`--clearenv`）
 - capability 只留 `CAP_DAC_OVERRIDE`，`mount`、`ptrace` 全丢
 - 密钥目录 `/etc/dafeiyu`、`/root/.ssh` 挂成空 tmpfs，项目根 `.env` 和 pm2 的 env 快照盖成 `/dev/null`

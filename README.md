@@ -560,12 +560,13 @@ Router（index.js）          接消息、判断要不要干、建工单、统�
 
 **shell 子进程不继承密钥**：只传 `PATH / HOME / LANG` 这几个基础变量。前台命令、`background:true` 的后台命令、`install_package` 的 pnpm 一视同仁，`env` 里都看不到 `DEEP_SEEK_API_KEY` 和 `QQ_APP_SECRET`。
 
-（模型 key 只存在于 MCP 子进程本身——`search` / `fetch` 要用它调 DeepSeek 的搜索接口。但沙箱里看不到父进程，`/proc/<ppid>/environ` 这条路也断着。）
+（模型 key 只注入**内置** MCP 服务——`search` / `fetch` 要用它调 DeepSeek 的搜索接口。通过 `add_mcp` 注册的第三方服务拿不到它。而沙箱里看不到父进程，`/proc/<ppid>/environ` 这条路也断着。）
 
 **OS 级沙箱（可选，Linux）**：装了 bwrap 并且内核允许建命名空间时，shell 命令会被包进 `bwrap`：
 
-- 整个根只读，**只有 `tmp/` 和 `downloads/` 可写**——`data/`、`src/`、`skills/`、`node_modules/` 全只读，沙箱里的进程改不了自己的配置、日志和代码
-- 默认断网（装包/拉代码这类才放行）、`--clearenv`、父进程死了跟着死
+- 整个根只读，**只有 `tmp/` 可写**——`data/`、`src/`、`skills/`、`node_modules/`、`downloads/` 全只读，沙箱里的进程改不了自己的配置和代码，也读不到别的会话的附件
+- **一律断网**，没有例外：装包走 `install_package`、拉代码走 `git_sync`、下载走 `download`、搜索走 `search`，都在宿主侧执行
+- `--clearenv`、父进程死了跟着死
 - capability 默认全清；只有当可写目录的属主和运行用户不一致时，才补 `CAP_DAC_OVERRIDE`。**把项目目录 `chown` 给运行用户后，这个 capability 就完全不需要了**（可选，见下）
 - 只读根挡不住读，所以敏感位置一律遮空：`/root`、`/home`、`/www`（站点源码）和密钥目录挂成空 tmpfs，`/etc/shadow`、`/etc/gshadow`、`/etc/sudoers` 盖成空设备，项目根 `.env` 也盖上
 

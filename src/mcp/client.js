@@ -26,12 +26,14 @@ let baseEnv = {}
 let builtinSpec = null
 let registryStamp = -1
 
-function childEnv(extra = {}) {
+function childEnv(extra = {}, { withSecrets = false } = {}) {
   const env = {}
   for (const key of SAFE_ENV_KEYS) {
     if (process.env[key] !== undefined) env[key] = process.env[key]
   }
-  return { ...env, ...baseEnv, ...extra }
+  // 模型 key 只给内置服务：search / fetch 要用它调搜索接口。
+  // 注册进来的第三方 MCP 服务不该拿到它——那等于把「能跑命令」升级成「能刷额度」。
+  return { ...env, ...(withSecrets ? baseEnv : {}), ...extra }
 }
 
 async function connect(name, spec) {
@@ -40,7 +42,7 @@ async function connect(name, spec) {
   const transport = new StdioClientTransport({
     command: spec.command,
     args: (spec.args ?? []).map(String),
-    env: childEnv(spec.env ?? {}),
+    env: childEnv(spec.env ?? {}, { withSecrets: name === 'builtin' }),
     stderr: 'inherit',
   })
 

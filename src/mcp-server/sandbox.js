@@ -8,10 +8,12 @@ import { sandboxStatus, defaultEnvFile } from '../ops/platform.js'
 // 没网（除非命令明确需要联网），看不到宿主的环境变量和家目录。
 // bwrap 不可用时返回 null，调用方自己决定降级策略。
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+// 沙箱里的命令一律断网。
+// 装包走 install_package、拉代码走 git_sync、下载走 download、搜索走 search——
+// 这些都在宿主侧执行，shell 不需要网。所以不再按命令文本猜「这条要不要联网」：
+// 那个判断只要被一个词触发（`git status && ...`），整条命令就拿到宿主完整网络栈。
 
-// 装包、拉代码这类必须有网，其余一律断网
-const NEEDS_NETWORK = /\b(pnpm|npm|yarn|npx|pip3?|apt|apt-get|yum|dnf|apk|brew|git|curl|wget)\b/
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 // `--ro-bind / /` 只能挡写，挡不住读。bwrap 默认一个 capability 都不给，
 // 但下面要补 DAC 越权让 root 能写属 www 的项目目录，所以读取面得单独挡住：
@@ -67,14 +69,13 @@ export function sandboxCommand(command, cwd) {
   const status = sandboxStatus()
   if (!status.available) return null
 
-  const network = NEEDS_NETWORK.test(command)
   const isRoot = process.getuid?.() === 0
 
-  // 项目根整体只读，只放开这两个目录。
-  // data/（注册表、审计、记忆）、src/、skills/ 一律只读——
+  // 沙箱里只有 tmp/ 可写。downloads/ 不行——它整块可写就能读到别的会话的附件，
+  // 把「附件按会话隔离」那条承诺打穿。下载和产出物都走宿主侧工具，不需要 shell 写。
+  // data/（注册表、审计、记忆）、src/、skills/ 同样只读：
   // 沙箱里的进程不该有能力改自己的配置、日志和代码，那是目前最短的一条逃逸路。
-  // 装包、改源码请走 install_package / write_file（主进程执行，不受沙箱限制）。
-  const writableDirs = ['tmp', 'downloads']
+  const writableDirs = ['tmp']
     .map((name) => path.join(projectRoot, name))
     .filter((target) => {
       try {
@@ -103,14 +104,14 @@ export function sandboxCommand(command, cwd) {
     // 改成丢掉除 DAC 越权之外的所有 capability：能写指定目录，
     // 但拿不到 mount / ptrace / bpf 这些能把只读根和遮蔽拆掉的能力。
     ...(needsDacOverride ? ['--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_OVERRIDE'] : ['--cap-drop', 'ALL']),
-    // 其余命名空间照常隔离；网络按需
+    // 其余命名空间照常隔离，网络一律断
     '--unshare-pid',
     '--unshare-ipc',
     '--unshare-uts',
-    ...(network ? [] : ['--unshare-net']),
+    '--unshare-net',
     // 整个根只读挂载
     '--ro-bind', '/', '/',
-    // 只有这两个目录可写，其余（含 cwd 本身）都是只读
+    // 只有 tmp/ 可写，其余（含 cwd 本身）都是只读
     ...writableDirs.flatMap((target) => ['--bind', target, target]),
     // 临时目录、设备、进程信息
     '--tmpfs', '/tmp',
@@ -133,11 +134,6 @@ export function sandboxCommand(command, cwd) {
   ]
 
   return { argv, shell: false }
-}
-
-/** 当前命令会不会因为断网而失败（给提示用） */
-export function commandNeedsNetwork(command) {
-  return NEEDS_NETWORK.test(String(command ?? ''))
 }
 
 let selfTest = null

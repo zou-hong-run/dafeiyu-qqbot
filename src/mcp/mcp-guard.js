@@ -3,24 +3,42 @@ import path from 'node:path'
 
 // MCP 服务启动命令的白名单。add_mcp 和注册表热加载必须共用这一份，
 // 否则「工具入口管住了、热加载没管」就等于白名单形同虚设。
+//
+// 关键：所有路径必须先 resolve 再判断。只看前缀的话，
+// `tools/../../tmp/evil.js` 照样以 `tools/` 开头——而 tmp/ 是沙箱唯一可写的目录。
 
 const ALLOWED_COMMANDS = new Set(['node', 'npx'])
 
+function insideDir(root, target) {
+  const base = path.resolve(root)
+  const resolved = path.resolve(target)
+  if (resolved === base) return resolved
+  return resolved.startsWith(base + path.sep) ? resolved : null
+}
+
 function hasInstalledPackage(name, projectRoot) {
   if (!projectRoot || !name) return false
-  const clean = String(name).replace(/^npx\s+/, '')
-  const candidates = [
-    path.join(projectRoot, 'node_modules', clean, 'package.json'),
-    path.join(projectRoot, 'node_modules', '.bin', clean),
-  ]
-  return candidates.some((target) => fs.existsSync(target))
+
+  const clean = String(name)
+  // 包名里出现 .. 或反斜杠就是想跳出 node_modules
+  if (clean.includes('..') || clean.includes('\\')) return false
+  if (!/^@?[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(clean)) return false
+
+  const nodeModules = path.join(projectRoot, 'node_modules')
+  const dir = insideDir(nodeModules, path.join(nodeModules, clean))
+  if (!dir) return false
+
+  return (
+    fs.existsSync(path.join(dir, 'package.json')) ||
+    fs.existsSync(path.join(nodeModules, '.bin', clean))
+  )
 }
 
 /**
  * 校验一条 MCP 启动命令。
  * @param {string} command 可执行文件名
  * @param {string[]} argList 参数
- * @param {{ projectRoot?: string }} options 传了 projectRoot 才会校验 npx 包是否已安装
+ * @param {{ projectRoot?: string }} options 传了 projectRoot 才能做路径归一化（生产环境必须传）
  * @throws {Error} 不合法时抛错
  */
 export function assertMcpCommand(command, argList = [], { projectRoot } = {}) {
@@ -41,29 +59,29 @@ export function assertMcpCommand(command, argList = [], { projectRoot } = {}) {
     const pkg = args.find((item) => !item.startsWith('-'))
     if (!pkg) throw new Error('npx 要指定包名')
     if (projectRoot && !hasInstalledPackage(pkg, projectRoot)) {
-      throw new Error(`包「${pkg}」还没装。先用 install_package 装上，再注册 MCP 服务`)
+      throw new Error(`包「${pkg}」还没装，或者不在 node_modules 里。先用 install_package 装上`)
     }
     return
   }
 
   const target = args.find((item) => !item.startsWith('-'))
   if (!target) throw new Error('node 启动要指定脚本路径，比如 tools/my-tool.js')
+
+  if (projectRoot) {
+    // 归一化后必须真的落在项目 tools/ 里，`tools/../../tmp/x.js` 这类写法过不去
+    const toolsDir = path.join(projectRoot, 'tools')
+    const resolved = insideDir(toolsDir, path.resolve(projectRoot, target))
+    if (!resolved) {
+      throw new Error(`node 只能启动项目内 tools/ 目录下的脚本，收到的是「${target}」`)
+    }
+    return
+  }
+
+  // 没给项目根时退化成保守检查：至少挡住 `..` 和绝对路径
+  if (path.isAbsolute(target) || target.split(/[\\/]/).includes('..')) {
+    throw new Error(`脚本路径不能跳出项目 tools/，收到的是「${target}」`)
+  }
   if (!target.startsWith('tools/') && !target.startsWith('./tools/')) {
     throw new Error(`node 只能启动项目内 tools/ 下的脚本，收到的是「${target}」`)
-  }
-}
-
-/** 注册表条目是否合法（文件被篡改时能挡住） */
-export function isValidRegistryEntry(item, projectRoot) {
-  if (!item || typeof item !== 'object') return false
-  if (typeof item.name !== 'string' || !item.name.trim()) return false
-  if (typeof item.command !== 'string' || !item.command.trim()) return false
-  if (item.args !== undefined && !Array.isArray(item.args)) return false
-
-  try {
-    assertMcpCommand(item.command, item.args ?? [], { projectRoot })
-    return true
-  } catch {
-    return false
   }
 }

@@ -570,9 +570,10 @@ export const SHELL_TOOLS = [
     name: 'shell',
     description:
       '在服务器上执行 shell 命令，用于跑脚本、查看文件、跑测试、处理数据这类一次性操作。' +
-      '沙箱里只有 tmp/ 和 downloads/ 可写，项目其他目录（data/、src/、skills/、node_modules/）都是只读：' +
-      '装包用 install_package，改代码用 write_file / edit_file，拉代码用 git_sync，重启用 restart_self，' +
-      '别用这条命令硬来——写不进去会直接报 Permission denied。' +
+      '沙箱里只有 tmp/ 可写，其他目录全只读，而且默认没有网络：' +
+      '装包用 install_package，改代码用 write_file / edit_file，拉代码用 git_sync，' +
+      '下载用 download，联网查东西用 search / fetch，重启用 restart_self。' +
+      '用这条命令硬来做上面这些事会直接报错（Permission denied 或网络不可达）。' +
       '命令失败（退出码非 0）时会自动重试，默认最多 3 次。' +
       '长任务（转码、大文件下载、装大包）传 background:true，会在后台跑并返回 PID 和日志文件，用 tail 看进度。' +
       '执行前会预估内存（按命令里引用的文件大小和类型系数），超了直接拒绝。' +
