@@ -5,7 +5,7 @@ import { config } from 'dotenv'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { budgetFor, systemSnapshot } from '../ops/budget.js'
+import { systemSnapshot } from '../ops/budget.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 config({ path: path.join(projectRoot, '.env'), quiet: true })

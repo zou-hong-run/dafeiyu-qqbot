@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from '../config/env.js'
-import { isAdmin, isToolAllowed } from '../config/policy.js'
+import { isToolAllowed } from '../config/policy.js'
 import { formatUsage } from '../ops/usage.js'
 import { testVision } from '../chat/deepseek.js'
 import { audioSenderFor, fileSenderFor, imageSenderFor, videoSenderFor } from '../channel/media.js'
@@ -14,14 +14,7 @@ import { configSummary, helpText } from './display.js'
 import { killTask, startTask as launchTask, taskStatus } from '../tasks/task-runner.js'
 import { cleanWorkspace, workspaceStats } from '../ops/workspace.js'
 import { callTool } from '../mcp/client.js'
-import {
-  broadcastSenderFor,
-  gitSyncFor,
-  groupSenderFor,
-  groupsReaderFor,
-  notifierFor,
-  toolsForScope,
-} from './factories.js'
+import { broadcastSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, toolsForScope } from './factories.js'
 
 // 命令注册表：每项自己判断匹配、自己处理权限、自己回话。
 // handleMessage 只负责「按顺序问一遍，谁认领谁执行」，不再堆一长串 if。
