@@ -1236,6 +1236,22 @@ const IMAGE_MIME = {
   '.bmp': 'image/bmp',
 }
 
+// 按文件头判断真实图片格式：扩展名不可信
+function sniffMime(buffer) {
+  if (!buffer || buffer.length < 12) return ''
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png'
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif'
+  if (buffer[0] === 0x42 && buffer[1] === 0x4d) return 'image/bmp'
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  return ''
+}
+
 // 本地图片转成 OpenAI 多模态格式的 data URL
 function toImagePart(file) {
   try {
@@ -1245,12 +1261,15 @@ function toImagePart(file) {
     const stat = fs.statSync(full)
     if (stat.size > MAX_IMAGE_BYTES) return null
 
-    const mime = IMAGE_MIME[path.extname(full).toLowerCase()]
+    // QQ 给的扩展名经常和真实内容对不上（实测 .png 里装的是 JPEG），
+    // 光按后缀贴 mime 会被模型当成坏图拒掉，所以先按文件头定 mime，认不出再退回后缀
+    const buffer = fs.readFileSync(full)
+    const mime = sniffMime(buffer) || IMAGE_MIME[path.extname(full).toLowerCase()]
     if (!mime) return null
 
     return {
       type: 'image_url',
-      image_url: { url: `data:${mime};base64,${fs.readFileSync(full).toString('base64')}` },
+      image_url: { url: `data:${mime};base64,${buffer.toString('base64')}` },
     }
   } catch {
     return null

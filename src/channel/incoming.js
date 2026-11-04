@@ -164,8 +164,14 @@ export async function describeInbound(items, scopeKey = '') {
     )
   }
 
+  // 必须返回对象：调用方取的是 described.text / described.images，
+  // 之前这里直接 return 字符串，导致 images 永远是 undefined，图片下载了却从没喂给模型
   const text = lines.join('\n')
-  return `\n\n（对方还发了 ${items.length} 个附件）\n${text}`.slice(0, MAX_TEXT_CHARS * 4)
+  return {
+    text: `\n\n（对方还发了 ${items.length} 个附件）\n${text}`.slice(0, MAX_TEXT_CHARS * 4),
+    images,
+    voice: voiceCount,
+  }
 }
 
 // 入站附件按 mtime 定期清理：2G 机器磁盘也不富裕，收进来的图/语音不该永久堆积
