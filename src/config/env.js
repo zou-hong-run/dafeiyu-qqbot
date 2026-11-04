@@ -2,6 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from 'dotenv'
 import { personaName, personaPrompt } from '../chat/persona.js'
+import { budgetFor } from '../ops/budget.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 config({ path: path.join(projectRoot, '.env'), quiet: true })
@@ -47,6 +48,8 @@ if (appSecret.length < 16) {
   process.exit(1)
 }
 
+const budget = budgetFor()
+
 const customPrompt = process.env.SYSTEM_PROMPT?.trim()
 
 export const env = {
@@ -81,7 +84,7 @@ export const env = {
   taskReportInterval: positiveNumber('TASK_REPORT_INTERVAL', 60) * 1000,
   taskMaxReports: Math.floor(positiveNumber('TASK_MAX_REPORTS', 3)),
   // 2G 内存：每个 Worker 都是一个跑着 ReAct 循环的会话，同时开太多会直接 OOM
-  taskConcurrency: Math.floor(positiveNumber('TASK_CONCURRENCY', 2)),
+  taskConcurrency: Math.floor(positiveNumber('TASK_CONCURRENCY', budget.taskConcurrency)),
   // 一轮对话最多调几轮工具。默认 12 够用；设太大在 2G 机器上会把内存和额度一起吃穿
   maxToolRounds: Math.floor(positiveNumber('MAX_TOOL_ROUNDS', 12)),
   maxOutputTokens: Math.floor(positiveNumber('MAX_OUTPUT_TOKENS', 8192)),

@@ -5,6 +5,7 @@ import { config } from 'dotenv'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { budgetFor, systemSnapshot } from '../ops/budget.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 config({ path: path.join(projectRoot, '.env'), quiet: true })
@@ -324,6 +325,14 @@ const TOOLS = [
     },
   },
   {
+    name: 'system_info',
+    description:
+      '查这台机器现在什么状况：内存总量和可用量、CPU 核数和负载、磁盘剩余、以及当前的能力上限' +
+      '（主进程堆多大、单条命令能占多少内存、单文件多大、同时能跑几个工单）。' +
+      '要跑重命令（装包、转码、批量处理）之前先用它看一眼，别等被拦了才知道内存不够。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'now',
     description: '获取当前日期时间与星期。用户问「今天几号」「现在几点」时使用。',
     inputSchema: { type: 'object', properties: {} },
@@ -391,6 +400,7 @@ const TOOLS = [
 const HANDLERS = {
   search,
   fetch: fetchPage,
+  system_info: async () => systemSnapshot(projectRoot),
   now,
   weather,
   exchange,

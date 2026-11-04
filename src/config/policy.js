@@ -49,6 +49,7 @@ export const TOOL_POLICY = {
   search: READ_ONLY,
   fetch: READ_ONLY,
   now: READ_ONLY,
+  system_info: READ_ONLY,
   weather: READ_ONLY,
   exchange: READ_ONLY,
   calc: READ_ONLY,

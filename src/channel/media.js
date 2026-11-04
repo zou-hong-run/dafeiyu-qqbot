@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { segment } from 'qq-official-bot'
 import { env } from '../config/env.js'
+import { budgetFor } from '../ops/budget.js'
 import { bot } from '../bot.js'
 import { deliver, postMessage } from './sender.js'
 
@@ -306,7 +307,7 @@ export function videoSenderFor(event, send = (payload) => deliver(event, payload
 const FILE_BLOCKED = ['.env', 'data/', 'node_modules/', '.git/', '.ssh/']
 
 // 上传前整个文件要读进内存（SDK 还要再复制一份），2G 内存的机器经不起 200MB
-const MAX_SEND_BYTES = Number(process.env.MAX_SEND_FILE_MB || 50) * 1024 * 1024
+const MAX_SEND_BYTES = Number(process.env.MAX_SEND_FILE_MB || budgetFor().maxSendFileMB) * 1024 * 1024
 const incomingRoot = path.join(projectRoot, 'downloads', 'incoming')
 
 // 入站附件按会话分目录存放，发送时也要守住这个边界：

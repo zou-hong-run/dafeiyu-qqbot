@@ -24,6 +24,7 @@ import { dueFollowUps, flushSituations, markFollowedUp } from './memory/situatio
 import { generateHotTake } from './engage/hot-takes.js'
 import { listBackups, runBackup } from './ops/backup.js'
 import { caps, describePlatform, memoryInfo } from './ops/platform.js'
+import { budgetFor } from './ops/budget.js'
 import { flushTodos } from './chat/todos.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
 import { putChoice, resolveChoice, choiceText } from './chat/choices.js'
@@ -1674,6 +1675,7 @@ if (env.toolsEnabled) {
 function reportMemory() {
   try {
     const info = memoryInfo()
+    const budget = budgetFor(info.totalMB)
     const total = Math.round(info.totalMB)
     const available = Math.round(info.availableMB)
     const swap = Math.round(info.swapTotalMB ?? 0)
@@ -1685,7 +1687,7 @@ function reportMemory() {
     )
     console.log(`[平台] ${describePlatform()}`)
     console.log(
-      `[内存] 预算：主进程堆 ${process.env.MAIN_HEAP_MB || 320}MB + MCP ${process.env.MCP_HEAP_MB || 160}MB，` +
+      `[内存] 预算（${budget.profile} 档）：主进程堆 ${process.env.MAIN_HEAP_MB || budget.mainHeapMB}MB + MCP ${process.env.MCP_HEAP_MB || budget.mcpHeapMB}MB，` +
         `${caps.canUlimit ? `单条命令上限 ${process.env.SHELL_ULIMIT_MB || 512}MB` : '不限制单条命令内存（该平台无 ulimit）'}，命令预估安全线 ${Math.max(120, Math.floor(available * 0.75))}MB，` +
         `同时最多 ${env.taskConcurrency} 个工单`,
     )

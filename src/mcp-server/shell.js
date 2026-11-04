@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { caps, isWindows, memoryInfo } from '../ops/platform.js'
+import { budgetFor } from '../ops/budget.js'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -44,9 +45,10 @@ const HEAVY_COMMAND =
 // 视频转码是最容易把 2G 小机器打死的操作：一个 ffmpeg 能吃 700MB，
 // 超时后模型还可能重试，几个进程叠起来就 OOM
 const VIDEO_PROCESS = /\b(ffmpeg|ffprobe|avconv)\b/i
-const VIDEO_NEED_MB = 700
+const budget = budgetFor()
+const VIDEO_NEED_MB = Math.max(700, Math.round(budget.heavyNeedMB * 1.6))
 const VIDEO_ULIMIT_MB = 480
-const DEFAULT_ULIMIT_MB = Number(process.env.SHELL_ULIMIT_MB || 512)
+const DEFAULT_ULIMIT_MB = Number(process.env.SHELL_ULIMIT_MB || budget.shellUlimitMB)
 
 const MEMORY_RESCUE =
   /\b(swapon|swapoff|mkswap|fallocate|fstab|sysctl|free|df|du|ps|top|htop|kill|pkill|reboot)\b/i
