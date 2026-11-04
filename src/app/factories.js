@@ -111,15 +111,7 @@ export function broadcastSenderFor(event) {
     if (!text) throw new Error('缺少要通报的内容')
     if (text.length > 2000) throw new Error(`内容 ${text.length} 字，太长了，压到 2000 字以内`)
 
-    let ids = []
-    try {
-      ids = fs
-        .readdirSync(path.join(dataDir, 'groups'))
-        .filter((name) => name.endsWith('.jsonl'))
-        .map((name) => name.slice(0, -6))
-    } catch {
-      ids = []
-    }
+    let ids = groupLog.listGroups().map((group) => group.id)
 
     const only = Array.isArray(input?.targets) ? input.targets.map(String) : []
     if (only.length > 0) ids = ids.filter((id) => only.includes(id))
@@ -166,19 +158,9 @@ export function broadcastSenderFor(event) {
 }
 
 // 列出机器人待过的群，模型用它找 groupId
-
-
 export function groupsReaderFor() {
   return async () => {
-    let ids = []
-    try {
-      ids = fs
-        .readdirSync(path.join(dataDir, 'groups'))
-        .filter((name) => name.endsWith('.jsonl'))
-        .map((name) => name.slice(0, -6))
-    } catch {
-      ids = []
-    }
+    const ids = groupLog.listGroups().map((group) => group.id)
 
     if (ids.length === 0) return '还没有群聊记录，等群里有消息进来才有。'
 

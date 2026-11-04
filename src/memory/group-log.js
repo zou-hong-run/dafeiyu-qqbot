@@ -70,6 +70,29 @@ export function recent(groupId, limit = 200) {
   return load(groupId).slice(-limit)
 }
 
+/**
+ * 列出待过的群，附带记录文件的最后修改时间。
+ * 返回 [] 表示还没有任何群记录。
+ */
+export function listGroups() {
+  let names = []
+  try {
+    names = fs.readdirSync(logDir).filter((name) => name.endsWith('.jsonl'))
+  } catch {
+    return []
+  }
+
+  return names.map((name) => {
+    let mtime = 0
+    try {
+      mtime = fs.statSync(path.join(logDir, name)).mtimeMs
+    } catch {
+      // 文件刚被删掉之类，按 0 处理
+    }
+    return { id: name.slice(0, -6), mtime }
+  })
+}
+
 // 按 msg_idx（REFIDX_xxx）反查被引用的那条消息
 export function findByRef(groupId, refId) {
   if (!refId) return null

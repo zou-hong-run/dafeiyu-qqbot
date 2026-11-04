@@ -16,6 +16,9 @@ const KEYWORDS = new Set([
   'async', 'import', 'export', 'const', 'let', 'var', 'class', 'super', 'extends',
 ])
 
+// Node 内置模块的常用别名：用了却没 import，就是运行期 ReferenceError
+const NODE_MODULE_ALIASES = ['fs', 'path', 'os', 'url', 'crypto', 'util', 'child_process', 'stream']
+
 const GLOBALS = new Set([
   'console', 'process', 'require', 'Math', 'JSON', 'Object', 'Array', 'String', 'Number',
   'Boolean', 'Date', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet', 'Buffer', 'parseInt',
@@ -117,7 +120,6 @@ function collectExports(source) {
 
 const files = collectFiles(srcDir)
 const exportsOf = new Map()
-
 for (const file of files) {
   exportsOf.set(file, collectExports(fs.readFileSync(file, 'utf8')))
 }
@@ -138,6 +140,15 @@ for (const file of files) {
     const name = matched[1]
     if (KEYWORDS.has(name) || GLOBALS.has(name) || defined.has(name)) continue
     problems.push(`${rel}: 调用了未定义的 ${name}()`)
+  }
+
+  // ③ 用了 Node 内置模块的别名但没 import。
+  // ① 那条只抓 `name(` 形式，`fs.readdirSync(...)` 这种成员访问会整个漏掉，
+  // 一旦漏了就是运行期 ReferenceError，被 catch 吞掉后表现成「功能静默失效」。
+  for (const alias of NODE_MODULE_ALIASES) {
+    if (defined.has(alias)) continue
+    if (!new RegExp(`(?<![.\\w$])${alias}\\s*\\.`).test(src)) continue
+    problems.push(`${rel}: 用了 ${alias}. 但没有 import`)
   }
 
   // ② import 的名字目标模块没导出

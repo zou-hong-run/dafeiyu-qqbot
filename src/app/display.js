@@ -9,14 +9,9 @@ import { budgetFor } from '../ops/budget.js'
 export function configSummary() {
   const tools = getTools()
   const mem = (() => {
-    try {
-      const lines = fs.readFileSync('/proc/meminfo', 'utf8')
-      const total = Number(lines.match(/MemTotal:\s+(\d+)/)?.[1] ?? 0) / 1024
-      const available = Number(lines.match(/MemAvailable:\s+(\d+)/)?.[1] ?? 0) / 1024
-      return `总 ${Math.round(total)}MB / 可用 ${Math.round(available)}MB`
-    } catch {
-      return '读不到（非 Linux）'
-    }
+    const info = memoryInfo()
+    if (!info?.totalMB) return '读不到（非 Linux 且没有系统信息）'
+    return `总 ${Math.round(info.totalMB)}MB / 可用 ${Math.round(info.availableMB)}MB`
   })()
 
   const backups = listBackups(3)

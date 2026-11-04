@@ -85,15 +85,8 @@ export function progressReporter(event) {
 export async function runProactiveScan() {
   if (!env.proactive.enabled) return
 
-  let ids = []
-  try {
-    ids = fs
-      .readdirSync(path.join(dataDir, 'groups'))
-      .filter((name) => name.endsWith('.jsonl'))
-      .map((name) => name.slice(0, -6))
-  } catch {
-    return
-  }
+  const ids = groupLog.listGroups().map((group) => group.id)
+  if (ids.length === 0) return
 
   for (const groupId of ids) {
     try {
@@ -193,12 +186,7 @@ export function pickActiveGroup() {
   if (env.hotTake.target) return env.hotTake.target
 
   try {
-    const dir = path.join(dataDir, 'groups')
-    const files = fs
-      .readdirSync(dir)
-      .filter((name) => name.endsWith('.jsonl'))
-      .map((name) => ({ id: name.slice(0, -6), mtime: fs.statSync(path.join(dir, name)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime)
+    const files = groupLog.listGroups().sort((a, b) => b.mtime - a.mtime)
 
     // 太久的群不提，说明没人说话了
     if (files.length === 0) return ''
