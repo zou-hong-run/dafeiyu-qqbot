@@ -289,6 +289,7 @@ logs/                 pm2 日志
 - 想查「21:27 那条消息为什么自己发了」，读 logs/out.log 只看到凌晨的开头部分 → read_file 对日志是从头读且显示上限约 4000 字，98KB 的 out.log 尾部根本读不到；这一轮工具表里又没挂 shell，没法 grep → 查日志尾部或按关键词找，必须用 shell 跑 tail/grep；没有 shell 的轮次就别硬读日志，直接说看不到并请对方贴原文
 - speak 传方言音色 zh-CN-liaoning-XiaobeiNeural 报「音色名不合法」，但报错里列的可选清单又包含这个名字 → src/channel/media.js 的 VOICE_PATTERN 只认「zh-CN-XxxNeural」三段，带地区段（liaoning/shaanxi）的四段名过不了 → 已改成 `^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,10}){1,2}-[a-zA-Z]+Neural# 万能大肥鱼 · 自身能力说明
 - run_script 里调 edge_tts 报 socket.gaierror 域名解析失败，往 downloads/ 写文件报 Read-only file → run_script/shell 的沙箱没有网（edge-tts 这类在线 TTS 用不了），而且只有 tmp/ 可写 → 要合成语音用本地 espeak-ng（-v zh 中文最好听，-s 150 左右），产物写 tmp/，然后 send_audio 直接传「tmp/xxx.mp3」就能发出去，不必挪到 downloads/
+- shell 里跑 git archive / git status 报 fatal: detected dubious ownership in reposit → /qq 目录属主是 www，当前 shell 用户不是它，git 的 safe.directory 校验拦下 → 命令里加 -c 参数：git -c safe.directory=/qq archive ... 或 git -c safe.directory=/qq status，别改全局 config
 
 ## 我是什么
 
