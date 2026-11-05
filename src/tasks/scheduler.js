@@ -285,6 +285,14 @@ async function fire(task, options = {}) {
     if (result) {
       // 结果里只留正文：把「定时任务 id｜cron」这种内部前缀去掉，别让它出现在群聊里
       const text = String(result).trim()
+
+      // 约定：任务无事可说时回空串或 SILENT（可带括号），调度层直接吞掉不推送
+      if (!text || /^[\[【(（]?\s*silent\s*[\]】)）]?$/i.test(text)) {
+        task.lastStatus = `${task.lastStatus}（静默：无变化未推送）`.slice(0, 160)
+        persist()
+        return
+      }
+
       const outcome = await deliver(task, text, options)
       if (outcome.skipped) {
         task.lastStatus = outcome.disabled
