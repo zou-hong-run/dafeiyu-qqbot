@@ -31,6 +31,66 @@ export function pruneToolOutput(text, limit = SPILL_LIMIT) {
   return `${head}\n\n…（中间省略 ${omitted} 字符；需要完整内容请换更精确的命令，或用 read_file 分段读取）…\n\n${tail}`
 }
 
+// 出站清理：去掉模型自我指涉的元说明，以及机械重复的整句。
+// 只处理句首和连续重复，代码块、链接、引用一律原样保留。
+const META_PREFIX =
+  /^(?:作为(?:一个|一名)?\s*(?:AI|人工智能|语言模型|大模型|智能助手|助手)[^。！？，,\n]{0,24}[。！？，,]\s*|我是(?:一个|一名)?\s*(?:AI|人工智能|语言模型|助手)[^。！？，,\n]{0,10}[。！？，,]\s*)/
+
+function dedupeSentences(text) {
+  const parts = String(text).split(/(?<=[。！？!?\n])/)
+  const out = []
+
+  for (const part of parts) {
+    const key = part.trim()
+    if (!key) {
+      out.push(part)
+      continue
+    }
+    // 只去掉紧挨着的完全重复，不碰正常语气词
+    if (out.length > 0 && out[out.length - 1].trim() === key) continue
+    out.push(part)
+  }
+
+  return out.join('')
+}
+
+/**
+ * 回复文本的最后一道清理，在 stripToolMarkup 之后跑。
+ * 返回空字符串表示清完之后什么都不剩，调用方应该换一条兜底话术。
+ */
+export function cleanReply(text) {
+  let value = String(text ?? '').trim()
+  if (!value) return ''
+
+  // 代码块先摘出来，免得被下面的规则动到
+  const blocks = []
+  value = value.replace(/```[\s\S]*?```/g, (matched) => {
+    blocks.push(matched)
+    return `\u0000CODE${blocks.length - 1}\u0000`
+  })
+
+  // 开头的「作为一个AI…」这类自我说明，念出来很出戏
+  let guard = 0
+  while (META_PREFIX.test(value) && guard < 3) {
+    value = value.replace(META_PREFIX, '')
+    guard += 1
+  }
+
+  value = dedupeSentences(value)
+
+  value = value.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => blocks[Number(index)] ?? '')
+  return value.trim()
+}
+
+// 中括号表情名（[旺柴]、[吃瓜]）在 QQ 官方 API 里不会渲染成表情，只会原样显示成文字。
+// 出站时不删，但要能识别出来提示模型别这么写。
+export const BRACKET_FACE_PATTERN = /\[[^\]\s]{1,6}\]/g
+
+/** 回复出站的统一收尾：先去工具标记，再做清理 */
+export function finalizeReply(text) {
+  return cleanReply(stripToolMarkup(text))
+}
+
 // 用户这句话是在要一个动作（去查、去发、去改），而不是问概念。
 // 用来给模型加一句「现在就动手」的提醒 —— 它很容易先回「我这就去」然后等下一轮。
 const ACTION_WORDS = /(查|搜|下载|生成|画|发|写|改|装|部署|跑|统计|总结|整理|删|建|创建|上传|转换|翻译|分析)/

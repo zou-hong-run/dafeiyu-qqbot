@@ -208,6 +208,7 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
       images,
       scope,
       actor,
+      actorName: event.sender?.card || event.sender?.user_name || '',
       trigger,
       tools: toolsForScope(scope, actor),
       sendImage: imageSenderFor(event),

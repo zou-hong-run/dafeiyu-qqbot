@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   SPILL_LIMIT,
+  cleanReply,
+  finalizeReply,
   looksLikeActionRequest,
   pruneToolOutput,
   stripToolMarkup,
@@ -68,4 +70,37 @@ test('pruneToolOutput：省略字数算得对', () => {
   assert.ok(matched, '应该有省略标注')
   // 头 4500 + 尾 1800
   assert.equal(Number(matched[1]), total - 4500 - 1800)
+})
+
+test('cleanReply：去掉开头的自我指涉', () => {
+  assert.equal(cleanReply('作为一个 AI，我不能吃辣。'), '我不能吃辣。')
+  assert.equal(cleanReply('我是人工智能，没有身体。'), '没有身体。')
+  assert.equal(cleanReply('作为语言模型，我建议先备份。'), '我建议先备份。')
+})
+
+test('cleanReply：正常开场白不动', () => {
+  const text = '我建议先重启一下看看。'
+  assert.equal(cleanReply(text), text)
+  assert.equal(cleanReply('作为一个程序员，我觉得这写法有问题。'), '作为一个程序员，我觉得这写法有问题。')
+})
+
+test('cleanReply：紧挨着的重复整句只留一句', () => {
+  assert.equal(cleanReply('已经重启了。已经重启了。'), '已经重启了。')
+  assert.equal(cleanReply('好了。好了。好了。接下来看日志。'), '好了。接下来看日志。')
+})
+
+test('cleanReply：代码块原样保留', () => {
+  const text = '```js\nconsole.log(1)\n```\n跑一下看看'
+  assert.equal(cleanReply(text), text)
+})
+
+test('cleanReply：空输入返回空', () => {
+  assert.equal(cleanReply(''), '')
+  assert.equal(cleanReply(null), '')
+  assert.equal(cleanReply('   '), '')
+})
+
+test('finalizeReply：先清工具标记再清口癖', () => {
+  const raw = '好的，我来查。｜｜DSML｜｜ calls'
+  assert.equal(finalizeReply(raw), '好的，我来查。')
 })

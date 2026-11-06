@@ -3,12 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import OpenAI from 'openai'
 import { env } from '../config/env.js'
-import { denyReason, isToolAllowed, isDangerousTool, SCOPE_LABEL } from '../config/policy.js'
+import { denyReason, isToolAllowed, isDangerousTool, isAdmin, SCOPE_LABEL } from '../config/policy.js'
 import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
-import { SPILL_HEAD, SPILL_LIMIT, looksLikeActionRequest, pruneToolOutput, stripToolMarkup } from './text-utils.js'
+import { SPILL_HEAD, SPILL_LIMIT, finalizeReply, looksLikeActionRequest, pruneToolOutput } from './text-utils.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { resetSession } from './session-reset.js'
 import { readSkill, skillsPrompt } from '../skills/skills.js'
@@ -594,8 +594,17 @@ const TASK_NOTIFY_TOOL = {
   },
 }
 
-function buildSystemPrompt(sessionKey, userText) {
+function buildSystemPrompt(sessionKey, userText, speaker = {}) {
   const parts = [env.systemPrompt]
+
+  // 这轮在跟谁说话：群里要分得清昵称，私聊要分得清是不是管理员。
+  // 只在系统提示里说，不往消息正文里塞前缀——前缀会进历史，每轮重复一遍。
+  const who = String(speaker.actorName ?? '').trim()
+  if (who) {
+    const isGroup = speaker.scope === 'group'
+    const tag = speaker.isAdmin ? '（管理员）' : ''
+    parts.push(`【现在跟你说话的人】${who}${tag}${isGroup ? '，这是群聊，别把 TA 当成唯一听众' : ''}`)
+  }
 
   const self = selfDoc()
   if (self) parts.push(`【自身能力说明】\n${self}`)
@@ -1541,6 +1550,7 @@ export async function chat(sessionKey, userText, options = {}) {
   const {
     scope = 'private',
     actor = '',
+    actorName = '',
     images = [],
     tools = [],
     callTool = null,
@@ -1575,8 +1585,10 @@ export async function chat(sessionKey, userText, options = {}) {
 （提醒：这条是要我动手做的事，这一轮就调用工具，别先回「我这就去」等下一轮）`
     : userText
 
+  const speaker = { scope, actorName, isAdmin: isAdmin(scope, actor) }
+
   const messages = [
-    { role: 'system', content: buildSystemPrompt(sessionKey, userText) },
+    { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) },
     ...history(sessionKey),
     imageParts.length > 0
       ? { role: 'user', content: [{ type: 'text', text: userContent }, ...imageParts] }
@@ -1611,7 +1623,7 @@ export async function chat(sessionKey, userText, options = {}) {
         ],
         max_tokens: 800,
       })
-      return stripToolMarkup(response.choices?.[0]?.message?.content?.trim() ?? '')
+      return finalizeReply(response.choices?.[0]?.message?.content?.trim() ?? '')
     } catch (error) {
       console.error(`[兜底] ${label} 收尾失败：`, error?.message ?? error)
       return ''
@@ -1624,7 +1636,7 @@ export async function chat(sessionKey, userText, options = {}) {
   const budget = Math.floor(env.contextWindowTokens * env.contextBudgetRatio)
 
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
-    messages[0] = { role: 'system', content: buildSystemPrompt(sessionKey, userText) }
+    messages[0] = { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) }
 
     const payload = { model: env.model, messages, max_tokens: env.maxOutputTokens }
 
@@ -1661,7 +1673,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
         messages.length = 0
         messages.push(
-          { role: 'system', content: buildSystemPrompt(sessionKey, userText) },
+          { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) },
           ...history(sessionKey),
           { role: 'user', content: userText },
         )
@@ -1702,7 +1714,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
     if (!message.tool_calls?.length) {
       const raw = message.content?.trim() ?? ''
-      answer = stripToolMarkup(raw)
+      answer = finalizeReply(raw)
 
       if (raw.length > 60 && answer.length < 20) {
         console.warn(
@@ -1935,7 +1947,7 @@ export async function runTaskAgent({
     if (!message) throw new Error('DeepSeek 返回了空响应')
 
     if (!message.tool_calls?.length) {
-      answer = stripToolMarkup(message.content?.trim() ?? '')
+      answer = finalizeReply(message.content?.trim() ?? '')
       break
     }
 
@@ -1993,7 +2005,7 @@ export async function runTaskAgent({
         ],
         max_tokens: 800,
       })
-      answer = stripToolMarkup(wrapUp.choices?.[0]?.message?.content?.trim() ?? '')
+      answer = finalizeReply(wrapUp.choices?.[0]?.message?.content?.trim() ?? '')
     } catch (error) {
       console.error('[子任务] 收尾总结失败：', error?.message ?? error)
     }
