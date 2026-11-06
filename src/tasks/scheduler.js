@@ -33,15 +33,53 @@ function state() {
 // 20 秒一次：足够覆盖每分钟 cron，又不会太频繁
 const TICK_INTERVAL_MS = 20_000
 
+/**
+ * 解析任务文件内容。
+ *
+ * 必须和「文件不存在」分开：文件不存在是第一次启动、本来就该是空的；
+ * 文件读到了但内容不可用（JSON 坏了、顶层不是数组）是数据出了问题，
+ * 当成空任务处理会把用户的任务静默清空。
+ */
+export function parseSchedules(text) {
+  const raw = JSON.parse(text)
+  if (!Array.isArray(raw)) throw new Error('顶层不是数组')
+
+  const tasks = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || !item.id || !item.cron) {
+      console.warn('[定时] 跳过一条不完整的任务记录：', JSON.stringify(item).slice(0, 120))
+      continue
+    }
+    // running 是内存态：重启后一律清掉，否则会永远被当成「正在跑」跳过
+    tasks.push({ ...item, running: false })
+  }
+  return tasks
+}
+
 function load() {
+  let text
   try {
-    const raw = JSON.parse(fs.readFileSync(scheduleFile, 'utf8'))
-    // running 是内存态：重启后从磁盘读回来一律清掉，否则会永远被当成「正在跑」跳过
-    if (Array.isArray(raw)) return raw.map((task) => ({ ...task, running: false }))
+    text = fs.readFileSync(scheduleFile, 'utf8')
   } catch {
+    return [] // 文件不存在：第一次启动，本来就该是空的
+  }
+
+  try {
+    return parseSchedules(text)
+  } catch (error) {
+    // 损坏绝不能当成「没有任务」然后 persist 覆盖——那是静默清空用户的数据。
+    // 先把原文件改名留档，人工还能捞回来。
+    const backup = `${scheduleFile}.broken-${Date.now()}`
+    try {
+      fs.renameSync(scheduleFile, backup)
+      console.error(
+        `[定时] 任务文件损坏（${error?.message ?? error}），已备份为 ${path.basename(backup)}，本次按空任务启动`,
+      )
+    } catch (renameError) {
+      console.error(`[定时] 任务文件损坏（${error?.message ?? error}），备份也失败：`, renameError?.message)
+    }
     return []
   }
-  return []
 }
 
 function persist() {
