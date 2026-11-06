@@ -20,8 +20,15 @@ const RETRY_DELAY_MS = 4_000
 let tasks = []
 let deps = { sendMessage: null, runTask: null, selfHeal: null, recallSent: null, requestRestart: null }
 let lastTickKey = ''
-let timer = null
-let lastTickAt = 0
+
+// 运行状态挂在 globalThis 上：万一这个模块被加载成两份实例（热重载、路径别名），
+// /diag 读到的也是真正在跑的那一份，而不是一个从未初始化的副本
+function state() {
+  if (!globalThis.__schedulerState) {
+    globalThis.__schedulerState = { timer: null, lastTickAt: 0, startedAt: 0 }
+  }
+  return globalThis.__schedulerState
+}
 
 // 20 秒一次：足够覆盖每分钟 cron，又不会太频繁
 const TICK_INTERVAL_MS = 20_000
@@ -377,7 +384,7 @@ async function catchUpMissed() {
 
 function tick() {
   const now = new Date()
-  lastTickAt = now.getTime()
+  state().lastTickAt = now.getTime()
   const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`
   if (key === lastTickKey) return
   lastTickKey = key
@@ -417,10 +424,13 @@ export function nextMatchOf(expr, from = new Date()) {
 export function schedulerStatus() {
   const now = Date.now()
   return {
-    initialized: Boolean(timer),
+    initialized: Boolean(state().timer),
     tickIntervalSeconds: TICK_INTERVAL_MS / 1000,
-    lastTickAt: lastTickAt || null,
-    tickAgeSeconds: lastTickAt ? Math.round((now - lastTickAt) / 1000) : null,
+    pid: process.pid,
+    uptimeSeconds: Math.round(process.uptime()),
+    startedAt: state().startedAt || null,
+    lastTickAt: state().lastTickAt || null,
+    tickAgeSeconds: state().lastTickAt ? Math.round((now - state().lastTickAt) / 1000) : null,
     total: tasks.length,
     enabled: tasks.filter((task) => task.enabled).length,
     items: tasks.map((task) => ({
@@ -440,9 +450,10 @@ export function initScheduler({ sendMessage, runTask, selfHeal, recallSent, requ
   tasks = load()
   persist() // 把清干净的 running 写回磁盘
 
-  timer = setInterval(tick, TICK_INTERVAL_MS)
-  timer.unref?.()
-  lastTickAt = Date.now()
+  const shared = state()
+  shared.timer = setInterval(tick, TICK_INTERVAL_MS)
+  shared.startedAt = Date.now()
+  shared.lastTickAt = Date.now()
 
   const active = tasks.filter((task) => task.enabled).length
   console.log(`[定时] 已加载 ${tasks.length} 个任务（启用 ${active} 个），每 ${TICK_INTERVAL_MS / 1000} 秒检查一次`)

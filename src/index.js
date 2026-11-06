@@ -741,46 +741,9 @@ try {
 
 console.log(`[启动] 正在连接 QQ 开放平台（AppID: ${env.appId}）...`)
 
+// 调度器先起来：它不依赖网关（发消息时才用），放前面就不会因为后面的启动步骤出错而整个不启动。
+// 单独 try 包住，出错也只记日志——「到点了没触发」曾经查不出原因，就是因为这类失败被静默吞掉了。
 try {
-  onLifecycle({
-    ready: () => console.log('[网关] 已就绪'),
-    resumed: () => console.log('[网关] 已恢复上次会话（RESUME）'),
-    disconnected: ({ code, willReconnect } = {}) =>
-      console.warn(`[网关] 连接断开 code=${code ?? '?'}，${willReconnect ? '将自动重连' : '不再重连'}`),
-    error: (error) => console.warn('[网关] 可恢复错误：', String(error?.message ?? error).slice(0, 100)),
-  })
-
-  await startBot()
-  console.log('[启动] 已连接。私聊直接发消息，群聊 @ 我即可对话。')
-  console.log(`[启动] 人格: ${env.personaName}，模型: ${env.model}，记忆: 短期 ${env.historyTurns} 轮 / 中期摘要 / 长期事实`)
-  console.log(
-    `[启动] 群聊：${env.groupAutoReply ? `提到「${env.botAliases.join('/')}」必回（冷却 ${env.groupTriggerCooldown / 1000}s）` : '名字触发已关'}；` +
-      `${
-        env.judgeMode === 'auto'
-          ? `自动判断插话（每小时上限 ${env.judgeHourlyLimit} 次，回复后冷却 ${env.judgeCooldown / 1000}s）`
-          : env.judgeMode === 'observe'
-            ? '观察模式（会评估该不该接话，但只记录不回复，发 /observe 看）'
-            : '自动判断已关'
-      }；` +
-      `「/总结」复盘最近 ${env.summaryLimit} 条`,
-  )
-
-  // 没配的项都用了什么默认，一次列出来，省得猜「为什么它不回/为什么这么吵」
-  console.log(
-    `[配置] 主动接话=${env.proactive.enabled ? `开（${env.proactive.intervalMinutes} 分钟一轮，每群每小时≤${env.proactive.maxPerHour} 次）` : '关'}｜` +
-      `回访=${env.followup.enabled ? `开（≥${env.followup.minAgeHours} 小时）` : '关'}｜` +
-      `热点吐槽=${env.hotTake.enabled ? `开（${env.hotTake.cron}）` : '关'}｜` +
-      `连发合并=${env.mergeWindowMs > 0 ? `${env.mergeWindowMs}ms` : '关'}｜` +
-      `私聊流式=${env.streamReply ? '开' : '关'}｜` +
-      `引用=${env.quoteReply || '关'}`,
-  )
-  console.log(
-    `[配置] 工具=${env.toolsEnabled ? '开' : '关'}｜群聊工具=${env.groupToolsEnabled ? '开' : '关'}｜` +
-      `高危工具=${env.adminOpenIds.length > 0 ? `白名单 ${env.adminOpenIds.length} 人` : `私聊放开/群里${env.shellGroupEnabled ? '放开' : '禁用'}`}｜` +
-      `详细日志=${env.toolDebug ? '开' : '关（排查时设 TOOL_DEBUG=true）'}｜` +
-      `工具轮数上限=${env.maxToolRounds}｜单条输入上限=${env.maxInputChars} 字｜回复上限 ${env.replyMaxChars} 字/条`,
-  )
-
   initScheduler({
     sendMessage: async (target, text) => {
       // 群里被喊安静了就先别推：定时早报也是打扰
@@ -826,6 +789,51 @@ try {
     recallSent: recallSentToTarget,
     requestRestart: requestSchedulerRestart,
   })
+} catch (error) {
+  console.error('[启动] 调度器启动失败：', error?.message ?? error)
+}
+
+
+try {
+  onLifecycle({
+    ready: () => console.log('[网关] 已就绪'),
+    resumed: () => console.log('[网关] 已恢复上次会话（RESUME）'),
+    disconnected: ({ code, willReconnect } = {}) =>
+      console.warn(`[网关] 连接断开 code=${code ?? '?'}，${willReconnect ? '将自动重连' : '不再重连'}`),
+    error: (error) => console.warn('[网关] 可恢复错误：', String(error?.message ?? error).slice(0, 100)),
+  })
+
+  await startBot()
+  console.log('[启动] 已连接。私聊直接发消息，群聊 @ 我即可对话。')
+  console.log(`[启动] 人格: ${env.personaName}，模型: ${env.model}，记忆: 短期 ${env.historyTurns} 轮 / 中期摘要 / 长期事实`)
+  console.log(
+    `[启动] 群聊：${env.groupAutoReply ? `提到「${env.botAliases.join('/')}」必回（冷却 ${env.groupTriggerCooldown / 1000}s）` : '名字触发已关'}；` +
+      `${
+        env.judgeMode === 'auto'
+          ? `自动判断插话（每小时上限 ${env.judgeHourlyLimit} 次，回复后冷却 ${env.judgeCooldown / 1000}s）`
+          : env.judgeMode === 'observe'
+            ? '观察模式（会评估该不该接话，但只记录不回复，发 /observe 看）'
+            : '自动判断已关'
+      }；` +
+      `「/总结」复盘最近 ${env.summaryLimit} 条`,
+  )
+
+  // 没配的项都用了什么默认，一次列出来，省得猜「为什么它不回/为什么这么吵」
+  console.log(
+    `[配置] 主动接话=${env.proactive.enabled ? `开（${env.proactive.intervalMinutes} 分钟一轮，每群每小时≤${env.proactive.maxPerHour} 次）` : '关'}｜` +
+      `回访=${env.followup.enabled ? `开（≥${env.followup.minAgeHours} 小时）` : '关'}｜` +
+      `热点吐槽=${env.hotTake.enabled ? `开（${env.hotTake.cron}）` : '关'}｜` +
+      `连发合并=${env.mergeWindowMs > 0 ? `${env.mergeWindowMs}ms` : '关'}｜` +
+      `私聊流式=${env.streamReply ? '开' : '关'}｜` +
+      `引用=${env.quoteReply || '关'}`,
+  )
+  console.log(
+    `[配置] 工具=${env.toolsEnabled ? '开' : '关'}｜群聊工具=${env.groupToolsEnabled ? '开' : '关'}｜` +
+      `高危工具=${env.adminOpenIds.length > 0 ? `白名单 ${env.adminOpenIds.length} 人` : `私聊放开/群里${env.shellGroupEnabled ? '放开' : '禁用'}`}｜` +
+      `详细日志=${env.toolDebug ? '开' : '关（排查时设 TOOL_DEBUG=true）'}｜` +
+      `工具轮数上限=${env.maxToolRounds}｜单条输入上限=${env.maxInputChars} 字｜回复上限 ${env.replyMaxChars} 字/条`,
+  )
+
 
   try {
     const groups = rebuildAll()

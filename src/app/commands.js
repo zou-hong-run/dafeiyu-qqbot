@@ -163,7 +163,8 @@ export const COMMANDS = [
         lines.push(
           `调度器：${status.initialized ? '运行中' : '未初始化（没启动）'}` +
             `｜任务 ${status.total}（启用 ${status.enabled}）` +
-            `｜上次检查 ${status.tickAgeSeconds === null ? '从未' : `${status.tickAgeSeconds} 秒前`}`,
+            `｜上次检查 ${status.tickAgeSeconds === null ? '从未' : `${status.tickAgeSeconds} 秒前`}` +
+            `｜pid ${status.pid}｜进程已运行 ${status.uptimeSeconds} 秒`,
         )
         for (const item of status.items.slice(0, 5)) {
           lines.push(
