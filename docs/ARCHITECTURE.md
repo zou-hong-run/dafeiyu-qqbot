@@ -323,6 +323,8 @@ bwrap
 | `backups/` 是 `data/` 的副本，却能 `send_file` 发出去 | `send_file` 和 `read_document` 的黑名单补上 `backups/`、`logs/` |
 | 自动同步会把 `.github/`、`package.json` 推上去 | `BLOCKED_PATHS` 加上这两项，避免模型改动直接接进 CI |
 | 群成员能 `note_lesson` 写进系统提示词、`clear_memory` 清记忆 | 两者收进 `DANGEROUS_TOOLS` |
+| `exceljs` 解压炸弹（1.5MB 文件可膨胀到 1.5GB，MCP 堆只有 160MB） | 解析前读 zip 中央目录，声明解压总量 >64MB、单条目 >32MB 或压缩比 >120 一律拒绝 |
+| markdown 回复、引用回复走 `postMessage`，绕过 `sanitizeText` | 过滤下沉到 `postMessage` 入口，`content` 和 `markdown.content` 都过一遍 |
 | `/kill`、`/clean` 任何群成员都能用 | 加 `adminOnly` |
 | `xlsx@0.18.5` 两个高危 CVE，npm 上没有修复版 | 换 `exceljs`（npm 生态内、可审计），`.xls` 明确报不支持 |
 | `NODE_OPTIONS` 和 `--require` 等价，能绕开 argv 检查 | 从 `SAFE_ENV_KEYS` 移除，注释写明原因 |

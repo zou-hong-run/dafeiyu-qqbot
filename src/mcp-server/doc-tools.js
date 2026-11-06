@@ -11,6 +11,15 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const MAX_BYTES = 20 * 1024 * 1024
 const MAX_TEXT = 8000
 
+// xlsx 是 zip，解析库会把它整个解压进内存。压缩后 20MB 的表解压后可能上 GB，
+// 而内置 MCP 子进程堆上限只有 160MB，一个文件就能把全部工具打挂。
+// 所以解析前先读 zip 中央目录：那里声明了每条目的大小和压缩后大小。
+const ZIP_LIMITS = {
+  maxTotalBytes: 64 * 1024 * 1024, // 解压后总量
+  maxEntryBytes: 32 * 1024 * 1024, // 单条目
+  maxRatio: 120, // 总压缩比
+}
+
 // backups/ 是 data/ 的副本、logs/ 是命令输出，和 data/ 一样不该进模型上下文
 const BLOCKED = [/^\.env/, /^data\//, /^node_modules\//, /^\.git\//, /^backups\//, /^logs\//]
 
@@ -73,6 +82,85 @@ async function readDocx(buffer) {
   return { text: String(value ?? ''), format: 'Word' }
 }
 
+/**
+ * 读 zip 中央目录，汇总声明的大小。不信任条目里的其他内容，只看三个数。
+ * xlsx 一定是 zip，找不到 EOCD 就说明文件不是有效工作簿。
+ */
+export function inspectZip(buffer) {
+  const EOCD_SIGNATURE = 0x06054b50
+  const ENTRY_SIGNATURE = 0x02014b50
+  const EOCD_MIN = 22
+
+  if (!Buffer.isBuffer(buffer) || buffer.length < EOCD_MIN) {
+    throw new Error('文件太小，不是有效的 xlsx')
+  }
+
+  // EOCD 在末尾，最大后面跟 65535 字节注释
+  const searchFrom = Math.max(0, buffer.length - EOCD_MIN - 65535)
+  let eocd = -1
+  for (let i = buffer.length - EOCD_MIN; i >= searchFrom; i -= 1) {
+    if (buffer.readUInt32LE(i) === EOCD_SIGNATURE) {
+      eocd = i
+      break
+    }
+  }
+  if (eocd < 0) throw new Error('不是有效的 xlsx（找不到 zip 目录）')
+
+  const count = buffer.readUInt16LE(eocd + 10)
+  let offset = buffer.readUInt32LE(eocd + 16)
+
+  let totalBytes = 0
+  let totalPacked = 0
+  let maxEntryBytes = 0
+
+  for (let index = 0; index < count; index += 1) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== ENTRY_SIGNATURE) {
+      throw new Error('xlsx 目录结构损坏')
+    }
+
+    const packed = buffer.readUInt32LE(offset + 20)
+    const size = buffer.readUInt32LE(offset + 24)
+    const nameLen = buffer.readUInt16LE(offset + 28)
+    const extraLen = buffer.readUInt16LE(offset + 30)
+    const commentLen = buffer.readUInt16LE(offset + 32)
+
+    totalBytes += size
+    totalPacked += packed
+    maxEntryBytes = Math.max(maxEntryBytes, size)
+
+    offset += 46 + nameLen + extraLen + commentLen
+  }
+
+  return {
+    entries: count,
+    totalBytes,
+    totalPacked,
+    maxEntryBytes,
+    ratio: totalPacked > 0 ? totalBytes / totalPacked : 1,
+  }
+}
+
+/** 解压炸弹前置检查：声明大小超限就别交给解析库，直接把子进程打挂不值得 */
+export function assertZipSafe(buffer, limits = ZIP_LIMITS) {
+  const zip = inspectZip(buffer)
+
+  if (zip.totalBytes > limits.maxTotalBytes) {
+    throw new Error(
+      `这个表格解压后有 ${(zip.totalBytes / 1048576).toFixed(0)}MB，超过 ${limits.maxTotalBytes / 1048576}MB 上限，不解析`,
+    )
+  }
+  if (zip.maxEntryBytes > limits.maxEntryBytes) {
+    throw new Error(
+      `表格里单个条目解压后有 ${(zip.maxEntryBytes / 1048576).toFixed(0)}MB，超过上限，不解析`,
+    )
+  }
+  if (zip.ratio > limits.maxRatio) {
+    throw new Error(`压缩比 ${zip.ratio.toFixed(0)}:1 异常（正常表格不会超过 100:1），疑似解压炸弹，不解析`)
+  }
+
+  return zip
+}
+
 // Excel 单元格的值可能是数字、日期、富文本、公式、超链接，统一转成可读字符串
 function cellText(value) {
   if (value == null) return ''
@@ -99,6 +187,10 @@ async function readSpreadsheet(buffer, ext) {
 
   const lib = await requireLib('exceljs', 'Excel')
   const ExcelJS = lib.default ?? lib
+
+  // 先看 zip 声明的大小，再交给解析库——解压炸弹在 load() 阶段才爆，那时已经来不及
+  assertZipSafe(buffer)
+
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
 
@@ -148,7 +240,7 @@ async function readDocument(input) {
   } else if (ext === '.doc') {
     throw new Error('老版 .doc 读不了，另存成 .docx 再试')
   } else {
-    throw new Error(`不支持的格式：${ext || '无扩展名'}。支持 pdf / docx / xlsx / xls / csv / 常见文本`)
+    throw new Error(`不支持的格式：${ext || '无扩展名'}。支持 pdf / docx / xlsx / csv / 常见文本（老版 .xls 请另存为 .xlsx）`)
   }
 
   const text = String(result.text ?? '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim()
@@ -168,7 +260,7 @@ export const DOC_TOOLS = [
     name: 'read_document',
     type: 'tool',
     description:
-      '读文档内容：PDF、Word(.docx)、Excel(.xlsx/.xls/.csv) 和常见文本文件，提取文字给模型看。' +
+      '读文档内容：PDF、Word(.docx)、Excel(.xlsx/.csv) 和常见文本文件，提取文字给模型看；老版 .xls 会提示另存为 .xlsx。' +
       '文件要放在项目目录里（downloads/ 或项目根），20MB 以内，正文截断到 8000 字。' +
       '扫描版 PDF 提取不出文字时会明确告诉你。',
     inputSchema: {

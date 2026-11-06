@@ -478,7 +478,7 @@ const transport = new StdioServerTransport()
 await server.connect(transport)
 
 // 可选依赖自检：缺哪个就报哪个，服务照常起（只让对应用具报错，不搞成整块崩）
-const OPTIONAL_LIBS = ['unpdf', 'mammoth', 'xlsx', 'pngjs']
+const OPTIONAL_LIBS = ['unpdf', 'mammoth', 'exceljs', 'pngjs']
 const missingLibs = []
 for (const name of OPTIONAL_LIBS) {
   try {

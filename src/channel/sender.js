@@ -1,5 +1,6 @@
 import { env } from '../config/env.js'
 import { sendGroup, sendPrivate, openPrivateStream, postRaw } from '../bot.js'
+import { sanitizeText } from './qq.js'
 import { addPending } from '../chat/pending.js'
 import { noteSent } from './recall.js'
 
@@ -210,6 +211,15 @@ export async function deliver(event, payload) {
 export async function postMessage(event, body, { reference = true } = {}) {
   const { apiPath } = endpointOf(event)
   const usePassive = canUsePassive(event)
+
+  // 出站最后一道：用户原文里的 <qqbot-at-user> / <qqbot-at-everyone> / <emoji:1>
+  // 被平台当真标签解析。这条路（markdown 回复、引用回复、媒体卡片）不经过
+  // qq.js 的 flatten()，所以在这里统一剥一遍。
+  // 合法的 @ 标签由 flatten() 生成、走 dispatch()，不受影响。
+  if (typeof body?.content === 'string') body.content = sanitizeText(body.content)
+  if (typeof body?.markdown?.content === 'string') {
+    body.markdown.content = sanitizeText(body.markdown.content)
+  }
 
   // 引用只能挂在被动回复上：主动消息没有可引用的会话上下文
   const ref = usePassive && reference ? quoteRefOf(event) : null
