@@ -313,9 +313,13 @@ export function sendMarkdown(target, content, opts = {}) {
   return bot.sendMarkdown({ ...target }, content, opts)
 }
 
-/** 带按钮的文本。按钮点击会走 interaction 事件 */
+/**
+ * 带按钮的消息。
+ * 官方文档：按钮是「在 markdown 消息的基础上」挂载的——发文本消息带 keyboard
+ * 会被平台静默忽略（不报错，但用户看不到按钮），所以这里必须走 markdown。
+ */
 export function sendWithKeyboard(target, content, keyboard) {
-  return bot.sendTextWithKeyboard({ ...target }, content, keyboard)
+  return bot.sendMarkdown({ ...target }, content, { keyboard })
 }
 
 /** C2C 唤醒消息：用户主动聊过之后 30 天内可以再敲一次，有频率限制 */

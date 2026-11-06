@@ -52,7 +52,9 @@ onInteraction((event) => ...)                 // 按钮点击回调
 acknowledgeInteraction(id, code)              // 5 秒内回执
 ```
 
-按钮的 `action.type=1`（回调）、`permission.type=2`（所有人可点）是按官方文档写的，**还没真机点过**——如果点击后没反应，先看日志有没有回执错误。
+按钮的 `action.type=1`（回调）、`permission.type=2`（所有人可点）是按官方文档写的。
+
+**一个坑**：按钮只能挂在 markdown 消息上（文档原话「在 markdown 消息的基础上，支持消息最底部挂载按钮」）。发 `msg_type: 0` 的文本消息带 `keyboard` 字段，平台会**静默忽略**——不报错，只是用户看不到按钮，很难查。所以 `sendWithKeyboard()` 内部走的是 `sendMarkdown`。
 
 ## 不用的
 
