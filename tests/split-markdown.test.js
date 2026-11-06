@@ -36,3 +36,23 @@ test('没有空行的连续列表保持连续', () => {
   assert.equal(parts.length, 1)
   assert.equal(parts[0], text)
 })
+
+test('切分时不会把 URL 劈成两半', () => {
+  const url = 'https://m.sohu.com/a/1097835995_313745'
+  const text = '前面一段话。' + 'A'.repeat(30) + `[界面早报](${url})` + '后面还有内容'
+
+  for (const part of splitMarkdown(text, 40)) {
+    // 任何一段都不该出现半截链接
+    const opens = (part.match(/\]\(/g) ?? []).length
+    const closes = (part.match(/\)/g) ?? []).length
+    assert.ok(opens <= closes, `链接没闭合：${part}`)
+    assert.ok(!/https?:\/\/[^\s)]*$/.test(part) || part.includes(')'), `URL 被截断：${part}`)
+  }
+})
+
+test('超长纯 URL 不会被切成死链', () => {
+  const url = 'https://example.com/' + 'x'.repeat(100)
+  const parts = splitMarkdown(url, 40)
+  const joined = parts.join('')
+  assert.equal(joined, url, '拼起来应该还原成完整 URL')
+})

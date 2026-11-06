@@ -275,6 +275,38 @@ async function sendMarkdownMessage(event, content) {
   }
 }
 
+// 长文本按长度切时，别把 URL 或 markdown 链接劈成两半——
+// 劈开之后前半段是死链，后半段是乱码。
+const URL_IN_TEXT = /https?:\/\/[^\s)）]+/g
+
+function safeCutIndex(text, limit) {
+  if (text.length <= limit) return text.length
+
+  // 先看切点是不是落在 markdown 链接里：往前找最近的 '['，
+  // 如果它到切点之间还没有 ')'，说明这个链接没闭合，整段挪到 '[' 前面。
+  let cursor = limit - 1
+  while (cursor >= 0) {
+    if (text[cursor] === '[') {
+      if (!text.slice(cursor, limit).includes(')')) {
+        // 链接从这行开头就开始，往前没地方挪了：整段不切，宁可超长也不切坏
+        return cursor > 0 ? cursor : text.length
+      }
+      break
+    }
+    cursor -= 1
+  }
+
+  // 再看不带方括号的裸 URL。
+  // 一个 URL 比 limit 还长时没法安全切分，只能让这一段超长。
+  for (const matched of text.matchAll(URL_IN_TEXT)) {
+    const start = matched.index
+    const end = start + matched[0].length
+    if (start < limit && limit < end) return start > 0 ? start : text.length
+  }
+
+  return limit
+}
+
 // 长文本切分：优先在换行 / 句末 / 逗号处断开，尽量不切断词句
 /**
  * 按「块」切分 markdown 文本。
@@ -309,7 +341,13 @@ export function splitMarkdown(text, limit = Math.max(200, env.replyMaxChars)) {
   return parts.flatMap((part) => {
     if (part.length <= limit) return [part]
     const chunks = []
-    for (let i = 0; i < part.length; i += limit) chunks.push(part.slice(i, i + limit))
+    let rest = part
+    while (rest.length > limit) {
+      const cut = safeCutIndex(rest, limit)
+      chunks.push(rest.slice(0, cut))
+      rest = rest.slice(cut)
+    }
+    if (rest) chunks.push(rest)
     return chunks
   })
 }
@@ -347,6 +385,9 @@ export function chunkText(text, limit = Math.max(200, env.replyMaxChars)) {
         win.lastIndexOf(' '),
       )
       cut = cut > room * 0.35 ? cut + 1 : room
+      // 别把 URL 切断，切点落在链接里就往前挪
+      const guarded = safeCutIndex(rest, cut)
+      if (guarded > 0 && guarded < cut) cut = guarded
       buf += rest.slice(0, cut)
       flush()
       rest = rest.slice(cut)
