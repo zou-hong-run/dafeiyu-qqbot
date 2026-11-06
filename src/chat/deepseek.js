@@ -595,6 +595,19 @@ const TASK_SYSTEM_PROMPT = `你是后台执行任务的子助手，用户把一�
 - 输出支持 Markdown：可以用 **加粗**、*斜体*、- 列表、1. 有序列表、> 引用、[文字](链接)。不要用三反引号代码块、表格和 # 标题，QQ 不渲染这些，只会露出原始符号；贴代码和路径直接给原文，里面有下划线就拆开写
 - 如果发现做不到，直接说明卡在哪一步、缺什么，不要硬凑答案`
 
+// 定时任务/对外推送：产物直接进 QQ 消息，所以要求写成 QQ 能渲染的 markdown。
+// 只覆盖上一条「纯文本」约束，别的规矩不变。
+const TASK_MARKDOWN_PROMPT = `补充要求（优先于上面的「输出纯文本」那条）：本次产出会直接当成 QQ 消息发出去，请用 Markdown 排版：
+- 用 **粗体** 标出关键结论和数据，每条消息最多三四处，别通篇加粗
+- 并列的条目用 - 无序列表，有先后顺序的用 1. 有序列表
+- 分隔不同板块可以用 ---，引用原文用 >
+- 不要用代码块（三反引号）、表格、图片语法、# 标题，QQ 客户端不渲染这些，只会露出原始符号
+- 正文里的文件路径、命令、报错原文直接原样写，别包反引号`
+
+function withMarkdownHint(prompt, markdown) {
+  return markdown ? `${prompt}\n\n${TASK_MARKDOWN_PROMPT}` : prompt
+}
+
 const TASK_NOTIFY_TOOL = {
   type: 'function',
   function: {
