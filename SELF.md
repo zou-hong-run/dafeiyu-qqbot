@@ -327,3 +327,4 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - fetch GitHub API 查仓库 star 数，返回长 JSON 被截断，看不到 stargazers_count → api.github.com 的 repo 信息太长，fetch 正文有长度上限，关键字段在后半段 → 改抓 https://img.shields.io/github/stars/<owner>/<repo>.json ，只返回几十字节，value 字段就是星数
 - send_to_group 带 at 参数时直接报「segment is not defined」 → src/app/factories.js 拼 at 消息段用了 segment.at()，但文件顶部没从 bot.js 引入 segment → import 里补上 segment，改完必须 restart_self 才生效
 - shell 里 node / pnpm 报 command not found（rc=127）→ 沙箱遮掉了 /www 下除 server/nodejs 之外的目录，node 目录是留着的；真报这个错说明这台机器的 node 装在别处（/usr/local/bin、nvm 之类）→ 先用 `ls /www/server/nodejs/bin` 和 `command -v node` 确认；确认不了就别反复重试，直接说明「沙箱里 node 不可见，没做语法验证」，靠 read_file 逐项核对改动后再 restart_self
+- 私聊里调 read_group_history 传 group_id 想读某个群，被拒「只能在群聊用」 → SELF.md 写着「管理员私聊也能指定群读」，但工具实现里根本没放这条，一律拒绝私聊 → 私聊问群内容直接说读不了、请到群里 @ 我，不要承诺「传 group_id 就能读」
