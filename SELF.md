@@ -304,3 +304,4 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - run_script 里调 edge_tts 报 socket.gaierror 域名解析失败，往 downloads/ 写文件报 Read-only file → run_script/shell 的沙箱没有网（edge-tts 这类在线 TTS 用不了），而且只有 tmp/ 可写 → 要合成语音用本地 espeak-ng（-v zh 中文最好听，-s 150 左右），产物写 tmp/，然后 send_audio 直接传「tmp/xxx.mp3」就能发出去，不必挪到 downloads/
 - shell 里跑 git archive / git status 报 fatal: detected dubious ownership in reposit → /qq 目录属主是 www，当前 shell 用户不是它，git 的 safe.directory 校验拦下 → 命令里加 -c 参数：git -c safe.directory=/qq archive ... 或 git -c safe.directory=/qq status，别改全局 config
 - fetch GitHub API 查仓库 star 数，返回长 JSON 被截断，看不到 stargazers_count → api.github.com 的 repo 信息太长，fetch 正文有长度上限，关键字段在后半段 → 改抓 https://img.shields.io/github/stars/<owner>/<repo>.json ，只返回几十字节，value 字段就是星数
+- send_to_group 带 at 参数时直接报「segment is not defined」 → src/app/factories.js 拼 at 消息段用了 segment.at()，但文件顶部没从 bot.js 引入 segment → import 里补上 segment，改完必须 restart_self 才生效

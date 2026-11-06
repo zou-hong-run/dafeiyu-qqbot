@@ -1,4 +1,4 @@
-import { selfOpenid, sendGroup, sendPrivate, sendWakeup } from '../bot.js'
+import { selfOpenid, segment, sendGroup, sendPrivate, sendWakeup } from '../bot.js'
 import { env } from '../config/env.js'
 import * as groupLog from '../memory/group-log.js'
 import { clip, withSendRetry } from '../channel/sender.js'
