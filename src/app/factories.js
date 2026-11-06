@@ -289,10 +289,13 @@ export function profileReaderFor(event) {
 
 // 按 target 主动发消息（定时任务、跨群播报都用它，不依赖 event）
 export function sendToTarget(target, payload) {
+  // 主动消息（定时任务、补推、跨群转发）以前固定走纯文本，模型写的 markdown 会原样露出符号。
+  // 现在统一跟主对话一样按 markdownReply 走 markdown 通道；发送失败 dispatch 里会自动降级纯文本。
+  const markdown = env.markdownReply
   if (target?.type === 'group') {
-    return withSendRetry(() => sendGroup(target.id, payload), '主动群消息')
+    return withSendRetry(() => sendGroup(target.id, payload, { markdown }), '主动群消息')
   }
-  return withSendRetry(() => sendPrivate(target.id, payload), '主动私聊消息')
+  return withSendRetry(() => sendPrivate(target.id, payload, { markdown }), '主动私聊消息')
 }
 
 // 主对话用：从 event 取群 id
@@ -402,8 +405,8 @@ export function notifierFor(event) {
     }
 
     try {
-      if (isGroup) await sendGroup(groupId, body)
-      else await sendPrivate(userId, body)
+      if (isGroup) await sendGroup(groupId, body, { markdown: env.markdownReply })
+      else await sendPrivate(userId, body, { markdown: env.markdownReply })
     } catch (error) {
       console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
     }
