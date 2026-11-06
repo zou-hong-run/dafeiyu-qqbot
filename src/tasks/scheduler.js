@@ -6,8 +6,22 @@ import { checkDuplicate, recordSent } from './outbox.js'
 import { canHeal, errorSignature, markHeal } from './heal.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const dataDir = path.join(projectRoot, 'data')
-const scheduleFile = path.join(dataDir, 'schedules.json')
+let dataDir = path.join(projectRoot, 'data')
+let scheduleFile = path.join(dataDir, 'schedules.json')
+
+/**
+ * 测试用：把任务文件指到临时目录。
+ *
+ * 不加这个的话，单测里调 addSchedule 会写到真实的 data/schedules.json——
+ * 在有任务的机器上跑一次 pnpm test 就能把用户的定时任务清空。
+ */
+export function useSchedulesDir(dir) {
+  dataDir = dir
+  scheduleFile = path.join(dir, 'schedules.json')
+  tasks = []
+  state().lastTickAt = 0
+  state().startedAt = 0
+}
 
 const MAX_PER_SESSION = 5
 const MAX_TOTAL = 20
@@ -147,7 +161,7 @@ function describeCron(expr) {
   return `cron ${expr}`
 }
 
-export function addSchedule({ sessionKey, target, cron, prompt }) {
+export function addSchedule({ sessionKey, target, cron, prompt, createdBy = '' }) {
   const error = validateCron(cron)
   if (error) throw new Error(error)
 
@@ -172,6 +186,8 @@ export function addSchedule({ sessionKey, target, cron, prompt }) {
     createdAt: Date.now(),
     lastRunAt: null,
     lastStatus: null,
+    // 记创建者：删除时要验身份，否则群里任何人说「删掉定时任务」就能清空别人的早报
+    createdBy: String(createdBy ?? ''),
   }
 
   tasks.push(task)
@@ -197,12 +213,31 @@ export function listSchedules(sessionKey) {
       enabled: task.enabled,
       lastRunAt: task.lastRunAt,
       lastStatus: task.lastStatus,
+      createdBy: task.createdBy ?? '',
     }))
 }
 
-export function removeSchedule(id, sessionKey) {
+/**
+ * 删除任务。remove_schedule 是 OPEN 工具——群里任何人都能调，
+ * 所以这里要验身份：只有创建者本人或管理员能删。
+ *
+ * 旧任务没有 createdBy（这一版之前建的），一律按「只有管理员能删」处理：
+ * 宁可让管理员多动一下手，也不能让群友一句话清空别人的日程。
+ */
+export function removeSchedule(id, sessionKey, { actor = '', isAdmin = false } = {}) {
   const index = tasks.findIndex((task) => task.id === id && task.sessionKey === sessionKey)
   if (index < 0) throw new Error(`找不到定时任务 ${id}`)
+
+  const target = tasks[index]
+  if (!isAdmin) {
+    if (!target.createdBy) {
+      throw new Error('这条是旧版本建的任务，没有创建者记录，只有管理员能删')
+    }
+    if (target.createdBy !== String(actor ?? '')) {
+      throw new Error('这个任务是别人建的，只有他本人或管理员能删')
+    }
+  }
+
   const [removed] = tasks.splice(index, 1)
   persist()
   return removed

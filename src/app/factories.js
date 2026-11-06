@@ -8,7 +8,7 @@ import { audit, auditKeyOf } from './audit.js'
 import { chunkText } from '../channel/sender.js'
 import { formatProfile } from '../memory/profiles.js'
 import { commitAndPush, describeStatus, pullLatest } from '../ops/sync.js'
-import { filterTools } from '../config/policy.js'
+import { filterTools, isAdmin } from '../config/policy.js'
 import { getTools, toDeepSeekTools } from '../mcp/client.js'
 import { addSchedule, listSchedules, removeSchedule } from '../tasks/scheduler.js'
 import { putChoice, choiceKeyboard, choiceText } from '../chat/choices.js'
@@ -385,7 +385,16 @@ export function schedulerFor(event) {
     id: isGroup ? event.group_id : event.user_id,
   }
 
-  return schedulerForTarget(sessionKey, target)
+  const actor = String(event.user_id ?? '')
+  const admin = isAdmin(actor)
+
+  return {
+    add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt, createdBy: actor }),
+    list: () => listSchedules(sessionKey),
+    // 删除要验身份：remove_schedule 是 OPEN 工具，群里谁都能调。
+    // 不校验的话，一个群友说「把定时任务都删了」就能清空别人建的早报。
+    remove: (id) => removeSchedule(id, sessionKey, { actor, isAdmin: admin }),
+  }
 }
 
 export function notifierFor(event) {
