@@ -30,3 +30,4 @@ test('未初始化时状态里能看出「没启动」', () => {
   assert.ok(Array.isArray(status.items))
   assert.equal(status.tickIntervalSeconds, 20)
 })
+

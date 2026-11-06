@@ -168,7 +168,7 @@ export const COMMANDS = [
         )
         for (const item of status.items.slice(0, 5)) {
           lines.push(
-            `  ${item.id}｜${item.cron}｜${item.enabled ? '启用' : '已停用'}` +
+            `  ${item.id}｜${item.when ?? item.cron}｜${item.enabled ? '启用' : '已停用'}` +
               `｜下次 ${item.nextAt ?? '解析失败'}` +
               `${item.lastStatus ? `｜上次 ${item.lastStatus}` : ''}`,
           )
