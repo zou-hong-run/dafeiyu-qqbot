@@ -15,6 +15,19 @@ import { sandboxStatus, defaultEnvFile } from '../ops/platform.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
+// 沙箱里的 PATH：默认系统目录 + 当前 node 所在目录（nvm / pnpm 装的 node 不在 /usr/bin）。
+// 这样机器人在沙箱里也能跑 node --check 和 pnpm test，改完代码可以自己验。
+function sandboxPath() {
+  const dirs = [
+    path.dirname(process.execPath),
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    '/usr/bin',
+    '/bin',
+  ]
+  return [...new Set(dirs)].join(':')
+}
+
 // `--ro-bind / /` 只能挡写，挡不住读。bwrap 默认一个 capability 都不给，
 // 但下面要补 DAC 越权让 root 能写属 www 的项目目录，所以读取面得单独挡住：
 // 目录挂空 tmpfs（整个目录变空），文件盖成 /dev/null（读到 0 字节）。
@@ -121,7 +134,9 @@ export function sandboxCommand(command, cwd) {
     ...shieldArgs(),
     // 干净环境：不继承宿主的密钥
     '--clearenv',
-    '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin',
+    // node 不一定在 /usr/bin（nvm、pnpm 装的可能在别处），
+    // 把当前进程的 node 目录也带上，否则机器人改完代码连 node --check 都跑不了
+    '--setenv', 'PATH', sandboxPath(),
     '--setenv', 'HOME', '/tmp',
     '--setenv', 'LANG', 'C.UTF-8',
     // 父进程死了就跟着死，别留孤儿
