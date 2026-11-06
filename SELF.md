@@ -127,6 +127,7 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - 收到的附件自动存在 `downloads/incoming/<会话>/`，提示词里会给出路径
 - 想转出来就把路径原样传给 send_video / send_audio / send_image（`downloads/incoming/...` 这种写法也能认）
 - 要发到别的群：`send_to_group` 传 `groupId` + `path`（附件路径），会自动提升到 downloads 再发
+- 发文件时文件名会自动补扩展名：没给后缀就借源文件的，源文件也没后缀就按文件头猜（png/zip/pdf…），兜底 .bin。不用手动加
 - 注意 `groupId` 是群 openid（`206309398B037A4DC0D07DA18C6997FB` 这种），不是 QQ 群号；`list_groups` 能查
 
 ### 媒体发送（文件必须放在 downloads/ 目录）

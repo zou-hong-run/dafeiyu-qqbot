@@ -292,12 +292,13 @@ const LOCAL_TOOLS = [
       description:
         '把任意格式的文件发送到当前聊天（PDF、Word、Excel、压缩包、代码等），群里会显示成可下载的文件卡片。' +
         '单文件上限 200MB。能发 downloads/ 下的文件和项目根下的文件（SELF.md、README.md、package.json、src/ 里的源码都可以）。' +
-        '.env、data/、node_modules/ 不开放。图片/视频/语音请分别用 send_image / send_video / send_audio。',
+        '.env、data/、node_modules/ 不开放。图片/视频/语音请分别用 send_image / send_video / send_audio。' +
+        '文件名会自动补扩展名：你给的 fileName 没后缀时会借源文件的后缀，所以不用手动加。',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'downloads 目录下的文件名或者相对路径' },
-          fileName: { type: 'string', description: '显示给对方看的文件名（可选）' },
+          fileName: { type: 'string', description: '显示给对方看的文件名（可选，后缀会自动补齐）' },
         },
         required: ['path'],
       },

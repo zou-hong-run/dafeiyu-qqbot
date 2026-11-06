@@ -70,3 +70,27 @@ test('markdown 图片：没有图片语法时快速返回', async () => {
   const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
   assert.equal(await rewriteMarkdownImages('纯文本没有图'), '纯文本没有图')
 })
+
+test('发文件时文件名一定带扩展名', async () => {
+  const { ensureFileNameExtension } = await import('../src/channel/media.js')
+
+  // 名字自带后缀：原样
+  assert.equal(ensureFileNameExtension('报告.pdf', '/tmp/x.pdf'), '报告.pdf')
+  // 名字没后缀：借源文件的
+  assert.equal(ensureFileNameExtension('报告', '/tmp/x.pdf'), '报告.pdf')
+  // 都不传：用源文件名
+  assert.equal(ensureFileNameExtension('', '/tmp/x.zip'), 'x.zip')
+  // 源文件也没后缀：按文件头猜
+  assert.equal(ensureFileNameExtension('数据', '/tmp/raw', Buffer.from([0x50, 0x4b, 0x03, 0x04])), '数据.zip')
+  assert.equal(ensureFileNameExtension('图片', '/tmp/raw', Buffer.from([0x89, 0x50, 0x4e, 0x47])), '图片.png')
+  // 猜不出来兜底成 .bin
+  assert.equal(ensureFileNameExtension('未知', '/tmp/raw', Buffer.from('hello world')), '未知.bin')
+})
+
+test('超长文件名加后缀后仍不超过 120 字符', async () => {
+  const { ensureFileNameExtension } = await import('../src/channel/media.js')
+  const name = 'a'.repeat(200)
+  const result = ensureFileNameExtension(name, '/tmp/x.pdf')
+  assert.ok(result.length <= 120)
+  assert.ok(result.endsWith('.pdf'))
+})

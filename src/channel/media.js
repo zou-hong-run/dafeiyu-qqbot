@@ -380,7 +380,9 @@ export async function sendMediaToGroup(groupId, inputPath, options = {}) {
     kind = '语音'
   } else {
     if (mb > 50) throw new Error(`文件 ${mb.toFixed(1)}MB，超过 50MB 上限`)
-    payload = segment.file(filePath, { name: String(options.fileName ?? path.basename(filePath)).slice(0, 120) })
+    payload = segment.file(filePath, {
+      name: ensureFileNameExtension(options.fileName ?? path.basename(filePath), filePath),
+    })
     kind = '文件'
   }
 
@@ -412,6 +414,34 @@ function resolveSendableFile(target) {
   return null
 }
 
+// 发出去的文件一定要带扩展名：QQ 客户端靠它决定用什么打开，
+// 没有后缀的文件对方点开是「未知类型」，还得自己猜。
+function guessExtension(buffer) {
+  const head = buffer.subarray(0, 8)
+  if (head[0] === 0x89 && head[1] === 0x50) return '.png'
+  if (head[0] === 0xff && head[1] === 0xd8) return '.jpg'
+  if (head.toString('latin1', 0, 3) === 'GIF') return '.gif'
+  if (head.toString('latin1', 0, 4) === '%PDF') return '.pdf'
+  if (head[0] === 0x50 && head[1] === 0x4b) return '.zip'
+  if (head[0] === 0x37 && head[1] === 0x7a) return '.7z' // 7z
+  if (head[0] === 0x1f && head[1] === 0x8b) return '.gz'
+  return '.bin'
+}
+
+/**
+ * 保证文件名带扩展名。
+ * 顺序：名字本身有后缀 → 用名字的；否则借源文件的后缀；再否则按文件头猜。
+ */
+export function ensureFileNameExtension(name, sourcePath, buffer) {
+  const raw = String(name ?? '').trim() || path.basename(String(sourcePath ?? ''))
+  if (path.extname(raw)) return raw.slice(0, 120)
+
+  const sourceExt = path.extname(String(sourcePath ?? ''))
+  const finalExt = sourceExt || (buffer ? guessExtension(buffer) : '.bin')
+  const base = raw.slice(0, Math.max(1, 120 - finalExt.length))
+  return `${base}${finalExt}`
+}
+
 export function fileSenderFor(event, options = {}) {
   const downloadDir = path.join(projectRoot, 'downloads')
 
@@ -437,13 +467,20 @@ export function fileSenderFor(event, options = {}) {
     const replyTarget = isGroup
       ? { scope: 'group', targetId: String(id) }
       : { scope: 'c2c', targetId: String(id) }
-    const fileName = String(options.fileName ?? path.basename(resolved)).slice(0, 120)
+
+    const buffer = fs.readFileSync(resolved)
+    const fileName = ensureFileNameExtension(
+      options.fileName ?? path.basename(resolved),
+      resolved,
+      buffer,
+    )
 
     // 文件消息要自己传一遍拿到 file_info，再拼 msg_type=7 的消息体
     const upload = await uploadMedia({
       target: replyTarget,
       fileType: 4, // FILE
-      buffer: fs.readFileSync(resolved),
+      buffer,
+      fileName,
       srvSendMsg: false,
     })
 
