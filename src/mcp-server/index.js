@@ -60,6 +60,53 @@ async function search({ query, count = 5 }) {
   return `共 ${results.length} 条结果：\n\n${lines.join('\n\n')}`
 }
 
+/** 相对地址转绝对，失败返回空 */
+function absoluteUrl(raw, base) {
+  try {
+    return new URL(String(raw ?? '').trim(), base).toString()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 从页面 HTML 里提取分享主图（og:image / twitter:image）。
+ * 只读前 200KB——这些 meta 都在 head 里，读全文是浪费。
+ * 抓不到就返回空，不影响正文。
+ */
+async function coverImageOf(url) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(NET_TIMEOUT),
+    })
+    if (!response.ok) return ''
+
+    const html = (await response.text()).slice(0, 200_000)
+    const patterns = [
+      /<meta[^>]+property=["']og:image(?::url)?["'][^>]*content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image(?::url)?["']/i,
+      /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i,
+    ]
+
+    for (const pattern of patterns) {
+      const matched = html.match(pattern)
+      if (matched) {
+        const absolute = absoluteUrl(matched[1], url)
+        if (absolute) return absolute
+      }
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 async function fetchPage({ url }) {
   const data = await getJson(`${baseURL}/v1/tools/fetch`, {
     method: 'POST',
@@ -68,7 +115,13 @@ async function fetchPage({ url }) {
   })
 
   const title = data.title ? `标题: ${data.title}\n` : ''
-  return `${title}链接: ${url}\n\n正文（Markdown）：\n${truncate(data.content, contentLimit)}`
+
+  // 主图单独抓一次：抓取接口只回正文，不给配图。
+  // 失败不报错，正文照常返回。
+  const cover = await coverImageOf(url)
+  const coverLine = cover ? `主图: ${cover}\n` : ''
+
+  return `${title}链接: ${url}\n${coverLine}\n正文（Markdown）：\n${truncate(data.content, contentLimit)}`
 }
 
 function now() {
@@ -315,7 +368,10 @@ const TOOLS = [
   },
   {
     name: 'fetch',
-    description: '抓取单个网页正文，返回 Markdown。用于读取搜索结果里值得细看的页面。',
+    description:
+      '抓取单个网页正文，返回 Markdown。用于读取搜索结果里值得细看的页面。' +
+      '顺带返回页面主图（og:image），有的话返回值里会有一行「主图: https://...」，' +
+      '可以直接写进回复：![配图](那个地址)。没有主图的站就没有这一行，别硬凑。',
     inputSchema: {
       type: 'object',
       properties: {
