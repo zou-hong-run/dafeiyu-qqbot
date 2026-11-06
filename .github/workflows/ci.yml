@@ -31,9 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 版本必须和 packageManager 一致：lockfile 是 pnpm 12 生成的，
+      # 用 9 的话 setup-node 的 cache: pnpm 执行 pnpm store path 会直接失败
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 12
 
       - uses: actions/setup-node@v4
         with:
