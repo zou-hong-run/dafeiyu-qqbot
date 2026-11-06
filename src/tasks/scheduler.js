@@ -20,6 +20,11 @@ const RETRY_DELAY_MS = 4_000
 let tasks = []
 let deps = { sendMessage: null, runTask: null, selfHeal: null, recallSent: null, requestRestart: null }
 let lastTickKey = ''
+let timer = null
+let lastTickAt = 0
+
+// 20 秒一次：足够覆盖每分钟 cron，又不会太频繁
+const TICK_INTERVAL_MS = 20_000
 
 function load() {
   try {
@@ -340,7 +345,13 @@ async function fire(task, options = {}) {
   }
 }
 
-// 启动时补跑：上次该跑的时刻没跑（进程当时没在跑），就补一次
+// 启动时补跑：上次该跑的时刻没跑（进程当时没在跑），就补一次。
+//
+// 原来只在启动后 20 秒跑一次，结果「到点了没触发」只能等下一个 cron 周期（一小时）。
+// 现在每次 tick 都会走一遍：只要发现某个任务的上次触发时刻没跑过、且不超过 6 小时，
+// 就补上。同一个时间点只补一次，避免失败后每 20 秒重试轰炸。
+const catchUpTried = new Set()
+
 async function catchUpMissed() {
   const now = Date.now()
   for (const task of tasks) {
@@ -354,13 +365,19 @@ async function catchUpMissed() {
     const anchor = Math.max(Number(task.lastRunAt) || 0, Number(task.createdAt) || 0)
     if (anchor >= plannedAt) continue
 
-    console.log(`[定时] 补跑 ${task.id}，错过 ${new Date(plannedAt).toLocaleString('zh-CN')}`)
+    const key = `${task.id}@${plannedAt}`
+    if (catchUpTried.has(key)) continue
+    catchUpTried.add(key)
+    if (catchUpTried.size > 200) catchUpTried.clear()
+
+    console.log(`[定时] 补跑 ${task.id}，错过 ${new Date(plannedAt).toLocaleString('zh-CN', { hour12: false })}`)
     await fire(task, { catchUp: true, plannedAt })
   }
 }
 
 function tick() {
   const now = new Date()
+  lastTickAt = now.getTime()
   const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`
   if (key === lastTickKey) return
   lastTickKey = key
@@ -371,6 +388,51 @@ function tick() {
     if (!cronMatches(task.cron, now)) continue
     fire(task).catch((error) => console.error('[定时] 执行异常：', error?.message ?? error))
   }
+
+  // 命中失败也别干等一小时：这一分钟里没跑成的，下一轮补上
+  catchUpMissed().catch((error) => console.error('[定时] 补跑异常：', error?.message ?? error))
+}
+
+/** 下一次该跑的时刻，用来判断 cron 到底是没解析对还是调度器没在跑 */
+export function nextMatchOf(expr, from = new Date()) {
+  const raw = String(expr ?? '').trim()
+  if (raw.split(/\s+/).length !== 5) return null
+
+  try {
+    return CronExpressionParser.parse(raw, { currentDate: from })
+      .next()
+      .toDate()
+      .toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 调度器实时状态。`/diag` 会原样打出来。
+ *
+ * 为什么要有这个：出过「到点了没触发」，然后只能靠猜——是 cron 写错了、
+ * 还是调度器压根没启动、还是任务被停用了。三个都能从这几个数字里直接看出来。
+ */
+export function schedulerStatus() {
+  const now = Date.now()
+  return {
+    initialized: Boolean(timer),
+    tickIntervalSeconds: TICK_INTERVAL_MS / 1000,
+    lastTickAt: lastTickAt || null,
+    tickAgeSeconds: lastTickAt ? Math.round((now - lastTickAt) / 1000) : null,
+    total: tasks.length,
+    enabled: tasks.filter((task) => task.enabled).length,
+    items: tasks.map((task) => ({
+      id: task.id,
+      cron: task.cron,
+      enabled: Boolean(task.enabled),
+      running: Boolean(task.running),
+      nextAt: nextMatchOf(task.cron),
+      lastRunAt: task.lastRunAt,
+      lastStatus: task.lastStatus,
+    })),
+  }
 }
 
 export function initScheduler({ sendMessage, runTask, selfHeal, recallSent, requestRestart }) {
@@ -378,11 +440,16 @@ export function initScheduler({ sendMessage, runTask, selfHeal, recallSent, requ
   tasks = load()
   persist() // 把清干净的 running 写回磁盘
 
-  const timer = setInterval(tick, 20_000)
+  timer = setInterval(tick, TICK_INTERVAL_MS)
   timer.unref?.()
+  lastTickAt = Date.now()
 
   const active = tasks.filter((task) => task.enabled).length
-  console.log(`[定时] 已加载 ${tasks.length} 个任务（启用 ${active} 个）`)
+  console.log(`[定时] 已加载 ${tasks.length} 个任务（启用 ${active} 个），每 ${TICK_INTERVAL_MS / 1000} 秒检查一次`)
+  // 把每个任务的下次触发时间打出来：cron 写错或没解析上，启动时就能看见
+  for (const task of tasks.filter((item) => item.enabled)) {
+    console.log(`[定时]   ${task.id} ${task.cron} → 下次 ${nextMatchOf(task.cron) ?? '解析失败'}`)
+  }
 
   // 等网关和依赖就绪后再补跑，避免启动瞬间发不出去
   setTimeout(() => {

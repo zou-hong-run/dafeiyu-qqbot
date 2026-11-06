@@ -155,6 +155,27 @@ export const COMMANDS = [
 
       lines.push(`被动回复剩余额度：${Math.max(0, 4 - passiveCountOf(event))} / 4`)
 
+      // 定时任务到点没触发时，靠这几行区分三种情况：
+      // 调度器没启动 / cron 解析不出下次时间 / 任务被停用了
+      try {
+        const { schedulerStatus } = await import('../tasks/scheduler.js')
+        const status = schedulerStatus()
+        lines.push(
+          `调度器：${status.initialized ? '运行中' : '未初始化（没启动）'}` +
+            `｜任务 ${status.total}（启用 ${status.enabled}）` +
+            `｜上次检查 ${status.tickAgeSeconds === null ? '从未' : `${status.tickAgeSeconds} 秒前`}`,
+        )
+        for (const item of status.items.slice(0, 5)) {
+          lines.push(
+            `  ${item.id}｜${item.cron}｜${item.enabled ? '启用' : '已停用'}` +
+              `｜下次 ${item.nextAt ?? '解析失败'}` +
+              `${item.lastStatus ? `｜上次 ${item.lastStatus}` : ''}`,
+          )
+        }
+      } catch (error) {
+        lines.push(`调度器状态读取失败：${error?.message ?? error}`)
+      }
+
       await reply(`自检结果：\n${lines.join('\n')}`)
     },
   },
