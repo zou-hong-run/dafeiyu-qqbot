@@ -37,7 +37,11 @@ export const SHIELDED_DIRS = [
   path.dirname(envFile), // 外部密钥文件所在目录
   '/root', // 家目录：SSH 私钥、云凭据、bash_history、.pm2 快照都在这
   '/home', // 其他用户的家目录
-  '/www', // 宝塔的站点目录：网站源码和 wp-config 这类配置文件
+  // 宝塔的站点源码和面板数据。注意不能整个 /www 都遮：
+  // node / pnpm 装在 /www/server/nodejs，遮了之后沙箱里连 node 都跑不了，
+  // 机器人改完代码没法自检，只能靠猜。
+  '/www/wwwroot',
+  '/www/server/panel',
   '/etc/sudoers.d',
 ]
 
