@@ -2,7 +2,7 @@
 
 `@tencent-connect/qqbot-nodejs` v1.0.5 的全部公开能力，以及我们用它做了什么。
 
-适配层在 `src/qq/client.js`——业务代码只调这里导出的函数，不直接碰 SDK。
+适配层在 `src/channel/qq.js`——业务代码只调这里导出的函数，不直接碰 SDK。
 
 ## 已用
 

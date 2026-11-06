@@ -22,4 +22,4 @@ export {
   start,
   stop,
   selfOpenid,
-} from './qq/client.js'
+} from './channel/qq.js'

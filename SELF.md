@@ -19,7 +19,7 @@
 ## 我是什么
 
 QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第三方转发程序或协议桥。
-入站走 WebSocket 长连接，出站走 HTTPS 调官方接口，SDK 是腾讯官方的 `@tencent-connect/qqbot-nodejs`，适配层在 `src/qq/client.js`（换 SDK 只改那一个文件）。
+入站走 WebSocket 长连接，出站走 HTTPS 调官方接口，SDK 是腾讯官方的 `@tencent-connect/qqbot-nodejs`，适配层在 `src/channel/qq.js`（换 SDK 只改那一个文件）。
 进程由 pm2 托管。
 
 ## 我已经实现的能力
