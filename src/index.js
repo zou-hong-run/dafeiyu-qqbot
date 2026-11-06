@@ -513,10 +513,16 @@ onInteraction(async (interaction) => {
   }
 
   const picked = resolveChoiceById(matched[1], Number(matched[2]))
+
   if (!picked) {
-    // 已过期或已经被选过：告诉对方「这个不行了」，别让人干等。
-    // code=1 是「操作失败」，比 code=2（操作频繁）更贴合这个场景
+    // 题目不存在或已过期
     await acknowledgeInteraction(interaction?.id, 1)
+    return
+  }
+
+  if (picked.taken) {
+    // 已经被别人选过了：用 code=3（重复操作），客户端提示和「失败」不一样
+    await acknowledgeInteraction(interaction?.id, 3)
     return
   }
 
@@ -526,7 +532,12 @@ onInteraction(async (interaction) => {
   const groupId = interaction.group_openid
   const userId = interaction.group_member_openid ?? interaction.user_openid
 
-  // 互动事件里没有昵称，也拿不到被动回复的 msg_id，所以这里按主动消息发
+  // 互动事件里没有昵称：从群记录反查，查不到就显示 openid 后四位
+  const nickname = isGroup
+    ? groupLog.nicknameOf(groupId, userId) || `用户${String(userId ?? '').slice(-4)}`
+    : '对方'
+
+  // 互动事件里没有被动回复的 msg_id 上下文，这里按主动消息发
   const event = {
     message_type: isGroup ? 'group' : 'private',
     group_id: groupId,
@@ -537,7 +548,7 @@ onInteraction(async (interaction) => {
       isGroup ? sendGroup(groupId, payload) : sendPrivate(userId, payload),
   }
 
-  const note = `${picked.choice}\n（对方刚在「${picked.question}」这道选择题里选了这一项）`
+  const note = `${picked.choice}\n（${nickname} 刚在「${picked.question}」这道选择题里选了这一项）`
   enqueue(picked.sessionKey, () => handleMessage(event, 'at', note))
 })
 

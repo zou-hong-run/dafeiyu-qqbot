@@ -128,8 +128,20 @@ export function clear(groupId) {
 
 // 昵称 → openid 对照表，只列真人（跳过 bot），按最后发言时间倒序
 // 给模型看的：要 @ 人、要长期记人，都得知道 openid，光有昵称不管用
-export function memberTable(entries, max = 40) {
-  const seen = new Map()
+/** 从群记录里反查某个 openid 的昵称，查不到返回空串 */
+export function nicknameOf(groupId, openid) {
+  const id = String(openid ?? '')
+  if (!id) return ''
+
+  const entries = load(groupId)
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i]
+    if (String(entry.u ?? '') === id && entry.n) return String(entry.n)
+  }
+  return ''
+}
+
+export function memberTable(entries, max = 40) {  const seen = new Map()
   for (let i = entries.length - 1; i >= 0 && seen.size < max; i -= 1) {
     const entry = entries[i]
     const id = String(entry.u ?? '')

@@ -13,10 +13,12 @@ test('按钮点击按 id 找回原题', () => {
   assert.equal(picked.sessionKey, 'test:btn-1')
 })
 
-test('选过一次之后不能重复选', () => {
+test('选过一次之后，第二个人点会被告知已被选走', () => {
   const entry = putChoice('test:btn-2', { question: 'q', options: ['甲', '乙'] })
-  assert.ok(resolveChoiceById(entry.id, 0))
-  assert.equal(resolveChoiceById(entry.id, 0), null)
+  assert.ok(resolveChoiceById(entry.id, 0).choice)
+
+  const second = resolveChoiceById(entry.id, 1)
+  assert.equal(second.taken, true, '应该标记为已被选过，而不是当不存在')
 })
 
 test('不存在的 id 返回 null', () => {
@@ -35,4 +37,20 @@ test('按钮布局带上全部选项和回调数据', () => {
 
 test('少于两个选项时不创建', () => {
   assert.equal(putChoice('test:btn-4', { question: 'q', options: ['只有一个'] }), null)
+})
+
+test('没投过的题返回 null，和被选走的区分开', () => {
+  assert.equal(resolveChoiceById('c_never_seen', 0), null)
+})
+
+test('第一个人选中的是哪个就是哪个', () => {
+  const entry = putChoice('test:btn-5', { question: 'q', options: ['甲', '乙', '丙'] })
+
+  const first = resolveChoiceById(entry.id, 2)
+  assert.equal(first.choice, '丙')
+
+  // 后来的人点别的，会被记为「已选走」，不会覆盖第一个人的结果
+  const second = resolveChoiceById(entry.id, 0)
+  assert.equal(second.taken, true)
+  assert.equal(second.choice, '丙', '返回的仍是第一个人的选择')
 })

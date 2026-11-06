@@ -54,7 +54,9 @@ acknowledgeInteraction(id, code)              // 5 秒内回执
 
 按钮的 `action.type=1`（回调）、`permission.type=2`（所有人可点）是按官方文档写的。回执走 `PUT /interactions/{id}`，文档特别注明 **id 不带 `INTERACTION_CREATE:` 前缀**——SDK 传的是事件体 `d`，所以 `interaction.id` 天然是对的，代码里还是加了剥离做兜底。
 
-回执码：0 成功 / 1 失败 / 2 频繁 / 3 重复 / 4 无权限 / 5 仅管理员。选过期或已选过的选项回 1，不是 2。
+回执码：0 成功 / 1 失败 / 2 频繁 / 3 重复 / 4 无权限 / 5 仅管理员。
+
+群聊里发选择题时是**先到先得**：第一个人点了就把题从待选池里摘掉，后面的人再点回 `code=3`（重复操作）。点击者的 openid 从 interaction 事件拿，昵称从群记录反查，查不到就显示后四位。
 
 **一个坑**：按钮只能挂在 markdown 消息上（文档原话「在 markdown 消息的基础上，支持消息最底部挂载按钮」）。发 `msg_type: 0` 的文本消息带 `keyboard` 字段，平台会**静默忽略**——不报错，只是用户看不到按钮，很难查。所以 `sendWithKeyboard()` 内部走的是 `sendMarkdown`。
 

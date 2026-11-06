@@ -8,6 +8,8 @@ const MAX_OPTIONS = 5
 
 const pending = new Map()
 const pendingById = new Map()
+// 已答过的题：id → { at, choice }。用来区分「被别人抢先选了」和「压根不存在/已过期」
+const answered = new Map()
 
 function sweep() {
   const now = Date.now()
@@ -64,10 +66,22 @@ export function resolveChoice(sessionKey, text) {
   return { question: entry.question, choice: option }
 }
 
-/** 按钮点击：按 id 找回原题，按 index 取选项 */
+/**
+ * 按钮点击：按 id 找回原题，按 index 取选项。
+ * 返回三种情况：
+ *   { sessionKey, question, choice }  选中了
+ *   { taken: true, choice }           这题已经被别人选过了
+ *   null                              不存在或已过期
+ */
 export function resolveChoiceById(id, index) {
-  const entry = pendingById.get(String(id ?? ''))
-  if (!entry) return null
+  const key = String(id ?? '')
+  const entry = pendingById.get(key)
+
+  if (!entry) {
+    const done = answered.get(key)
+    if (done && Date.now() - done.at <= TTL_MS) return { taken: true, choice: done.choice }
+    return null
+  }
 
   if (Date.now() - entry.at > TTL_MS) {
     pendingById.delete(entry.id)
@@ -80,6 +94,14 @@ export function resolveChoiceById(id, index) {
 
   pendingById.delete(entry.id)
   pending.delete(entry.sessionKey)
+  answered.set(key, { at: Date.now(), choice: option })
+
+  if (answered.size > 200) {
+    for (const [oldKey, item] of answered) {
+      if (Date.now() - item.at > TTL_MS) answered.delete(oldKey)
+    }
+  }
+
   return { sessionKey: entry.sessionKey, question: entry.question, choice: option }
 }
 
