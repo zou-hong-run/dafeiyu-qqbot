@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { fetchPublic } from '../mcp-server/net-guard.js'
 
 // 入站附件：SDK 会把 attachments 解析成 event.message 里的 image / voice / video / file 元素
 // 我们之前完全忽略它们，用户发语音、发图，机器人等于什么都收不到
@@ -112,7 +113,9 @@ async function downloadOne(item, index, dir) {
   try {
     fs.mkdirSync(dir, { recursive: true })
 
-    const response = await fetch(item.url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
+    // 走统一的出网校验：URL 来自 QQ 平台，理论上可信，
+    // 但「所有出网都过 net-guard」这条规则不该有例外，纵深防御成本也就一行。
+    const response = await fetchPublic(item.url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
     if (!response.ok) return { ...item, error: `下载失败 HTTP ${response.status}` }
 
     const buffer = Buffer.from(await response.arrayBuffer())
