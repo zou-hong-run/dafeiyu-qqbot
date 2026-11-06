@@ -38,6 +38,28 @@ import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSend
 import { claim, coolingDown, enqueue, hasReplied, initTrigger, markReplied, mentionsBot, recordGroupMessage, scheduleJudge, touch, worthJudging } from './channel/trigger.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * 当前跑的到底是哪一版。
+ *
+ * 反复出现「代码改了、机器人口径没变」的来回确认，根因是分不清
+ * 「没拉到代码」和「拉到了没重启」。启动时把版本和 commit 打出来，
+ * 一眼就能对上：commit 对得上但行为没变，那就是别的原因。
+ */
+function buildInfo() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
+    const head = fs.readFileSync(path.join(projectRoot, '.git/HEAD'), 'utf8').trim()
+
+    if (!head.startsWith('ref:')) return `v${pkg.version}｜${head.slice(0, 7)}`
+
+    const ref = head.slice(4).trim()
+    const hash = fs.readFileSync(path.join(projectRoot, '.git', ref), 'utf8').trim().slice(0, 7)
+    return `v${pkg.version}｜${hash}`
+  } catch {
+    return 'v?'
+  }
+}
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
 const AUDITED_TOOLS = new Set([
@@ -841,6 +863,7 @@ try {
 
   await startBot()
   console.log('[启动] 已连接。私聊直接发消息，群聊 @ 我即可对话。')
+  console.log(`[启动] 版本 ${buildInfo()}｜进程启动于 ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
   console.log(`[启动] 人格: ${env.personaName}，模型: ${env.model}，记忆: 短期 ${env.historyTurns} 轮 / 中期摘要 / 长期事实`)
   console.log(
     `[启动] 群聊：${env.groupAutoReply ? `提到「${env.botAliases.join('/')}」必回（冷却 ${env.groupTriggerCooldown / 1000}s）` : '名字触发已关'}；` +
