@@ -60,6 +60,12 @@ export function isDangerousTool(name) {
 
 // 管理员判定：配了白名单就只认名单，没配就只认私聊
 export function isAdmin(scope, actor) {
+  // 只传一个参数时它会当成 scope，actor 变 undefined，静默返回 false——
+  // 表现是「管理员的私聊读群、删别人任务全被拒」，而且没人知道为什么。喊一声。
+  if (arguments.length < 2) {
+    console.warn('[policy] isAdmin 少传了参数，签名是 isAdmin(scope, actor)')
+  }
+
   const admins = env.adminOpenIds
   if (admins.length > 0) return Boolean(actor) && admins.includes(String(actor))
   return scope === 'private'

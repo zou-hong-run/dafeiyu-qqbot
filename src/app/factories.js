@@ -416,7 +416,8 @@ export function schedulerFor(event) {
   }
 
   const actor = String(event.user_id ?? '')
-  const admin = isAdmin(actor)
+  // isAdmin 的签名是 (scope, actor)：只传 actor 会当成 scope，actor 变 undefined，永远 false
+  const admin = isAdmin(isGroup ? 'group' : 'private', actor)
 
   return {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt, createdBy: actor }),

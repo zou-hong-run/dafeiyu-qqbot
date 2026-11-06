@@ -117,3 +117,18 @@ test('read_group_history 私聊也放行，越界与否交给 resolveHistoryTarg
   // 群友仍然读不到别的群
   assert.throws(() => resolveHistoryTarget({ current: '', wanted: 'gB', isAdmin: false }), /管理员/)
 })
+
+// isAdmin 的签名是 (scope, actor)。只传一个参数时它会被当成 scope，
+// actor 变成 undefined，永远返回 false——这个坑真踩过：
+// 管理员在私聊里读群记录被拒、在群里删别人的任务也被拒，而且没有任何报错。
+test('isAdmin 少传 actor 时会告警，不静默失败', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {})
+  isAdmin('group')
+  assert.equal(warn.mock.callCount(), 1, '少传参数必须喊一声')
+})
+
+test('参数传全时不告警', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {})
+  isAdmin('group', 'someone')
+  assert.equal(warn.mock.callCount(), 0)
+})
