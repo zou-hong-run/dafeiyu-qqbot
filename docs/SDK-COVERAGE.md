@@ -11,7 +11,7 @@
 | WebSocket 连接 + 自动重连 | `client.js` | 心跳、RESUME、按关闭码分类处理都是 SDK 做的 |
 | **session 持久化** | `data/qq-session.json` | 重启后先试 RESUME，不用重新 IDENTIFY，少丢几条消息 |
 | 文本发送 | `sendGroup` / `sendPrivate` | 有 `msgId` 走被动回复，没有走主动消息 |
-| **@ 成员** | `segment.at()` | 拼成 `<qqbot-at-user id="..." />`，`all` 对应 `<qqbot-at-everyone />` |
+| **@ 成员** | `segment.at()` | 拼成 `<qqbot-at-user id="..." />`。**群聊里 @ 具体某人只有 markdown 消息支持**，没权限时自动摘掉标签降级成纯文本；`@全体成员` 文本消息也支持（需群管理员，每群每天 1 次） |
 | 图片 / 语音 / 视频 / 文件 | `segment.image` 等 | 转成 `sendImage/sendVoice/sendVideo/sendFile` |
 | **大文件分块上传** | 自动 | ≥5MB 自动走 `upload_prepare → PUT → complete`，调用方无感 |
 | **上传去重** | 内置 | 同字节同目标 TTL 内只传一次 |

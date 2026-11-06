@@ -139,6 +139,24 @@ async function dispatch(target, payload, msgId) {
 
   if (media.length === 0) {
     if (!text.trim()) throw new Error('消息内容为空')
+
+    // 群聊里 @ 具体某人只有 markdown 消息支持（官方文档：@用户 → markdown 消息）。
+    // 纯文本发出去的话，标签会原样显示成一段字符串。@全体成员例外，文本消息也支持。
+    const needsMarkdown = target.scope === 'group' && /<qqbot-at-user/.test(text)
+
+    if (needsMarkdown) {
+      try {
+        return await bot.sendMarkdown({ ...target, msgId }, text)
+      } catch (error) {
+        // 没开通 markdown 权限：把标签摘掉退回纯文本，别把标签露给用户看
+        const plain = text.replace(TAG_PATTERN, '').replace(/[ \t]{2,}/g, ' ').trim()
+        console.warn(
+          `[qq] @ 需要 markdown 权限，已降级为纯文本：${String(error?.message ?? error).slice(0, 80)}`,
+        )
+        return bot.sendText({ ...target, msgId }, plain || text)
+      }
+    }
+
     return bot.sendText({ ...target, msgId }, text)
   }
 
