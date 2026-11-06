@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { env } from '../config/env.js'
 import { budgetFor } from '../ops/budget.js'
 import { sensitiveReason } from '../ops/file-policy.js'
+import { assertPublicUrlResolved } from '../mcp-server/net-guard.js'
 import { segment, sendGroup, uploadMedia } from '../bot.js'
 import { deliver, postMessage } from './sender.js'
 
@@ -54,6 +55,8 @@ export function imageSenderFor(event, send = (payload) => deliver(event, payload
     if (!target) throw new Error('缺少图片路径')
 
     if (/^https?:\/\//i.test(target)) {
+      // 地址可能来自网页内容（模型转手），先把内网和云元数据挡掉
+      await assertPublicUrlResolved(target)
       await send(segment.image(target))
       return target
     }
@@ -112,6 +115,7 @@ export function audioSenderFor(event, send = (payload) => deliver(event, payload
     if (!target) throw new Error('缺少音频路径')
 
     if (/^https?:\/\//i.test(target)) {
+      await assertPublicUrlResolved(target)
       await send(segment.audio(target))
       return target
     }
@@ -277,6 +281,7 @@ export function videoSenderFor(event, send = (payload) => deliver(event, payload
     if (!target) throw new Error('缺少视频路径')
 
     if (/^https?:\/\//i.test(target)) {
+      await assertPublicUrlResolved(target)
       await send(segment.video(target))
       return target
     }

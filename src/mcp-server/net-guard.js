@@ -156,6 +156,19 @@ export function assertPublicUrl(raw) {
 const DEFAULT_MAX_REDIRECTS = 5
 
 /**
+ * 字面量校验 + 域名解析校验，返回 URL 对象。
+ *
+ * 用于「把地址交给第三方去下载」的场景（send_image / send_video / send_audio）：
+ * 我们不会亲自请求它，所以没法用 fetchPublic 逐跳复核，但至少能挡住
+ * 直接写内网 IP、以及解析到内网的域名。
+ */
+export async function assertPublicUrlResolved(raw) {
+  const url = assertPublicUrl(raw)
+  await assertResolvesPublic(url.hostname)
+  return url
+}
+
+/**
  * 域名解析后逐个 IP 再判一次。
  * 只校验字面量的话，`127.0.0.1.nip.io`、`localtest.me` 这类解析到内网的域名
  * 会原样通过——这就是 DNS rebinding。

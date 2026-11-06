@@ -259,7 +259,14 @@ export function assertZipSafe(buffer, limits = ZIP_LIMITS) {
   }
 
   // 声明值过关也可能是伪造的，实测一遍才算数
-  return measureInflation(buffer, limits)
+  const actual = measureInflation(buffer, limits)
+  if (actual.ratio > limits.maxRatio) {
+    // 用实测解压量对比文件实际大小算的压缩比，这个伪造不了
+    throw new Error(
+      `实测压缩比 ${actual.ratio.toFixed(0)}:1 异常（正常表格不会超过 100:1），疑似解压炸弹，不解析`,
+    )
+  }
+  return actual
 }
 
 // Excel 单元格的值可能是数字、日期、富文本、公式、超链接，统一转成可读字符串

@@ -1,11 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sensitiveReason } from '../ops/file-policy.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const MAX_CONTENT = 200_000
 
-function resolveSafe(input) {
+// 工具输出超过上限时会落盘到这里，模型需要能读回来。
+// 它是 file-policy 里 tmp/ 的唯一例外，读放行、写不拦（写了也只是临时文件）。
+const SPILL_PREFIX = 'tmp/tool-output/'
+
+function resolveSafe(input, { write = false } = {}) {
   const raw = String(input ?? '').trim()
   if (!raw) throw new Error('缺少文件路径')
 
@@ -15,8 +20,11 @@ function resolveSafe(input) {
   }
 
   const rel = path.relative(projectRoot, target).split(path.sep).join('/')
-  if (rel === '.env' || rel.startsWith('.env.') || rel === 'data' || rel.startsWith('data/')) {
-    throw new Error('.env 和 data 目录不开放读写，密钥和记忆不允许通过工具改动')
+  // 密钥、记忆、日志、备份、依赖一律不开：read_file 是群聊里任何人都能调的只读工具，
+  // 只挡 .env 和 data/ 的话，backups/ 里那份 memory.json 副本照样读得出来
+  if (!(rel.startsWith(SPILL_PREFIX) && !write)) {
+    const reason = sensitiveReason(rel)
+    if (reason) throw new Error(`${rel} 不开放读写：${reason}`)
   }
 
   return { target, rel }
@@ -28,7 +36,7 @@ function truncate(text, limit) {
 }
 
 async function writeFile({ path: inputPath, content }) {
-  const { target, rel } = resolveSafe(inputPath)
+  const { target, rel } = resolveSafe(inputPath, { write: true })
   const body = String(content ?? '')
 
   if (body.length === 0) throw new Error('内容为空')
@@ -41,7 +49,7 @@ async function writeFile({ path: inputPath, content }) {
 }
 
 async function editFile({ path: inputPath, old_string, new_string, replace_all }) {
-  const { target, rel } = resolveSafe(inputPath)
+  const { target, rel } = resolveSafe(inputPath, { write: true })
   if (!fs.existsSync(target)) throw new Error(`文件不存在：${rel}，先用 read_file 看一眼`)
 
   const stat = fs.statSync(target)

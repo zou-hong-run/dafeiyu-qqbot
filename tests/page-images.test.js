@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { pickImages, pageImagesOf, usableImage } from '../src/mcp-server/page-images.js'
 
-// 新闻页配图提取：og:image 优先，正文图兜底，二维码/logo 一律丢掉
+// 新闻页配图提取：og:image 优先，正文图兜底，二维码/logo 一律丢掉。
+// 网页内容由网站作者控制，所以每个候选地址还要过一遍出网校验。
 
 const BASE = 'https://www.news.cn/politics/20261104/c.html'
 
@@ -64,19 +65,56 @@ test('没有可用图时返回空数组', () => {
 })
 
 test('pageImagesOf 抓页面后返回图片', async () => {
-  const fetchImpl = async () => ({
-    ok: true,
-    text: async () => '<meta property="og:image" content="https://cdn.x.com/cover.jpg">',
-  })
+  const fetchImpl = async () =>
+    new Response('<meta property="og:image" content="https://cdn.x.com/cover.jpg">', {
+      headers: { 'Content-Type': 'text/html' },
+    })
   assert.deepEqual(await pageImagesOf(BASE, { fetchImpl }), ['https://cdn.x.com/cover.jpg'])
 })
 
 test('pageImagesOf 出错或非 200 时返回空，不抛', async () => {
-  const notOk = async () => ({ ok: false, text: async () => '' })
+  const notOk = async () => new Response('', { status: 404 })
   assert.deepEqual(await pageImagesOf(BASE, { fetchImpl: notOk }), [])
 
   const boom = async () => {
     throw new Error('network down')
   }
   assert.deepEqual(await pageImagesOf(BASE, { fetchImpl: boom }), [])
+})
+
+test('页面里指向内网或云元数据的图一律丢掉', () => {
+  const html = [
+    '<meta property="og:image" content="http://169.254.169.254/latest/meta-data/">',
+    '<img src="http://127.0.0.1:8080/admin/a.png">',
+    '<img src="http://[::ffff:169.254.169.254]/x.jpg">',
+    '<img src="http://10.0.0.1/logo.png">',
+    '<img src="https://cdn.x.com/ok.jpg">',
+  ].join('\n')
+  assert.deepEqual(pickImages(html, BASE), ['https://cdn.x.com/ok.jpg'])
+})
+
+test('og:image 写内网地址时不采用，退回正文图', () => {
+  const html = [
+    '<meta property="og:image" content="http://100.100.100.200/latest/meta-data/">',
+    '<img src="https://cdn.x.com/photo.jpg">',
+  ].join('\n')
+  assert.deepEqual(pickImages(html, BASE), ['https://cdn.x.com/photo.jpg'])
+})
+
+test('pageImagesOf 拒绝抓内网地址，一个请求都不发', async () => {
+  let called = false
+  const fetchImpl = async () => {
+    called = true
+    return new Response('<img src="https://cdn.x.com/a.jpg">')
+  }
+
+  assert.deepEqual(await pageImagesOf('http://127.0.0.1:8080/admin', { fetchImpl }), [])
+  assert.deepEqual(await pageImagesOf('http://169.254.169.254/latest/meta-data/', { fetchImpl }), [])
+  assert.equal(called, false, '内网地址根本不该发出请求')
+})
+
+test('响应体超大时只读前面一段', async () => {
+  const huge = '<img src="https://cdn.x.com/a.jpg">' + 'x'.repeat(5_000_000)
+  const fetchImpl = async () => new Response(huge)
+  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl }), ['https://cdn.x.com/a.jpg'])
 })
