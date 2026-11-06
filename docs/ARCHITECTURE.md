@@ -324,6 +324,9 @@ bwrap
 | 自动同步会把 `.github/`、`package.json` 推上去 | `BLOCKED_PATHS` 加上这两项，避免模型改动直接接进 CI |
 | 群成员能 `note_lesson` 写进系统提示词、`clear_memory` 清记忆 | 两者收进 `DANGEROUS_TOOLS` |
 | `/kill`、`/clean` 任何群成员都能用 | 加 `adminOnly` |
+| `xlsx@0.18.5` 两个高危 CVE，npm 上没有修复版 | 换 `exceljs`（npm 生态内、可审计），`.xls` 明确报不支持 |
+| `NODE_OPTIONS` 和 `--require` 等价，能绕开 argv 检查 | 从 `SAFE_ENV_KEYS` 移除，注释写明原因 |
+| `@` 的 openid 不转义，能伪造 `<qqbot-at-everyone />` | id 走白名单正则，用户文本里的协议标签一律剥离 |
 | 所有 MCP 服务都拿到模型 key | 只有内置服务注入 `baseEnv`，注册进来的第三方服务拿不到 |
 | 断网按命令文本判断 | 删掉 `NEEDS_NETWORK`，`--unshare-net` 无条件加 |
 | `downloads/` 整块可写 | 收成只有 `tmp/` 可写，附件会话隔离不再被绕 |

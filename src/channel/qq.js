@@ -25,7 +25,9 @@ const sessionPersistence = {
   save(state) {
     try {
       fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true })
-      fs.writeFileSync(SESSION_FILE, JSON.stringify(state))
+      // sessionId 落到磁盘，权限收到只有属主能读
+      fs.writeFileSync(SESSION_FILE, JSON.stringify(state), { mode: 0o600 })
+      fs.chmodSync(SESSION_FILE, 0o600)
     } catch {
       // 存不下就算了，下次重新 IDENTIFY
     }
@@ -68,7 +70,19 @@ export const segment = {
 
 // QQ 官方协议里，@ 和表情都是拼在 content 里的特殊标签，不是独立消息段。
 // 标签格式取自平台实际收发的报文。
-function flatten(payload) {
+//
+// 这里要防两件事：
+//   1. at 的 id 被塞进引号闭合标签，伪造「@全体」
+//   2. 用户原文里的 <qqbot-...> / <emoji:...> 被平台当真标签解析
+const AT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+const TAG_PATTERN = /<\s*\/?\s*(?:qqbot-[a-z-]+|emoji:\d+)[^>]*>/gi
+
+/** 剥掉文本里的协议标签：用户说什么就发什么，别让平台把它当指令 */
+export function sanitizeText(value) {
+  return String(value ?? '').replace(TAG_PATTERN, '')
+}
+
+export function flatten(payload) {
   const parts = Array.isArray(payload) ? payload : [payload]
   let text = ''
   const media = []
@@ -76,7 +90,7 @@ function flatten(payload) {
   for (const part of parts) {
     if (part == null) continue
     if (typeof part === 'string') {
-      text += part
+      text += sanitizeText(part)
       continue
     }
 
@@ -84,11 +98,19 @@ function flatten(payload) {
     const data = part.data ?? {}
 
     if (type === 'text') {
-      text += String(data.text ?? '')
+      text += sanitizeText(data.text)
     } else if (type === 'at') {
-      text += data.user_id === 'all' ? '<qqbot-at-everyone />' : `<qqbot-at-user id="${data.user_id}" />`
+      const id = String(data.user_id ?? '')
+      if (id === 'all') {
+        text += '<qqbot-at-everyone />'
+      } else if (AT_ID_PATTERN.test(id)) {
+        text += `<qqbot-at-user id="${id}" />`
+      } else {
+        throw new Error(`@ 的 openid 不合法：${id.slice(0, 40)}`)
+      }
     } else if (type === 'face') {
-      text += `<emoji:${data.id}>`
+      const id = Number(data.id)
+      if (Number.isInteger(id) && id >= 0 && id <= 348) text += `<emoji:${id}>`
     } else if (type === 'image' || type === 'audio' || type === 'video' || type === 'file') {
       media.push({ type, data })
     }
@@ -169,8 +191,8 @@ export function uploadMedia(options) {
  */
 export async function postRaw(scope, targetId, body) {
   const token = await bot.tokenManager.getAccessToken(env.appId, env.appSecret)
-  const path =
-    scope === 'group' ? `/v2/groups/${targetId}/messages` : `/v2/users/${targetId}/messages`
+  const id = encodeURIComponent(String(targetId ?? ''))
+  const path = scope === 'group' ? `/v2/groups/${id}/messages` : `/v2/users/${id}/messages`
   return bot.apiClient.request(token, 'POST', path, body)
 }
 

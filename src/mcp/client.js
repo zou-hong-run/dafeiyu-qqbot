@@ -13,7 +13,10 @@ const SAFE_ENV_KEYS = [
   'PATH', 'Path', 'SYSTEMROOT', 'SystemRoot', 'TEMP', 'TMP',
   // 视频解析用：yt-dlp 的路径和伪装开关，子进程要靠这两个
   'YTDLP_PATH', 'YTDLP_IMPERSONATE',
-  'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'NODE_OPTIONS',
+  'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME',
+  // 注意：NODE_OPTIONS 绝对不能传。
+  // NODE_OPTIONS=--require=/tmp/x.js 和 node --require 等价，
+  // MCP 子进程是主进程在宿主侧 spawn 的，bwrap 和 --clearenv 都管不到它。
 ]
 
 const CONNECTION_ERROR = /connection closed|not connected|EPIPE|ECONNRESET|socket hang up/i

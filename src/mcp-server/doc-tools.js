@@ -73,18 +73,54 @@ async function readDocx(buffer) {
   return { text: String(value ?? ''), format: 'Word' }
 }
 
-async function readSpreadsheet(buffer, ext) {
-  const lib = await requireLib('xlsx', 'Excel')
-  const XLSX = lib.default ?? lib
-  const workbook = XLSX.read(buffer, { type: 'buffer' })
-  const parts = []
+// Excel 单元格的值可能是数字、日期、富文本、公式、超链接，统一转成可读字符串
+function cellText(value) {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  if (typeof value !== 'object') return String(value)
 
-  for (const name of workbook.SheetNames.slice(0, 5)) {
-    const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name], { blankrows: false })
-    if (csv.trim()) parts.push(`【${name}】\n${csv}`)
+  if (Array.isArray(value.richText)) return value.richText.map((item) => item.text ?? '').join('')
+  if (value.text !== undefined) return String(value.text)
+  if (value.result !== undefined) return String(value.result)
+  if (value.hyperlink) return String(value.hyperlink)
+  return ''
+}
+
+async function readSpreadsheet(buffer, ext) {
+  // .csv 本身就是文本，不用解析库，直接读前 200 行
+  if (ext === '.csv') {
+    const lines = buffer.toString('utf8').split(/\r?\n/).filter(Boolean).slice(0, 200)
+    return { text: lines.join('\n'), format: 'CSV' }
   }
 
-  return { text: parts.join('\n\n'), format: ext === '.xls' ? 'Excel 97-2003' : 'Excel', sheets: workbook.SheetNames.length }
+  if (ext === '.xls') {
+    throw new Error('老版 Excel（.xls）解析不了，另存为 .xlsx 再发')
+  }
+
+  const lib = await requireLib('exceljs', 'Excel')
+  const ExcelJS = lib.default ?? lib
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
+
+  const parts = []
+  for (const sheet of workbook.worksheets.slice(0, 5)) {
+    const rows = []
+    sheet.eachRow((row) => {
+      const cells = []
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const text = cellText(cell.value)
+        if (text) cells.push(text)
+      })
+      if (cells.length > 0) rows.push(cells.join(','))
+    })
+    if (rows.length > 0) parts.push(`【${sheet.name}】\n${rows.join('\n')}`)
+  }
+
+  return {
+    text: parts.join('\n\n'),
+    format: 'Excel',
+    sheets: workbook.worksheets.length,
+  }
 }
 
 async function readPlain(buffer) {

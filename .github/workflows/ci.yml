@@ -49,6 +49,11 @@ jobs:
       - name: 单元测试
         run: pnpm test
 
+      # 上游有漏洞时提醒，但不阻塞——镜像源不一定支持 audit 接口
+      - name: 依赖审计
+        run: pnpm audit --prod --registry=https://registry.npmjs.org
+        continue-on-error: true
+
       # 冒烟启动会真的执行仓库里的代码。只在 push 到 main 时跑，
       # PR 不跑——PR 可能来自 fork，执行它的代码等于给外部提交一个执行入口。
       - name: 冒烟启动（不连 QQ，只验证装配）
