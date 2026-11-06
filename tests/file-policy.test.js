@@ -93,3 +93,14 @@ test('黑名单自己做路径规范化', () => {
   assert.equal(sensitiveReason('./downloads/a.png'), '')
   assert.equal(sensitiveReason('src/../README.md'), '')
 })
+
+test('markdown 外链图也要过地址校验（源码级守门）', () => {
+  // 外链图交给平台去抓，但地址是模型从网页里抄的，必须验过再发。
+  const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/channel/qq.js')
+  const source = fs.readFileSync(file, 'utf8')
+  const start = source.indexOf('export async function rewriteMarkdownImages')
+  assert.ok(start > 0)
+
+  const body = source.slice(start, start + 1500)
+  assert.match(body, /assertPublicUrl\(/, '外链图地址要校验')
+})
