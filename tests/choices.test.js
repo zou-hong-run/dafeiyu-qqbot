@@ -27,7 +27,8 @@ test('不存在的 id 返回 null', () => {
 
 test('按钮布局带上全部选项和回调数据', () => {
   const entry = putChoice('test:btn-3', { question: 'q', options: ['甲', '乙', '丙'] })
-  const buttons = choiceKeyboard(entry).content.rows[0].buttons
+  const rows = choiceKeyboard(entry).content.rows
+  const buttons = rows.flatMap((row) => row.buttons)
 
   assert.equal(buttons.length, 3)
   assert.equal(buttons[0].action.type, 1, '回调按钮')
@@ -35,17 +36,28 @@ test('按钮布局带上全部选项和回调数据', () => {
   assert.equal(buttons[2].action.data, `choice:${entry.id}:2`)
 })
 
-test('选项多时按钮分行，不挤成一行', () => {
-  // 群里实际看到过「1. ...」：5 个按钮挤一行，每个宽度只够显示省略号
+test('一个按钮占一行，宽度才够显示文字', () => {
+  // 群里实际看到过「1. ...」和「1. 再来……」：一行塞多个按钮时平台平分宽度，
+  // 中文很快被截断。独占一行才能把字显示全。
   const entry = putChoice('test:btn-5', { question: 'q', options: ['一', '二', '三', '四', '五'] })
   const rows = choiceKeyboard(entry).content.rows
 
-  assert.equal(rows.length, 2, '5 个选项应该分两行')
-  assert.equal(rows[0].buttons.length, 3)
-  assert.equal(rows[1].buttons.length, 2)
-  // 序号要接着排，不能每行都从 1 开始
-  assert.equal(rows[1].buttons[0].render_data.label, '4. 四')
-  assert.equal(rows[1].buttons[1].action.data, `choice:${entry.id}:4`)
+  assert.equal(rows.length, 5)
+  for (const row of rows) assert.equal(row.buttons.length, 1)
+
+  assert.equal(rows[0].buttons[0].render_data.label, '1. 一')
+  assert.equal(rows[3].buttons[0].render_data.label, '4. 四')
+  assert.equal(rows[4].buttons[0].action.data, `choice:${entry.id}:4`)
+})
+
+test('选项文字太长时按钮上截断，回传的数据不受影响', () => {
+  const long = '这个选项写得特别特别长长长长长长'
+  const entry = putChoice('test:btn-6', { question: 'q', options: [long, '短'] })
+  const label = choiceKeyboard(entry).content.rows[0].buttons[0].render_data.label
+
+  assert.ok(label.length <= 10, `按钮文字不能超过 10 个字符，实际 ${label.length}`)
+  // 截断只影响显示，点下去仍然是完整选项
+  assert.equal(resolveChoiceById(entry.id, 0).choice, long)
 })
 
 test('少于两个选项时不创建', () => {

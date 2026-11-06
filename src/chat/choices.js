@@ -120,16 +120,18 @@ export function choiceText({ question, options }) {
  * 构造按钮布局。每个选项一个按钮，点了触发 INTERACTION_CREATE。
  * action.type=1 是回调按钮（不往会话里发指令），permission.type=2 表示所有人可点。
  *
- * 按钮要分行：5 个挤在一行时每个按钮宽度只剩一点，群里看到的是「1. ...」，
- * 完全看不出点什么。每行最多 3 个，空间留给文字。
+ * 一个按钮占一行。QQ 客户端是按「这一行有几个按钮」平分宽度的：
+ * 3 个一行时每个只剩三分之一，中文很快被截成「1. 再来……」；
+ * 5 个挤一行时更惨，直接变成「1. ...」。独占一行才能把字显示全。
  */
-const BUTTONS_PER_ROW = 3
+const BUTTONS_PER_ROW = 1
 
 export function choiceKeyboard(entry) {
   const buttons = entry.options.map((label, index) => ({
     id: `b_${entry.id}_${index}`,
     render_data: {
-      label: `${index + 1}. ${label}`.slice(0, 20),
+      // 独占一行时大约能放下 10 个字符，再多平台自己截
+      label: `${index + 1}. ${label}`.slice(0, 10),
       visited_label: `已选 ${index + 1}`,
       style: index === 0 ? 1 : 0,
     },
