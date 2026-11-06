@@ -56,6 +56,22 @@ export function clip(text) {
   return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
 }
 
+/**
+ * 这段文本是不是从中间被切开的：结尾是半截 URL / 没闭合的 markdown 链接，
+ * 或者开头是一个没有协议的域名（`treetcn.com/articles/...`）。
+ *
+ * 我们自己的分段已经不会切链接了，出现这种文本说明是上游动的手——
+ * 多半是模型自己把一条回复拆成两次 send_to_group，群里就出现死链。
+ * 这里只管喊一声，不猜它原本该拼成什么。
+ */
+export function looksSliced(text) {
+  const value = String(text ?? '').trim()
+  if (!value) return false
+  if (/https?:\/\/[^\s()（）]*$/.test(value)) return true
+  if (/\]\([^)]*$/.test(value)) return true
+  return /^[a-z0-9][a-z0-9.-]*\.(?:com|cn|net|org|io|co|me|dev)(?:[/)]|$)/i.test(value)
+}
+
 export function isStaleMessage(event, ttlMs = 4 * 60_000) {
   const ts = Number(event?.timestamp) * 1000
   if (!Number.isFinite(ts) || ts <= 0) return false
@@ -388,9 +404,21 @@ export function chunkText(text, limit = Math.max(200, env.replyMaxChars)) {
         win.lastIndexOf(' '),
       )
       cut = cut > room * 0.35 ? cut + 1 : room
-      // 别把 URL 切断，切点落在链接里就往前挪
+      // 别把 URL 切断：切点落在链接里就往前挪。
+      // 往前挪不动（链接从 rest 开头就在，safeCutIndex 返回“整段别切”）时，
+      // 先把手上攒的 buf 发出去，让这一行从空 buf 重新开始——
+      // 否则 guarded 比 cut 大，下面的兜底不生效，链接照样被劈成两半。
       const guarded = safeCutIndex(rest, cut)
-      if (guarded > 0 && guarded < cut) cut = guarded
+      if (guarded > 0 && guarded < cut) {
+        cut = guarded
+      } else if (guarded === 0 || guarded >= rest.length) {
+        if (buf.trim()) {
+          flush()
+          continue
+        }
+        // buf 是空的还装不下：单条上限比一条链接还短，只能硬切
+        cut = room
+      }
       buf += rest.slice(0, cut)
       flush()
       rest = rest.slice(cut)
@@ -531,6 +559,9 @@ export async function sendMarkdownTo(target, text) {
 export async function sendReply(event, text) {
   const body = clip(String(text ?? '').trim())
   if (!body) return
+  if (looksSliced(body)) {
+    console.warn('[发送] 这段文本像是从中间切开的（半截链接），发出去会打不开——检查是不是被拆成了两次发送')
+  }
 
   try {
     if (env.markdownReply && markdownState !== false) {

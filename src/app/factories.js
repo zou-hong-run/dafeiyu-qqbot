@@ -1,7 +1,7 @@
 import { selfOpenid, segment, sendGroup, sendPrivate, sendWakeup, sendWithKeyboard } from '../bot.js'
 import { env } from '../config/env.js'
 import * as groupLog from '../memory/group-log.js'
-import { clip, withSendRetry } from '../channel/sender.js'
+import { clip, splitMarkdown, withSendRetry } from '../channel/sender.js'
 import { sendMediaToGroup } from '../channel/media.js'
 import { noteSentToGroup } from '../channel/recall.js'
 import { audit, auditKeyOf } from './audit.js'
@@ -87,7 +87,6 @@ export function groupSenderFor(event) {
     }
 
     if (!text) throw new Error('缺少要发送的内容：文字放 text，文件放 path')
-    if (text.length > 2000) throw new Error(`内容 ${text.length} 字，太长了，压到 2000 字以内`)
 
     const groupId = !target || target === 'current' ? currentGroup : target
     if (!groupId) throw new Error('没指定群，也没法确定当前群：私聊里要传 groupId')
@@ -97,26 +96,48 @@ export function groupSenderFor(event) {
       .split(/[,，\s]+/)
       .map((id) => id.trim())
       .filter(Boolean)
-    const body = clip(text)
-    // 有 at 时拼成消息段数组（正文也走 segment.text，避免裸字符串在数组里不被识别）；
-    // 没 at 就是纯文本，但开了 markdown 就走 markdown 通道，让列表、加粗生效
-    const payload =
-      atIds.length > 0 ? [...atIds.map((id) => segment.at(id)), segment.text(body)] : body
 
-    const sent = await sendGroup(groupId, payload, { markdown: atIds.length === 0 && env.markdownReply })
-    noteSentToGroup(groupId, sent?.id, text, 'text')
+    // 长文自动分段，模型不用自己拆。
+    // 它拆过一次就出过事：把 [华尔街见闻](https://wallstreetcn.com/...) 从
+    // https://walls | treetcn.com/... 切成两条消息，第一条里的链接就死了。
+    // 有 at 时只发一条（@ 只对第一条有意义），照旧 clip。
+    let parts
+    if (atIds.length > 0) {
+      parts = [clip(text)]
+    } else {
+      parts = env.markdownReply ? splitMarkdown(text) : chunkText(text)
+      if (parts.length === 0) parts = [clip(text)]
+    }
+
+    let sent
+    for (let index = 0; index < parts.length; index += 1) {
+      if (index > 0) await new Promise((resolve) => setTimeout(resolve, 600))
+
+      const body = parts[index]
+      // 有 at 时拼成消息段数组（正文也走 segment.text，避免裸字符串在数组里不被识别）；
+      // 没 at 就是纯文本，但开了 markdown 就走 markdown 通道，让列表、加粗生效
+      const payload =
+        index === 0 && atIds.length > 0
+          ? [...atIds.map((id) => segment.at(id)), segment.text(body)]
+          : body
+
+      sent = await sendGroup(groupId, payload, { markdown: atIds.length === 0 && env.markdownReply })
+      noteSentToGroup(groupId, sent?.id, body, 'text')
+    }
+
+    const detail = parts.length > 1 ? `，分 ${parts.length} 段` : ''
     console.log(
-      `[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字${atIds.length ? `，@${atIds.join('/')}` : ''}）`,
+      `[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字${detail}${atIds.length ? `，@${atIds.join('/')}` : ''}）`,
     )
 
     audit(
       auditKeyOf(event),
       'send_to_group',
-      { groupId, chars: text.length, at: atIds.length },
-      `已发送 ${text.length} 字${atIds.length ? `，@${atIds.length} 人` : ''}`,
+      { groupId, chars: text.length, parts: parts.length, at: atIds.length },
+      `已发送 ${text.length} 字${detail}${atIds.length ? `，@${atIds.length} 人` : ''}`,
     )
 
-    return { groupId, chars: text.length, messageId: sent?.id ?? '', at: atIds }
+    return { groupId, chars: text.length, parts: parts.length, messageId: sent?.id ?? '', at: atIds }
   }
 }
 

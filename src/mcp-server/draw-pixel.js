@@ -254,6 +254,8 @@ export const DRAW_TOOLS = [
     name: 'draw_pixel',
     description:
       '画一张像素风 PNG 存到 downloads/，然后可以用 send_image 发出去。' +
+      '只在有人明确让你画图（表情包、示意图、像素画）时用；' +
+      '**不要拿它冒充新闻配图或真实照片** —— 抓不到原图就直说没有。' +
       '两种用法：传 preset（heart 爱心 / star 星星 / fish 鱼 / camera 相机），' +
       '或者传 pattern 自己拼——每行一个字符串，# 是主色，. 是透明，其他字符按顺序用 colors 里的颜色。' +
       'colors 支持 #rrggbb 或 black/white/red 这类名字；scale 是整数倍放大（1-20，默认 8）。' +

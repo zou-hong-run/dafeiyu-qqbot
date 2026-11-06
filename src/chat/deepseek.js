@@ -502,12 +502,14 @@ const LOCAL_TOOLS = [
         '它会把附件从会话目录提升到 downloads 再发出去。' +
         'groupId 只能传 list_groups 查到的群 openid（形如 206309398B037A4DC0D07DA18C6997FB），' +
         '不是 QQ 群号——纯数字群号平台不认；当前群可以传 current。' +
+        '正文一次传完整就行：长了系统会自动分段（不会把 markdown 链接切断），' +
+        '**不要自己把一条回复拆成几次调用发出去**，那样会把链接和列表劈成两半。' +
         '主动消息有频控：同一个群别连发太多条。',
       parameters: {
         type: 'object',
         properties: {
           groupId: { type: 'string', description: '目标群 openid（不是 QQ 群号），或 current 表示当前群' },
-          text: { type: 'string', description: '要发的正文，2000 字以内；发文件时不用传' },
+          text: { type: 'string', description: '要发的正文，一次给完整（长了会自动分段）；发文件时不用传' },
           path: {
             type: 'string',
             description: '要发的文件：提示词里的附件路径（downloads/incoming/...）或 downloads 里的文件名',
