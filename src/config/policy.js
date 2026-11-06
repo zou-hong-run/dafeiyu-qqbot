@@ -95,7 +95,9 @@ export const TOOL_POLICY = {
   note_situation: OPEN,
   ask_choice: OPEN,
   todo_write: OPEN,
-  read_group_history: GROUP_ONLY,
+  // 私聊也要开：管理员在私聊里指定 group_id 读某个群。
+  // 具体能不能读由 resolveHistoryTarget() 判，群友私聊调会被拒。
+  read_group_history: READ_ONLY,
   read_profile: GROUP_ONLY,
   list_groups: READ_ONLY,
   send_to_group: OPEN,

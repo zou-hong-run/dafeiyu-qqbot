@@ -107,3 +107,13 @@ test('私聊里非管理员一律拒绝，管理员也得给出群 id', () => {
   assert.throws(() => resolveHistoryTarget({ current: '', wanted: 'gB' }), /管理员/)
   assert.throws(() => resolveHistoryTarget({ current: '', isAdmin: true }), /group_id/)
 })
+
+test('read_group_history 私聊也放行，越界与否交给 resolveHistoryTarget 判', () => {
+  // 只是把工具暴露出来；真正能不能读某个群，由 resolveHistoryTarget 决定。
+  // 之前这里是 GROUP_ONLY，管理员在私聊里连工具都看不到，报「只能在群聊用」。
+  assert.equal(isToolAllowed('read_group_history', 'private'), true)
+  assert.equal(isToolAllowed('read_group_history', 'group'), true)
+
+  // 群友仍然读不到别的群
+  assert.throws(() => resolveHistoryTarget({ current: '', wanted: 'gB', isAdmin: false }), /管理员/)
+})

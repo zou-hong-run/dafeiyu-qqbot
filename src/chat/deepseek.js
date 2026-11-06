@@ -1114,10 +1114,10 @@ async function runTool(
 
   if (name === 'read_group_history') {
     if (!isToolAllowed('read_group_history', scope, actor)) {
-      return `${denyReason('read_group_history', scope, actor)}。群聊记录只能在群里读。`
+      return `${denyReason('read_group_history', scope, actor)}。`
     }
     if (typeof historyReader !== 'function') {
-      return '当前场景读不到群聊记录（私聊没有群记录）。'
+      return '当前场景读不到群聊记录。'
     }
     try {
       return await historyReader(args.limit, args.mode, args.group_id)
