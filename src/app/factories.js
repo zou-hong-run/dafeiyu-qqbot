@@ -8,7 +8,7 @@ import { audit, auditKeyOf } from './audit.js'
 import { chunkText } from '../channel/sender.js'
 import { formatProfile } from '../memory/profiles.js'
 import { commitAndPush, describeStatus, pullLatest } from '../ops/sync.js'
-import { filterTools, isAdmin } from '../config/policy.js'
+import { filterTools, isAdmin, resolveHistoryTarget } from '../config/policy.js'
 import { getTools, toDeepSeekTools } from '../mcp/client.js'
 import { addSchedule, listSchedules, removeSchedule } from '../tasks/scheduler.js'
 import { putChoice, choiceKeyboard, choiceText } from '../chat/choices.js'
@@ -304,8 +304,36 @@ export function sendToTarget(target, payload) {
 }
 
 // 主对话用：从 event 取群 id
-export function historyReaderFor(event) {
-  return historyReaderForGroup(event?.group_id)
+/**
+ * 读群记录。
+ *
+ * 群里默认只读当前群；管理员可以额外指定 group_id 读别的群。
+ * 私聊里本来没有群上下文，管理员传 group_id 也能读——
+ * 「我在私聊问某个群的情况」这种需求，只按当前会话过滤是答不了的。
+ */
+export function historyReaderFor(event, { isAdmin: admin = false } = {}) {
+  const current = event?.group_id ? String(event.group_id) : ''
+
+  const readerOf = (groupId) => {
+    // 当前群不校验：可能刚拉进群还没记录，historyReaderForGroup 会给专门提示
+    if (groupId === current) return historyReaderForGroup(groupId)
+
+    const known = groupLog.listGroups().some((group) => group.id === groupId)
+    if (!known) {
+      const ids = groupLog
+        .listGroups()
+        .map((group) => group.id)
+        .slice(0, 8)
+        .join('、')
+      throw new Error(`没有这个群的记录：${groupId}。已知的群：${ids || '（一个都没有）'}`)
+    }
+    return historyReaderForGroup(groupId)
+  }
+
+  return async (limit, mode, groupId) => {
+    const target = resolveHistoryTarget({ current, wanted: groupId, isAdmin: admin })
+    return readerOf(target)(limit, mode)
+  }
 }
 
 export function sessionKeyOf(event) {

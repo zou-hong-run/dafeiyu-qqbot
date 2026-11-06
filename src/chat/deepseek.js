@@ -430,10 +430,11 @@ const LOCAL_TOOLS = [
     function: {
       name: 'read_group_history',
       description:
-        '读取当前这个群最近的聊天记录（时间 + 昵称 + 内容）。只能在群里用，只能看到当前群，' +
-        '看不到别的群，也看不到私聊。被问「刚才大家聊了什么」「我们的聊天记录」「复盘一下」时用它。' +
+        '读取某个群最近的聊天记录（时间 + 昵称 + 内容）。被问「刚才大家聊了什么」「复盘一下」时用它。' +
+        '群里默认读当前群；管理员可以再传 group_id 读别的群，私聊里管理员也能指定群来读（先用 list_groups 查 openid）。' +
         '如果返回为空或只有几条，说明这个群没开「获取群内全部消息」，我只能看到 @ 我的那几条。' +
-        '要统计「谁说过话 / 群里有几个人」，把 mode 设成 people，直接返回昵称和发言条数。',
+        '要统计「谁说过话」，把 mode 设成 people，直接返回昵称和发言条数。' +
+        '注意：QQ 没有给机器人「拉群成员名单」的接口，潜水没发过言的人数不出来。',
       parameters: {
         type: 'object',
         properties: {
@@ -442,6 +443,10 @@ const LOCAL_TOOLS = [
             type: 'string',
             description: 'messages=原始对话（默认）；people=只返回出现过的人和各自发言条数',
             enum: ['messages', 'people'],
+          },
+          group_id: {
+            type: 'string',
+            description: '只对管理员有效：要看哪个群的记录（list_groups 查到的 openid）。不传就是当前群',
           },
         },
       },
@@ -1093,7 +1098,7 @@ async function runTool(
       return '当前场景读不到群聊记录（私聊没有群记录）。'
     }
     try {
-      return await historyReader(args.limit, args.mode)
+      return await historyReader(args.limit, args.mode, args.group_id)
     } catch (error) {
       return `读群聊记录失败：${error?.message ?? error}`
     }

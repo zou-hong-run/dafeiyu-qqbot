@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DANGEROUS_TOOLS, TOOL_POLICY, filterTools, isAdmin, isDangerousTool, isToolAllowed } from '../src/config/policy.js'
+import { DANGEROUS_TOOLS, TOOL_POLICY, filterTools, isAdmin, isDangerousTool, isToolAllowed, resolveHistoryTarget } from '../src/config/policy.js'
 
 test('高危工具都在名单里', () => {
   for (const name of ['shell', 'run_script', 'write_file', 'edit_file', 'start_task', 'broadcast', 'file_copy']) {
@@ -84,4 +84,26 @@ test('没在权限表里的工具默认拒绝', () => {
   // add_mcp 注册进来的服务不自动获得权限，要在 TOOL_POLICY 里显式加条目
   assert.equal(isToolAllowed('some_unknown_tool', 'private', 'u1'), false)
   assert.equal(isToolAllowed('some_unknown_tool', 'group', 'u1'), false)
+})
+
+// 读群记录的权限：群里只能读当前群，私聊只有管理员能指定群。
+// 这条规则写漏了，等于群友能读别的群的聊天记录。
+test('群里默认读当前群，不传就不越界', () => {
+  assert.equal(resolveHistoryTarget({ current: 'gA' }), 'gA')
+  assert.equal(resolveHistoryTarget({ current: 'gA', wanted: 'gA' }), 'gA')
+  assert.equal(resolveHistoryTarget({ current: 'gA', wanted: '  gA  ' }), 'gA')
+})
+
+test('群友不能读别的群', () => {
+  assert.throws(() => resolveHistoryTarget({ current: 'gA', wanted: 'gB' }), /管理员/)
+})
+
+test('管理员可以读别的群，也可以私聊指定群', () => {
+  assert.equal(resolveHistoryTarget({ current: 'gA', wanted: 'gB', isAdmin: true }), 'gB')
+  assert.equal(resolveHistoryTarget({ current: '', wanted: 'gB', isAdmin: true }), 'gB')
+})
+
+test('私聊里非管理员一律拒绝，管理员也得给出群 id', () => {
+  assert.throws(() => resolveHistoryTarget({ current: '', wanted: 'gB' }), /管理员/)
+  assert.throws(() => resolveHistoryTarget({ current: '', isAdmin: true }), /group_id/)
 })

@@ -223,7 +223,7 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
       choiceSender: choiceSenderFor(event),
-      historyReader: historyReaderFor(event),
+      historyReader: historyReaderFor(event, { isAdmin: isAdmin(String(event?.user_id ?? '')) }),
       profileReader: profileReaderFor(event),
       groupSender: groupSenderFor(event),
       wakeSender: wakeSenderFor(event),

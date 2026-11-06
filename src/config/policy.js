@@ -209,3 +209,24 @@ export function describeAdminPolicy() {
   if (env.shellGroupEnabled) return '未设 ADMIN_OPENIDS，高危工具已对所有人放开（含群聊），风险很高'
   return '未设 ADMIN_OPENIDS，高危工具只在私聊可用，群里禁用；建议配 ADMIN_OPENIDS'
 }
+
+/**
+ * 决定这次读群记录到底读哪个群。
+ *
+ * 群里默认只能读当前群；私聊本来没有群上下文，只有管理员能指定 group_id。
+ * 抽成纯函数是因为这条规则很容易写漏——漏了就等于群友能读别的群。
+ */
+export function resolveHistoryTarget({ current = '', wanted = '', isAdmin = false } = {}) {
+  const now = String(current ?? '').trim()
+  const want = String(wanted ?? '').trim()
+
+  if (now && (!want || want === now)) return now
+
+  if (!isAdmin) {
+    throw new Error(now ? '只能在当前群读记录，读别的群要管理员权限' : '私聊里读群记录要管理员权限')
+  }
+  if (!want) {
+    throw new Error('私聊里读群记录要传 group_id，可以先用 list_groups 查群 openid')
+  }
+  return want
+}
