@@ -52,7 +52,7 @@ async function git(args, { allowFail = false } = {}) {
 }
 
 // 没装 git 或不是仓库时不要反复报错：安静跳过，只在启动日志里提示一次
-export async function isRepo() {
+async function isRepo() {
   const probe = await git(['rev-parse', '--is-inside-work-tree'], { allowFail: true })
   return probe.ok && probe.out === 'true'
 }
@@ -66,7 +66,7 @@ function localStamp(date = new Date()) {
   )
 }
 
-export async function repoStatus() {
+async function repoStatus() {
   const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true })).out || 'unknown'
   const dirty = (await git(['status', '--porcelain'], { allowFail: true })).out
   const changes = dirty ? dirty.split('\n').filter(Boolean) : []

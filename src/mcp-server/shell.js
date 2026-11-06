@@ -77,7 +77,7 @@ function classifyFile(ext) {
 
 const BASE_MEM_MB = 64
 
-export function estimateResourceUsage(text, cwd) {
+function estimateResourceUsage(text, cwd) {
   let memMB = BASE_MEM_MB
   const notes = []
   const seen = new Set()

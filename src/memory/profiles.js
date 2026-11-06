@@ -33,7 +33,7 @@ function hourBand(hours) {
  * 聚合一个群的成员画像
  * @returns {{ groupId, analyzed, span, members }}
  */
-export function buildProfile(groupId, window = ANALYSIS_WINDOW) {
+function buildProfile(groupId, window = ANALYSIS_WINDOW) {
   const entries = groupLog.recent(groupId, window)
   if (entries.length === 0) {
     return { groupId, analyzed: 0, span: null, members: [] }

@@ -98,21 +98,10 @@ export function noteSituation(sessionKey, { person = '', topic = '', mood = '' }
   return { duplicated: false, item }
 }
 
-export function pendingSituations(sessionKey, limit = PROMPT_LIMIT) {
+function pendingSituations(sessionKey, limit = PROMPT_LIMIT) {
   const list = state[sessionKey] ?? []
   return list.filter((item) => !item.resolved).slice(-limit).reverse()
 }
-
-export function allPending(limit = 20) {
-  const result = []
-  for (const [sessionKey, list] of Object.entries(state)) {
-    for (const item of list) {
-      if (!item.resolved) result.push({ sessionKey, ...item })
-    }
-  }
-  return result.sort((a, b) => b.at - a.at).slice(0, limit)
-}
-
 export function resolveSituation(sessionKey, id) {
   const list = state[sessionKey] ?? []
   const target = id
@@ -165,22 +154,6 @@ export function situationPrompt(sessionKey) {
 
   return `【还在进行中的事】\n${lines.join('\n')}\n（有下文就顺手提一句，别每次都问）`
 }
-
-export function formatSituations(sessionKey) {
-  const list = state[sessionKey] ?? []
-  if (list.length === 0) return '还没记下什么正在进行的事。'
-
-  return list
-    .slice()
-    .reverse()
-    .map((item) => {
-      const flag = item.resolved ? '已解决' : item.followUpAt ? '已回访' : '进行中'
-      const who = item.person || '对方'
-      return `${item.id}｜${flag}｜${who}：${item.topic}`
-    })
-    .join('\n')
-}
-
 export function clearSituations(sessionKey) {
   if (!state[sessionKey]) return false
   delete state[sessionKey]

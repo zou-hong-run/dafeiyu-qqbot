@@ -90,7 +90,7 @@ function detectTopics(entries) {
     .map(([label]) => label)
 }
 
-export function rebuildGroup(groupId, window = WINDOW) {
+function rebuildGroup(groupId, window = WINDOW) {
   const entries = groupLog.recent(groupId, window)
   if (entries.length === 0) {
     delete state[groupId]
@@ -180,26 +180,6 @@ export function knowledgePrompt(groupId) {
     `主要发言者：${memberText}${topicText}`
   )
 }
-
-export function getKnowledge(groupId) {
-  return state[groupId] ?? null
-}
-
-export function formatKnowledge(groupId) {
-  const knowledge = state[groupId]
-  if (!knowledge) return '这个群还没有沉淀出画像，先让它多聊几句。'
-
-  const lines = [
-    `本群沉淀（${knowledge.analyzed} 条记录）`,
-    `成员：${knowledge.members.map((item) => `${item.name} ${item.count}条/${item.share}%`).join('、')}`,
-  ]
-
-  if (knowledge.topics.length > 0) lines.push(`话题倾向：${knowledge.topics.join('、')}`)
-  lines.push(`更新时间：${new Date(knowledge.updatedAt).toLocaleString('zh-CN', { hour12: false })}`)
-
-  return lines.join('\n')
-}
-
 export function flushKnowledge() {
   clearTimeout(saveTimer)
   persist()

@@ -14,11 +14,6 @@ const LESSON_HEADING = '## 踩坑记录（自己总结的，别删）'
 const MAX_LESSONS = 40
 
 let cache = { mtime: -1, text: '' }
-
-export function selfDocPath() {
-  return docFile
-}
-
 export function selfDoc() {
   try {
     const stat = fs.statSync(docFile)
@@ -85,18 +80,4 @@ export function appendLesson({ symptom = '', cause = '', fix = '' } = {}) {
   fs.writeFileSync(docFile, updated, 'utf8')
   cache.mtime = -1
   return { duplicated: false, line, total: 1 }
-}
-
-export function listLessons(limit = MAX_LESSONS) {
-  try {
-    const raw = fs.readFileSync(docFile, 'utf8')
-    const headingIndex = raw.indexOf(LESSON_HEADING)
-    if (headingIndex < 0) return []
-    const rest = raw.slice(headingIndex + LESSON_HEADING.length)
-    const nextHeading = rest.search(/\n##\s/)
-    const section = nextHeading >= 0 ? rest.slice(0, nextHeading) : rest
-    return lessonLines(section).slice(-limit)
-  } catch {
-    return []
-  }
 }

@@ -8,7 +8,7 @@ const SENSITIVE_PATH = /(\.env\b|data\/|id_rsa|\.ssh\/|authorized_keys|\/etc\/(p
 // 外传工具：命令里同时出现敏感路径和这些，基本就是往外偷
 const EXFIL_TOOL = /\b(curl|wget|nc|ncat|ncat|scp|ssh|ftp|socat)\b/i
 
-export const BLOCKED_PATTERNS = [
+const BLOCKED_PATTERNS = [
   { pattern: /rm\s+(-[a-zA-Z]+\s+)*\/(\s|$|\*)/, reason: '禁止删除根目录' },
   { pattern: /rm\s+(-[a-zA-Z]+\s+)*(~|\$HOME)(\/|\s|$)/, reason: '禁止删除用户主目录' },
   // 只允许删项目内的相对路径和 /tmp，别把宝塔站点、系统目录一起带走

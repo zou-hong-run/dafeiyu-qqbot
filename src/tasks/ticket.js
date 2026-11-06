@@ -157,15 +157,6 @@ export function finishTicket(id, { status, answer = '', error = '' }) {
   scheduleSave()
   return ticket
 }
-
-export function listTickets({ status, sessionKey, limit = 20 } = {}) {
-  return [...tickets.values()]
-    .filter((ticket) => (status ? ticket.status === status : true))
-    .filter((ticket) => (sessionKey ? ticket.sessionKey === sessionKey : true))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, limit)
-}
-
 export function activeTickets(sessionKey) {
   return [...tickets.values()].filter(
     (ticket) => ACTIVE.has(ticket.status) && (!sessionKey || ticket.sessionKey === sessionKey),
@@ -188,20 +179,6 @@ export function recoverTickets() {
   if (recovered.length > 0) scheduleSave()
   return recovered
 }
-
-export function describeTicket(ticket) {
-  const elapsed = Math.round(((ticket.finishedAt ?? Date.now()) - ticket.createdAt) / 1000)
-  const idle = Math.round((Date.now() - (ticket.progress?.at ?? ticket.createdAt)) / 1000)
-
-  return [
-    `${ticket.id} [${ticket.status}] ${ticket.goal.slice(0, 60)}`,
-    `  步数 ${ticket.step}｜已跑 ${elapsed}s｜空闲 ${idle}s｜第 ${ticket.attempts} 轮`,
-    ticket.error ? `  错误：${ticket.error}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
 export function flushTickets() {
   clearTimeout(saveTimer)
   persistNow()

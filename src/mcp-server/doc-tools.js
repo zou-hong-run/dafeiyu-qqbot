@@ -91,7 +91,7 @@ async function readPlain(buffer) {
   return { text: buffer.toString('utf8'), format: '纯文本' }
 }
 
-export async function readDocument(input) {
+async function readDocument(input) {
   const file = resolvePath(input)
   const stat = fs.statSync(file)
 

@@ -91,7 +91,7 @@ export function writeTodos(sessionKey, items) {
   return { items: list, progress: progressOf(list) }
 }
 
-export function progressOf(items) {
+function progressOf(items) {
   const done = items.filter((item) => item.status === 'done').length
   const doing = items.filter((item) => item.status === 'in_progress').length
   return { total: items.length, done, doing, open: items.length - done }
@@ -156,14 +156,6 @@ export function clearTodos(sessionKey) {
   scheduleSave()
   return true
 }
-
-export function formatTodos(sessionKey) {
-  const items = listTodos(sessionKey)
-  if (items.length === 0) return '当前没有任务清单。'
-  const { total, done } = progressOf(items)
-  return [`进度 ${done}/${total}`, ...items.map((item) => `${marker(item.status)} ${item.title}`)].join('\n')
-}
-
 export function flushTodos() {
   clearTimeout(saveTimer)
   persist()

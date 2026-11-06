@@ -96,13 +96,4 @@ export async function generateHotTake({ personaName = '' } = {}) {
 
   return take
 }
-
-export function lastTakeAt() {
-  return state.lastAt
-}
-
-export function flushHotTakes() {
-  persist()
-}
-
 load()

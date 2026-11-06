@@ -42,7 +42,7 @@ function persist() {
 }
 
 // 内容指纹：归一化空白后做 djb2，加上长度，足够区分「同一条早报」和「新一天的早报」
-export function fingerprint(text) {
+function fingerprint(text) {
   const raw = String(text ?? '').replace(/\s+/g, ' ').trim()
   let hash = 5381
   for (let i = 0; i < raw.length; i += 1) {
@@ -127,7 +127,7 @@ export function recordSent({ taskId, target, text, ids = [], note = '' } = {}) {
   return dupOf ? { duplicated: true, at: dupOf.t, preview: dupOf.preview } : { duplicated: false }
 }
 
-export function listOutbox(target, limit = 10) {
+function listOutbox(target, limit = 10) {
   const key = targetKey(target)
   return load()
     .filter((item) => item.target === key)
@@ -135,13 +135,3 @@ export function listOutbox(target, limit = 10) {
     .reverse()
 }
 
-export function formatOutbox(target, limit = 10) {
-  const list = listOutbox(target, limit)
-  if (list.length === 0) return '这个会话没有定时任务推送记录。'
-  return list
-    .map((item) => {
-      const time = new Date(item.t).toLocaleString('zh-CN', { hour12: false })
-      return `${time} ${item.taskId}｜${item.preview || '（无预览）'}`
-    })
-    .join('\n')
-}

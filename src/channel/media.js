@@ -147,7 +147,7 @@ const TTS_MAX_CHARS = 500
 // 只放行字母和连字符这个格式，别把任意字符串塞给命令行
 const VOICE_PATTERN = /^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2,10}){1,2}-[a-zA-Z]+Neural$/
 
-export const TTS_VOICES = {
+const TTS_VOICES = {
   'zh-CN-XiaoxiaoNeural': '晓晓 · 温和女声（默认）',
   'zh-CN-XiaoyiNeural': '晓伊 · 活泼少女',
   'zh-CN-YunxiNeural': '云希 · 年轻男声',
@@ -159,7 +159,7 @@ export const TTS_VOICES = {
   'zh-HK-HiuGaaiNeural': '曉佳 · 粤语女声',
 }
 
-export function resolveVoice(input) {
+function resolveVoice(input) {
   const voice = String(input ?? '').trim()
   if (!voice || voice === 'default') return TTS_VOICE
 
@@ -389,7 +389,7 @@ export async function sendMediaToGroup(groupId, inputPath, options = {}) {
   return { groupId: group, kind, name: path.basename(filePath), sizeMB: Number(mb.toFixed(2)) }
 }
 
-export function resolveSendableFile(target) {
+function resolveSendableFile(target) {
   const roots = [path.join(projectRoot, 'downloads'), projectRoot]
   const cleaned = String(target ?? '')
     .trim()

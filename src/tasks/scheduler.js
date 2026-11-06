@@ -59,7 +59,7 @@ export function cronMatches(expr, date = new Date()) {
 }
 
 // 上一次命中 cron 的时刻，找不到返回 null
-export function previousMatch(cronExpr, from = new Date()) {
+function previousMatch(cronExpr, from = new Date()) {
   const raw = String(cronExpr ?? '').trim()
   if (raw.split(/\s+/).length !== 5) return null
 
@@ -70,7 +70,7 @@ export function previousMatch(cronExpr, from = new Date()) {
   }
 }
 
-export function validateCron(expr) {
+function validateCron(expr) {
   const raw = String(expr ?? '').trim()
   if (!raw) return 'cron 不能为空'
 
@@ -390,24 +390,3 @@ export function initScheduler({ sendMessage, runTask, selfHeal, recallSent, requ
   }, CATCHUP_DELAY_MS).unref?.()
 }
 
-export function schedulerStats() {
-  return {
-    total: tasks.length,
-    enabled: tasks.filter((task) => task.enabled).length,
-  }
-}
-
-// 给自愈 agent 用的只读视图：它能看见任务是怎么配的，但不能直接改
-export function describeTask(taskId) {
-  const task = tasks.find((item) => item.id === taskId)
-  if (!task) return null
-  return {
-    id: task.id,
-    cron: task.cron,
-    when: describeCron(task.cron),
-    prompt: task.prompt,
-    target: task.target,
-    lastStatus: task.lastStatus,
-    lastRunAt: task.lastRunAt,
-  }
-}

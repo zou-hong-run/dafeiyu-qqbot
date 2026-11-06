@@ -74,7 +74,3 @@ export function recordTemplate({ goal, tools = [], steps = 0, note = '' } = {}) 
     return null
   }
 }
-
-export function listTemplates() {
-  return readItems()
-}

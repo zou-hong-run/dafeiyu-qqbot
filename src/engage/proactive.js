@@ -123,11 +123,3 @@ export function formatCandidates(candidates) {
     })
     .join('\n')
 }
-
-export function proactiveStats() {
-  return [...state.entries()].map(([groupId, record]) => ({
-    groupId,
-    lastAt: record.lastAt,
-    hourCount: record.hourCount,
-  }))
-}

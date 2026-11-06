@@ -17,6 +17,7 @@
     "pm2:logs": "pm2 logs dafeiyu",
     "pm2:status": "pm2 status dafeiyu",
     "check": "node scripts/check-refs.js",
+    "dead-code": "node scripts/dead-code.js",
     "diagnose": "node scripts/diagnose.js",
     "version:tag": "node scripts/release.js",
     "test": "node --test \"tests/**/*.test.js\"",

@@ -96,18 +96,7 @@ export function markHeal(taskId, signature, { ok = false, note = '', attempt = '
   persist()
 }
 
-export function recentHeals(limit = 10) {
+function recentHeals(limit = 10) {
   return load().slice(-limit).reverse()
 }
 
-export function formatHeals(limit = 10) {
-  const list = recentHeals(limit)
-  if (list.length === 0) return '还没有自愈记录。'
-  return list
-    .map((item) => {
-      const time = new Date(item.t).toLocaleString('zh-CN', { hour12: false })
-      const flag = item.ok ? '修好' : '没修好'
-      return `${time} ${item.taskId} ${flag}｜${item.sig}${item.note ? `｜${item.note}` : ''}`
-    })
-    .join('\n')
-}

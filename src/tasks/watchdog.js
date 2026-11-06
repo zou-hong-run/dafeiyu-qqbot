@@ -84,17 +84,3 @@ export function stopWatchdog() {
   timer = null
   started = false
 }
-
-export function watchdogSnapshot() {
-  return activeTickets()
-    .filter((ticket) => ticket.status === STATUS.running)
-    .map((ticket) => {
-      const full = getTicket(ticket.id)
-      return {
-        id: full.id,
-        step: full.step,
-        idle: Math.round((Date.now() - (full.progress?.at ?? full.createdAt)) / 1000),
-        streak: full.progress?.streak ?? 0,
-      }
-    })
-}

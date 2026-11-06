@@ -214,10 +214,3 @@ export async function cleanupIncoming(ttlHours = 24) {
   return removed
 }
 
-export function clearIncoming() {
-  try {
-    fs.rmSync(incomingRoot, { recursive: true, force: true })
-  } catch {
-    // 目录不存在或删不掉都不影响
-  }
-}

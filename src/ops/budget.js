@@ -37,7 +37,7 @@ const STATE_LABEL = {
   normal: '可以正常跑',
 }
 
-export function describeState(state) {
+function describeState(state) {
   return STATE_LABEL[state] ?? state
 }
 

@@ -5,7 +5,7 @@ export const SPILL_LIMIT = 7000
 export const SPILL_HEAD = 4000
 
 // 模型偶尔会输出 DSML 这类工具标记，而不是真的调用工具
-export const TOOL_MARKUP_PATTERN = /[｜|]{2}\s*DSML/i
+const TOOL_MARKUP_PATTERN = /[｜|]{2}\s*DSML/i
 
 /** 去掉工具标记：标记在中间就砍掉后面，整条都是标记就返回空 */
 export function stripToolMarkup(text) {
@@ -84,7 +84,6 @@ export function cleanReply(text) {
 
 // 中括号表情名（[旺柴]、[吃瓜]）在 QQ 官方 API 里不会渲染成表情，只会原样显示成文字。
 // 出站时不删，但要能识别出来提示模型别这么写。
-export const BRACKET_FACE_PATTERN = /\[[^\]\s]{1,6}\]/g
 
 /** 回复出站的统一收尾：先去工具标记，再做清理 */
 export function finalizeReply(text) {

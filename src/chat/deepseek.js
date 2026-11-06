@@ -703,7 +703,7 @@ function spillToolOutput(name, text) {
   }
 }
 
-export function wrapToolOutput(name, text) {
+function wrapToolOutput(name, text) {
   const raw = String(text ?? '')
   let body = raw
 

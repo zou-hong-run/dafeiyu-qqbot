@@ -93,9 +93,6 @@ function poolOf(event, limit = 5, groupId = '') {
     .reverse()
 }
 
-export function listSent(event, limit = 5) {
-  return poolOf(event, limit)
-}
 
 async function recallOne(entry) {
   if (entry.kind === 'group') return recallGroup(entry.target, entry.messageId)

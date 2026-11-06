@@ -136,7 +136,7 @@ export function passiveCountOf(event) {
 
 // 同一条消息还能被动回复几条。QQ 官方限制一条消息最多回 4 条，
 // 超了就只能发主动消息，而群里主动消息基本发不出去——所以长回复要按这个余量切
-export function passiveRemaining(event) {
+function passiveRemaining(event) {
   if (!event?.message_id || isStaleMessage(event)) return 0
   return Math.max(0, MAX_PASSIVE_PER_MESSAGE - passiveCountOf(event))
 }
@@ -357,7 +357,7 @@ let streamState = null // null = 还没试过，false = 已知平台不支持
 
 const STREAM_UNAVAILABLE = /stream_messages|404|not found|无权限|权限不足|不支持|not support|3040/i
 
-export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 320 } = {}) {
+async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 320 } = {}) {
   const body = String(text ?? '').trim()
   if (event?.message_type !== 'private' || !event?.user_id) return false
   if (!env.streamReply) return false

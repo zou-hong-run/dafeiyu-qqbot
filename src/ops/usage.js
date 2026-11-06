@@ -118,7 +118,7 @@ function sumDays(days) {
   )
 }
 
-export function usageSummary(days = 7) {
+function usageSummary(days = 7) {
   const today = state.days[dayKey()] ?? emptyBucket()
   const period = sumDays(days)
 

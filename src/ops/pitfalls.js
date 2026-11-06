@@ -114,16 +114,3 @@ export function noteToolResult(toolName, result) {
   const ok = writeEntries(entries)
   return ok ? { recorded: true, tool, message } : { recorded: false }
 }
-
-export function listPitfalls(limit = 10) {
-  return readEntries().slice(-limit)
-}
-
-export function clearPitfalls() {
-  try {
-    fs.rmSync(pitfallsFile, { force: true })
-    return true
-  } catch {
-    return false
-  }
-}

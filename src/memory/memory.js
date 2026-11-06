@@ -55,7 +55,7 @@ function blank() {
   return { shortTerm: [], midTerm: '', longTerm: [], updatedAt: Date.now() }
 }
 
-export function getSession(key) {
+function getSession(key) {
   let session = state.sessions[key]
   if (!session) {
     session = blank()
@@ -77,7 +77,7 @@ export function appendTurn(key, userText, assistantText) {
   scheduleSave()
 }
 
-export function estimateTokens(text) {
+function estimateTokens(text) {
   const value = String(text ?? '')
   if (!value) return 0
 
@@ -185,12 +185,6 @@ export function recallLongTerm(key, query, limit = 6) {
     .slice(0, limit)
     .filter((item) => item.score > 0.1 && !TOOL_MARKUP.test(item.text))
 }
-
-export function recentLongTerm(key, limit = 5) {
-  const session = getSession(key)
-  return session.longTerm.slice(-limit)
-}
-
 export function history(key) {
   const list = getSession(key).shortTerm
   const result = []

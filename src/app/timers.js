@@ -182,7 +182,7 @@ export async function runFollowUps() {
 // 选择题：QQ 官方按钮要开放平台预建模板，机器人自己造不出来，
 // 所以用「编号选项 + 回数字」实现同样的交互
 // 热点吐槽：自己去搜当天新闻，挑一条在群里说两句
-export function pickActiveGroup() {
+function pickActiveGroup() {
   if (env.hotTake.target) return env.hotTake.target
 
   try {
