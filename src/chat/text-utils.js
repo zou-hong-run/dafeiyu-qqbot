@@ -101,3 +101,26 @@ export function looksLikeActionRequest(text) {
   if (!value) return false
   return !QUESTION_WORDS.test(value) && ACTION_WORDS.test(value) && !CONCEPT_WORDS.test(value)
 }
+
+/**
+ * 模型没给出结论时的退路：把最后一次工具的真实返回交给用户。
+ *
+ * 之前这里只会说「没整理出结论，换个问法」——可工具其实已经跑成功了，
+ * 数据在手里却被丢掉，用户只能再问一遍。宁可给一段没润色的原文。
+ */
+export function fallbackFromTool(snapshot) {
+  const text = String(snapshot?.text ?? '').trim()
+
+  if (!text) return '这个问题我没整理出结论，换个问法或者把任务拆小一点再试试？'
+
+  // 工具本来就报了错：把错误原样说出来，比「换个问法」有用
+  // 只看开头一小段：正文里偶然出现「失败」两个字不该被当成错误
+  if (/(失败|错误|读不到|没有这个群|只能在|权限|❌)/.test(text.slice(0, 60))) {
+    return text.slice(0, 500)
+  }
+
+  const clipped = text.length > 900 ? `${text.slice(0, 900)}…（还有 ${text.length - 900} 字没显示）` : text
+  return `我没整理成结论，但 ${snapshot?.name ?? '工具'} 查到的内容在这儿：
+
+${clipped}`
+}

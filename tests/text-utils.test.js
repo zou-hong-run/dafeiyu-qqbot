@@ -7,6 +7,7 @@ import {
   looksLikeActionRequest,
   pruneToolOutput,
   stripToolMarkup,
+  fallbackFromTool,
 } from '../src/chat/text-utils.js'
 
 // 纯文本处理，不依赖 env 和网络，CI 上可直接跑
@@ -103,4 +104,30 @@ test('cleanReply：空输入返回空', () => {
 test('finalizeReply：先清工具标记再清口癖', () => {
   const raw = '好的，我来查。｜｜DSML｜｜ calls'
   assert.equal(finalizeReply(raw), '好的，我来查。')
+})
+
+// 模型收尾失败时不能把工具查到的内容一起丢掉：
+// 群里真出现过「问某个群在聊什么」→ 工具跑成功了 → 回复「我没整理出结论，换个问法」。
+test('收尾失败时把最后一次工具结果交出去', () => {
+  const out = fallbackFromTool({ name: 'read_group_history', text: '01:20 张三：晚上吃啥\n01:21 李四：火锅' })
+  assert.match(out, /read_group_history/)
+  assert.match(out, /火锅/)
+  assert.doesNotMatch(out, /换个问法/)
+})
+
+test('工具本身报错时原样转述，不加包装', () => {
+  const out = fallbackFromTool({ name: 'read_group_history', text: '读群聊记录失败：私聊里读群记录要管理员权限' })
+  assert.match(out, /管理员权限/)
+  assert.doesNotMatch(out, /查到的内容在这儿/)
+})
+
+test('超长结果截断，不把上下文撑爆', () => {
+  const out = fallbackFromTool({ name: 'read_group_history', text: 'x'.repeat(2000) })
+  assert.ok(out.length < 1200, `实际 ${out.length}`)
+  assert.match(out, /还有 \d+ 字没显示/)
+})
+
+test('完全没工具输出时退回通用话术', () => {
+  assert.match(fallbackFromTool(null), /换个问法/)
+  assert.match(fallbackFromTool({ name: 'x', text: '   ' }), /换个问法/)
 })

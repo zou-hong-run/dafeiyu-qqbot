@@ -8,7 +8,7 @@ import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
-import { SPILL_HEAD, SPILL_LIMIT, finalizeReply, looksLikeActionRequest, pruneToolOutput } from './text-utils.js'
+import { SPILL_HEAD, SPILL_LIMIT, fallbackFromTool, finalizeReply, looksLikeActionRequest, pruneToolOutput } from './text-utils.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { resetSession } from './session-reset.js'
 import { readSkill, skillsPrompt } from '../skills/skills.js'
@@ -1735,6 +1735,8 @@ export async function chat(sessionKey, userText, options = {}) {
   let answer = ''
   let autoPushes = 0
   const callHistory = []
+  // 模型收尾失败时，别让工具查到的内容跟着丢掉——直接把最后一条真实结果交给用户
+  let lastToolSnapshot = null
   const budget = Math.floor(env.contextWindowTokens * env.contextBudgetRatio)
 
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
@@ -1924,6 +1926,8 @@ export async function chat(sessionKey, userText, options = {}) {
         )
       }
 
+      lastToolSnapshot = { name: toolName, text: String(result ?? '').trim() }
+
       messages.push({ role: 'tool', tool_call_id: call.id, content: result })
 
       if (typeof onStep === 'function') {
@@ -1954,8 +1958,7 @@ export async function chat(sessionKey, userText, options = {}) {
   }
 
   if (!answer) {
-    answer =
-      (await finalize(sessionKey)) || '这个问题我没整理出结论，换个问法或者把任务拆小一点再试试？'
+    answer = (await finalize(sessionKey)) || fallbackFromTool(lastToolSnapshot)
   }
 
   appendTurn(sessionKey, userText, answer)
