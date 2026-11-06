@@ -707,8 +707,11 @@ pnpm test:watch    # 改代码自动重跑
 pnpm start                   # 前台跑，直接看日志
 pnpm dev                     # --watch 热重载
 pnpm check                   # 静态引用检查
+pnpm test                    # 单元测试
 pnpm diagnose                # 逐层体检：配置 → MCP 工具 → 裸 API 调用
 ```
+
+**改动一律走测试**：`pnpm check` 和 `pnpm test` 两条都过才能提交，新功能要带用例，安全相关的改动必须有回归测试。完整规则（包括真机验证清单和文档同步要求）见 [AGENTS.md](AGENTS.md)。
 
 `pnpm check` 抓三类问题，都是 `node --check` 看不出来的：
 

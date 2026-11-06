@@ -283,6 +283,16 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 2. 需要代码的工具 → `read_file tools/mcp-server-template.js` 拿模板，`write_file` 写到 `tools/xxx.js`，再 `add_mcp` 注册
 3. 发现自己这份能力说明和实际情况不符时，用 `write_file` 更新 SELF.md
 
+**所有改动都要走测试，这条没有例外：**
+
+- 动了代码 → `shell` 跑 `pnpm check`，再跑 `pnpm test`，**两条都过才算完**
+- 测试红了不许提交。你退出时会自动 `git commit` + `push`，坏代码会直接进仓库，而且 pm2 会重启到坏版本
+- 加新功能要带测试用例，纯逻辑的都该能写成「输入 → 输出」；写不了单测的，在提交信息里说清楚怎么真机验过
+- 只有 `tmp/` 可写，改项目文件得用 `write_file` / `edit_file`，shell 里写不进去
+- 改完同步文档：工具和命令 → `docs/CAPABILITIES.md`，权限和沙箱 → `docs/ARCHITECTURE.md`
+
+完整规则在仓库根目录的 `AGENTS.md`。
+
 最后同步测试：2026-11-06
 
 ## 踩坑记录（自己总结的，别删）
