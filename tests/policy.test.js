@@ -1,10 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DANGEROUS_TOOLS, TOOL_POLICY, filterTools, isAdmin, isToolAllowed } from '../src/config/policy.js'
+import { DANGEROUS_TOOLS, TOOL_POLICY, filterTools, isAdmin, isDangerousTool, isToolAllowed } from '../src/config/policy.js'
 
 test('高危工具都在名单里', () => {
-  for (const name of ['shell', 'run_script', 'write_file', 'edit_file', 'start_task', 'broadcast']) {
+  for (const name of ['shell', 'run_script', 'write_file', 'edit_file', 'start_task', 'broadcast', 'file_copy']) {
     assert.ok(DANGEROUS_TOOLS.has(name), `${name} 应该算高危`)
+  }
+})
+
+test('没登记过的工具按名字里的能力词判高危', () => {
+  // add_mcp 注册进来的工具不在 DANGEROUS_TOOLS 里，靠这个兜底
+  for (const name of ['file_copy', 'evil_write', 'run_cmd', 'exec_code', 'delete_file', 'upload_blob']) {
+    assert.equal(isDangerousTool(name), true, `${name} 应该判为高危`)
+  }
+  for (const name of ['search', 'find_music', 'weather', 'song', 'read_document', 'group_recent_speakers']) {
+    assert.equal(isDangerousTool(name), false, `${name} 不该误伤`)
   }
 })
 

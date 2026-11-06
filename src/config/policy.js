@@ -21,7 +21,23 @@ export const DANGEROUS_TOOLS = new Set([
   'send_to_group',
   'broadcast',
   'git_sync',
+  // 能写项目文件的 MCP 工具：它们是外部注册进来的，名字不固定，
+  // 漏一个就等于给所有人开了一条改代码的路。这里按「能落盘」这个能力列，不按名字猜。
+  'file_copy',
 ])
+
+// 兜底：名字里带这些词的 MCP 工具一律按高危处理。
+// 不然 add_mcp 注册进来的新工具会默认对所有人开放——它只要能写文件或执行命令，
+// 就等于绕过了上面那张表。
+const DANGEROUS_NAME_PATTERN =
+  /(^|_)(write|copy|edit|exec|run|install|spawn|shell|delete|remove|move|rename|kill|restart|upload|save)(_|$)/i
+
+/** 这个工具要不要走白名单：先看名单，再看名字里的能力词 */
+export function isDangerousTool(name) {
+  const toolName = String(name ?? '')
+  if (DANGEROUS_TOOLS.has(toolName)) return true
+  return DANGEROUS_NAME_PATTERN.test(toolName)
+}
 
 // 管理员判定：配了白名单就只认名单，没配就只认私聊
 export function isAdmin(scope, actor) {
@@ -85,6 +101,8 @@ export const TOOL_POLICY = {
   read_video_subtitle: READ_ONLY,
   video_meta: READ_ONLY,
   read_document: READ_ONLY,
+  // 外部注册进来、能写项目文件的工具。名字不固定，但都会命中 isDangerousTool 的能力词
+  file_copy: PRIVATE_ONLY,
 
   shell: SHELL,
   run_script: SHELL,
@@ -116,10 +134,13 @@ export const SCOPE_LABEL = {
 
 export function isToolAllowed(toolName, scope, actor = '') {
   const rule = TOOL_POLICY[toolName]
+
+  // 危险工具先判：不管表里有没有、在哪个场景，一律走白名单。
+  // 未知工具按「能写/能执行」的名字特征判，避免 add_mcp 注册进来的新工具直接对所有人开放。
+  if (isDangerousTool(toolName)) return dangerAllowed(scope, actor)
+
   if (!rule) return scope === 'private'
-  if (!rule.scopes.includes(scope)) return false
-  if (DANGEROUS_TOOLS.has(toolName)) return dangerAllowed(scope, actor)
-  return true
+  return rule.scopes.includes(scope)
 }
 
 // 被拒时给出可执行的原因，别只回一句「不可用」
@@ -131,7 +152,7 @@ export function denyReason(toolName, scope, actor = '') {
     return `工具 ${toolName} 只能在${allowed}用，当前是${SCOPE_LABEL[scope] ?? scope}`
   }
 
-  if (DANGEROUS_TOOLS.has(toolName)) {
+  if (isDangerousTool(toolName)) {
     if (env.adminOpenIds.length > 0) {
       return (
         `工具 ${toolName} 需要管理员权限：你的 openid ${actor || '未知'} 不在 ADMIN_OPENIDS 名单里。` +
@@ -153,7 +174,7 @@ export function describePolicy(toolNames) {
     .map((name) => {
       const rule = TOOL_POLICY[name] ?? PRIVATE_ONLY
       const scopes = rule.scopes.map((scope) => SCOPE_LABEL[scope]).join('/')
-      const guard = DANGEROUS_TOOLS.has(name) ? '/仅管理员' : ''
+      const guard = isDangerousTool(name) ? '/仅管理员' : ''
       return `${name}(${scopes}${guard})`
     })
     .join(' ')

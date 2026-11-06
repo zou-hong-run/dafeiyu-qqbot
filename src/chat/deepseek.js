@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import OpenAI from 'openai'
 import { env } from '../config/env.js'
-import { denyReason, isToolAllowed, DANGEROUS_TOOLS, SCOPE_LABEL } from '../config/policy.js'
+import { denyReason, isToolAllowed, isDangerousTool, SCOPE_LABEL } from '../config/policy.js'
 import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
@@ -726,7 +726,7 @@ async function runTool(
   const name = call.function?.name ?? ''
 
   // 高危工具（shell / run_script / write_file / add_mcp / start_task / ...）走白名单
-  if (DANGEROUS_TOOLS.has(name) && !isToolAllowed(name, scope, actor)) {
+  if (isDangerousTool(name) && !isToolAllowed(name, scope, actor)) {
     console.warn(`[权限] ${sessionKey} 用户 ${actor || '未知'} 调用 ${name} 被拒（不在 ADMIN_OPENIDS）`)
     return (
       `工具 ${name} 只对管理员开放（ADMIN_OPENIDS），你的 openid 不在白名单里，这次调用被拒绝。` +
@@ -1585,7 +1585,7 @@ export async function chat(sessionKey, userText, options = {}) {
 
   // 本地工具也要过权限：start_task / schedule_task 这类高危的，不配白名单就别让模型看见
   const localTools = LOCAL_TOOLS.filter(
-    (tool) => !DANGEROUS_TOOLS.has(tool.function?.name) || isToolAllowed(tool.function.name, scope, actor),
+    (tool) => !isDangerousTool(tool.function?.name) || isToolAllowed(tool.function.name, scope, actor),
   )
 
   const usableTools = callTool
@@ -1893,7 +1893,7 @@ export async function runTaskAgent({
     (tool) =>
       tool.function?.name !== 'start_task' &&
       tool.function?.name !== 'clear_memory' &&
-      (!DANGEROUS_TOOLS.has(tool.function?.name) || isToolAllowed(tool.function.name, scope, actor)),
+      (!isDangerousTool(tool.function?.name) || isToolAllowed(tool.function.name, scope, actor)),
   )
   const usableTools = callTool
     ? [...baseTools, TASK_NOTIFY_TOOL, ...subTools]
