@@ -1,5 +1,5 @@
 import { env } from '../config/env.js'
-import { activeTickets, getTicket, STATUS } from './ticket.js'
+import { activeTickets, STATUS } from './ticket.js'
 
 // 外部控制回路：不参与执行，只站在外面看工单有没有真的在往前走
 // 文章里 Watchdog 除了看接口报错，还要判断 Worker 是否陷入无效循环

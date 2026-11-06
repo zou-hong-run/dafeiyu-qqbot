@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { env } from '../config/env.js'
 import { budgetFor } from '../ops/budget.js'
-import { segment, sendGroup, sendPrivate, uploadMedia } from '../bot.js'
+import { segment, sendGroup, uploadMedia } from '../bot.js'
 import { deliver, postMessage } from './sender.js'
 
 // 媒体发送器：每个工厂函数绑一个事件，返回「给模型调用的发送函数」

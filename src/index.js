@@ -643,6 +643,8 @@ async function shutdown(signal) {
   shuttingDown = true
 
   console.log(`\n[退出] 收到 ${signal}，正在落盘记忆并断开连接...`)
+
+
   try {
     flush()
     flushTickets()
@@ -953,6 +955,7 @@ try {
   const syncMinutes = env.autoSyncIntervalMinutes
   if (syncMinutes > 0) {
     const syncTimer = setInterval(async () => {
+      if (shuttingDown) return
       try {
         const result = await commitAndPush('auto sync: 定时同步')
 
@@ -979,6 +982,7 @@ try {
   const proactiveMinutes = env.proactive.intervalMinutes
   if (env.proactive.enabled && proactiveMinutes > 0) {
     const proactiveTimer = setInterval(() => {
+      if (shuttingDown) return
       runProactiveScan().catch((error) => console.warn('[主动] 扫描异常：', error?.message ?? error))
     }, proactiveMinutes * 60_000)
     proactiveTimer.unref?.()
@@ -994,6 +998,7 @@ try {
   const followupMinutes = env.followup.intervalMinutes
   if (env.followup.enabled && followupMinutes > 0) {
     const followupTimer = setInterval(() => {
+      if (shuttingDown) return
       runFollowUps().catch((error) => console.warn('[回访] 扫描异常：', error?.message ?? error))
     }, followupMinutes * 60_000)
     followupTimer.unref?.()
@@ -1010,6 +1015,7 @@ try {
   if (env.hotTake.enabled) {
     let lastHotKey = ''
     const hotTakeTimer = setInterval(() => {
+      if (shuttingDown) return
       const now = new Date()
       const key = `${now.getFullYear()}${now.getMonth()}${now.getDate()}${now.getHours()}${now.getMinutes()}`
       if (key === lastHotKey) return
@@ -1024,6 +1030,7 @@ try {
 
   // 每天把记忆和群记录备一份，机器重装不至于全丢
   const backupTimer = setInterval(() => {
+      if (shuttingDown) return
     try {
       const result = runBackup()
       if (!result.skipped) {
@@ -1044,6 +1051,7 @@ try {
 
   const mediaTtlHours = env.mediaTtlHours
   const cleaner = setInterval(async () => {
+      if (shuttingDown) return
     try {
       const groups = rebuildAll()
       const { cleared, removed } = evictIdleSessions(env.sessionTtlMs)
