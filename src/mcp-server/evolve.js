@@ -79,7 +79,11 @@ async function addMcp({ name, command, args = [], env = {} }) {
   else registry.push(entry)
 
   writeRegistry(registry)
-  return `已注册 MCP server「${safe}」：${command} ${argList.join(' ')}\n主进程会在下一轮对话时尝试连接，连接成功就能用它的工具。`
+  return (
+    `已注册 MCP server「${safe}」：${command} ${argList.join(' ')}\n` +
+    '主进程会在下一轮对话时尝试连接，连接成功就能用它的工具。\n' +
+    '注意：新工具默认不在权限表里，谁都用不了——要启用得让管理员在 src/config/policy.js 的 TOOL_POLICY 里加一行。'
+  )
 }
 
 async function listMcp() {

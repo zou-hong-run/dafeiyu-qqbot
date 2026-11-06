@@ -317,6 +317,13 @@ bwrap
 | 注册表热加载不校验 command | `syncRegistry()` 复用 `assertMcpCommand()`，env 字段一律清空 |
 | `tools/../../tmp/evil.js` 能过前缀检查 | 改成先 `path.resolve` 再判断是否真在 `tools/` 内 |
 | `redirect: 'follow'` 只校验第一跳，`::ffff:` 地址绕过 | `fetchPublic()` 用 `redirect: 'manual'` 逐跳复核，域名解析结果也过一遍 IP 规则 |
+| `node tools/x.js --require /tmp/evil.js` 能在宿主侧执行任意 JS | node 只允许脚本路径和 `--max-old-space-size`，其余选项一律拒；npx 同样不接受额外参数 |
+| 未知工具在私聊默认放行，危险词正则漏掉驼峰写法 | 未在 `TOOL_POLICY` 登记的工具一律拒绝；危险判定先把 `writeFile`、`filesystem.read_file` 归一化成下划线再分词 |
+| `find_video` 只校验 `^https?://`，没走出网校验 | 四个视频工具统一调 `assertPublicUrl()` |
+| `backups/` 是 `data/` 的副本，却能 `send_file` 发出去 | `send_file` 和 `read_document` 的黑名单补上 `backups/`、`logs/` |
+| 自动同步会把 `.github/`、`package.json` 推上去 | `BLOCKED_PATHS` 加上这两项，避免模型改动直接接进 CI |
+| 群成员能 `note_lesson` 写进系统提示词、`clear_memory` 清记忆 | 两者收进 `DANGEROUS_TOOLS` |
+| `/kill`、`/clean` 任何群成员都能用 | 加 `adminOnly` |
 | 所有 MCP 服务都拿到模型 key | 只有内置服务注入 `baseEnv`，注册进来的第三方服务拿不到 |
 | 断网按命令文本判断 | 删掉 `NEEDS_NETWORK`，`--unshare-net` 无条件加 |
 | `downloads/` 整块可写 | 收成只有 `tmp/` 可写，附件会话隔离不再被绕 |
