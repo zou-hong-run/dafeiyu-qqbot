@@ -39,7 +39,12 @@
 
 **按钮 + 交互事件**
 
-适配层已经备好三个函数：
+已经接进选择题：
+
+- `ask_choice` 优先发按钮，发不出去（没权限、配置被拒）自动回落成编号选项，功能不受影响
+- 点击触发 `INTERACTION_CREATE`，3 秒内回执后按 `choice:<id>:<index>` 找回原题，走正常对话
+
+适配层提供的三个函数：
 
 ```js
 sendWithKeyboard(target, content, keyboard)   // 发带按钮的文本
@@ -47,7 +52,7 @@ onInteraction((event) => ...)                 // 按钮点击回调
 acknowledgeInteraction(id, code)              // 5 秒内回执
 ```
 
-业务层还没接，因为要先把 `ask_choice` 的编号选项换成真按钮，需要确认机器人有没有按钮权限。**能力就绪，接起来是改一个工具的事。**
+按钮的 `action.type=1`（回调）、`permission.type=2`（所有人可点）是按官方文档写的，**还没真机点过**——如果点击后没反应，先看日志有没有回执错误。
 
 ## 不用的
 

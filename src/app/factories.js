@@ -1,4 +1,4 @@
-import { selfOpenid, segment, sendGroup, sendPrivate, sendWakeup } from '../bot.js'
+import { selfOpenid, segment, sendGroup, sendPrivate, sendWakeup, sendWithKeyboard } from '../bot.js'
 import { env } from '../config/env.js'
 import * as groupLog from '../memory/group-log.js'
 import { clip, withSendRetry } from '../channel/sender.js'
@@ -11,7 +11,7 @@ import { commitAndPush, describeStatus, pullLatest } from '../ops/sync.js'
 import { filterTools } from '../config/policy.js'
 import { getTools, toDeepSeekTools } from '../mcp/client.js'
 import { addSchedule, listSchedules, removeSchedule } from '../tasks/scheduler.js'
-import { putChoice, choiceText } from '../chat/choices.js'
+import { putChoice, choiceKeyboard, choiceText } from '../chat/choices.js'
 import { sendReply } from '../channel/sender.js'
 
 export function referencedContext(event) {
@@ -318,9 +318,25 @@ export function choiceSenderFor(event) {
     const entry = putChoice(sessionKey, { question, options })
     if (!entry) throw new Error('至少给 2 个选项，最多 5 个')
 
-    const text = choiceText(entry)
-    await sendReply(event, text)
-    return { count: entry.options.length, text }
+    // 优先发按钮：点了直接触发互动事件，比让用户回数字顺手。
+    // 发不出去（没权限、按钮配置被拒）就回落成编号选项，功能不受影响。
+    const target =
+      event.message_type === 'group'
+        ? { scope: 'group', targetId: String(event.group_id), msgId: event.message_id }
+        : { scope: 'c2c', targetId: String(event.user_id), msgId: event.message_id }
+
+    try {
+      const text = entry.question || '选一个'
+      await sendWithKeyboard(target, text, choiceKeyboard(entry))
+      return { count: entry.options.length, text, keyboard: true }
+    } catch (error) {
+      console.warn(
+        `[选择题] 按钮发送失败，回落编号选项：${String(error?.message ?? error).slice(0, 80)}`,
+      )
+      const text = choiceText(entry)
+      await sendReply(event, text)
+      return { count: entry.options.length, text, keyboard: false }
+    }
   }
 }
 

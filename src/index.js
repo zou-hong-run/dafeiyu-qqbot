@@ -21,7 +21,7 @@ import { flushSituations } from './memory/situations.js'
 import { runBackup } from './ops/backup.js'
 import { flushTodos } from './chat/todos.js'
 import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
-import { resolveChoice } from './chat/choices.js'
+import { resolveChoice, resolveChoiceById } from './chat/choices.js'
 import { mergeMessage } from './chat/merge.js'
 import { recentGroupContext } from './channel/group-context.js'
 import { audit } from './app/audit.js'
@@ -30,7 +30,7 @@ import { runCommand } from './app/commands.js'
 import { progressReporter, runFollowUps, runHotTake, runProactiveScan, runScheduledTask } from './app/timers.js'
 import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf, wakeSenderFor } from './app/factories.js'
 import { QUIET_MS, flushQuiet, isMuted, isUnmuteCommand, muteGroup, oncePer, parseMuteCommand, unmuteGroup } from './engage/quiet.js'
-import { onLifecycle, onMessage, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
+import { acknowledgeInteraction, onInteraction, onLifecycle, onMessage, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendMarkdownTo, sendReply, splitMarkdown } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
 import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSenderFor, videoSenderFor } from './channel/media.js'
@@ -499,6 +499,45 @@ onMessage((event) => {
   }
 
   enqueue(sessionKeyOf(event), () => handleGroupAll(event))
+})
+
+// 按钮点击：data 形如 choice:<id>:<index>，按 id 找回原题。
+// 平台要求 3 秒内响应，所以先回执再干活。
+onInteraction(async (interaction) => {
+  const data = String(interaction?.data?.resolved?.button_data ?? '')
+  const matched = /^choice:([^:]+):(\d+)$/.exec(data)
+
+  if (!matched) {
+    await acknowledgeInteraction(interaction?.id, 1)
+    return
+  }
+
+  const picked = resolveChoiceById(matched[1], Number(matched[2]))
+  if (!picked) {
+    // 已过期或已经被选过：告诉对方「这个不行了」，别让人干等
+    await acknowledgeInteraction(interaction?.id, 2)
+    return
+  }
+
+  await acknowledgeInteraction(interaction?.id, 0)
+
+  const isGroup = Boolean(interaction.group_openid)
+  const groupId = interaction.group_openid
+  const userId = interaction.group_member_openid ?? interaction.user_openid
+
+  // 互动事件里没有昵称，也拿不到被动回复的 msg_id，所以这里按主动消息发
+  const event = {
+    message_type: isGroup ? 'group' : 'private',
+    group_id: groupId,
+    user_id: userId,
+    message_id: interaction?.data?.resolved?.message_id,
+    content: '',
+    reply: (payload) =>
+      isGroup ? sendGroup(groupId, payload) : sendPrivate(userId, payload),
+  }
+
+  const note = `${picked.choice}\n（对方刚在「${picked.question}」这道选择题里选了这一项）`
+  enqueue(picked.sessionKey, () => handleMessage(event, 'at', note))
 })
 
 let shuttingDown = false
