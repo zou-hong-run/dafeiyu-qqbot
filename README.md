@@ -405,7 +405,7 @@ node --check src/index.js
 | `HOT_TAKE_ENABLED` | 热点吐槽：搜当天新闻在群里损两句（默认关） |
 | `MERGE_WINDOW_MS` | 连发合并的基础窗口（2500）。短句/明显没说完的自动延长到 1.6 倍，完整句子 0.8 秒就回；0 = 逐条处理 |
 | `STREAM_REPLY` | 私聊长回复走流式（默认关，需要开放平台开通 `/stream_messages`） |
-| `MARKDOWN_REPLY` | 用 Markdown 发回复（默认关）。群聊和单聊的自定义 markdown 已全量开放，不需要申请；默认关是因为模型输出里的 `* _ #` 会被当格式解析 |
+| `MARKDOWN_REPLY` | 用 Markdown 发回复（**默认开**）。群聊和单聊的自定义 markdown 已全量开放，支持加粗/斜体/列表/引用/链接/分割线，不支持代码块和表格。设 `false` 退回纯文本 |
 | `PROGRESS_MAX` | 私聊一轮最多报几次进度（3），群里固定 1 次 |
 | `TOOL_DEBUG` | 打每轮请求和工具调用的详细日志（默认关，排查时开） |
 

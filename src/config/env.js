@@ -104,7 +104,9 @@ export const env = {
   contextBudgetRatio: positiveNumber('CONTEXT_BUDGET_RATIO', 0.6),
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
-  markdownReply: process.env.MARKDOWN_REPLY === 'true',
+  // 群聊和单聊的自定义 markdown 自 2026-04-23 起全量开放，默认开着。
+  // 想退回纯文本就设 MARKDOWN_REPLY=false
+  markdownReply: process.env.MARKDOWN_REPLY !== 'false',
   // 私聊流式默认关：QQ 的 /stream_messages 要单独申请权限，没开通时每次都会失败一次
   streamReply: process.env.STREAM_REPLY === 'true',
   // false=从不引用（默认）；judge=只在真正插话时引用；always=每条都引用
