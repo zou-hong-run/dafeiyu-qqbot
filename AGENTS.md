@@ -63,8 +63,11 @@ pnpm dead-code  # 找没有跨文件引用的导出（清理用，不是必跑�
 
 | 改了什么 | 更新哪里 |
 |---|---|
+| **能力、工具、平台限制** | **`SELF.md`**——机器人靠这份文件认识自己，不同步它就会说错话（比如"按钮要预建模板"这种过时结论） |
 | 工具、命令 | `docs/CAPABILITIES.md` + README 的能力一览 |
 | 权限规则、高危名单 | `docs/ARCHITECTURE.md` 第四节 |
 | 沙箱参数、可写目录 | `docs/ARCHITECTURE.md` 第五节 + README 安全须知 |
 | 平台行为 | `docs/PLATFORMS.md` |
 | 版本号 | `package.json`、README 的 badge、`CHANGELOG.md` |
+
+**`SELF.md` 是给机器人的，不是给人看的。** 人看 README 和 docs；机器人每轮对话只读 `SELF.md`。改完能力不更新它，它就会按旧认知办事——说"我做不到"、给过时建议、或者压根不知道自己有新工具。这类错误比代码 bug 更难发现，因为它回答得很自信。
