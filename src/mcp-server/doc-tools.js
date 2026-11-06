@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { inflateRawSync } from 'node:zlib'
+import { sensitiveReason } from '../ops/file-policy.js'
 
 // 文档解析：把 PDF / Word / Excel 里的文字读出来喂给模型
 // 用纯 JS 的解析库（不依赖原生 canvas），别换成会拉 15MB 原生库的那种
@@ -13,15 +15,22 @@ const MAX_TEXT = 8000
 
 // xlsx 是 zip，解析库会把它整个解压进内存。压缩后 20MB 的表解压后可能上 GB，
 // 而内置 MCP 子进程堆上限只有 160MB，一个文件就能把全部工具打挂。
-// 所以解析前先读 zip 中央目录：那里声明了每条目的大小和压缩后大小。
+// 所以解析前先看中央目录里声明的大小；声明值可以伪造，再实测解压一遍（见 measureInflation）。
 const ZIP_LIMITS = {
   maxTotalBytes: 64 * 1024 * 1024, // 解压后总量
   maxEntryBytes: 32 * 1024 * 1024, // 单条目
   maxRatio: 120, // 总压缩比
 }
 
-// backups/ 是 data/ 的副本、logs/ 是命令输出，和 data/ 一样不该进模型上下文
-const BLOCKED = [/^\.env/, /^data\//, /^node_modules\//, /^\.git\//, /^backups\//, /^logs\//]
+const EOCD_SIGNATURE = 0x06054b50
+const ENTRY_SIGNATURE = 0x02014b50
+const LOCAL_SIGNATURE = 0x04034b50
+const EOCD_MIN = 22
+const METHOD_STORED = 0
+const METHOD_DEFLATE = 8
+
+// backups/ 是 data/ 的副本、logs/ 是命令输出、tmp/ 是沙箱脚本，和 data/ 一样不该进模型上下文
+// 黑名单统一在 ops/file-policy.js，和 send_file 共用一份，免得一边补了另一边漏
 
 function resolvePath(input) {
   const raw = String(input ?? '').trim()
@@ -35,8 +44,9 @@ function resolvePath(input) {
   }
 
   const rel = path.relative(projectRoot, full).split(path.sep).join('/')
-  if (BLOCKED.some((pattern) => pattern.test(rel))) {
-    throw new Error(`这个路径不开放（${rel}）：密钥、运行时数据和依赖目录不读`)
+  const reason = sensitiveReason(rel)
+  if (reason) {
+    throw new Error(`这个路径不开放（${rel}）：${reason}`)
   }
 
   if (!fs.existsSync(full)) throw new Error(`文件不存在：${rel}`)
@@ -83,14 +93,10 @@ async function readDocx(buffer) {
 }
 
 /**
- * 读 zip 中央目录，汇总声明的大小。不信任条目里的其他内容，只看三个数。
- * xlsx 一定是 zip，找不到 EOCD 就说明文件不是有效工作簿。
+ * 读 zip 中央目录，返回每个条目的元信息。
+ * 只取结构字段，不信其中的大小声明——声明值是攻击者可控的。
  */
-export function inspectZip(buffer) {
-  const EOCD_SIGNATURE = 0x06054b50
-  const ENTRY_SIGNATURE = 0x02014b50
-  const EOCD_MIN = 22
-
+function zipEntries(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < EOCD_MIN) {
     throw new Error('文件太小，不是有效的 xlsx')
   }
@@ -108,31 +114,61 @@ export function inspectZip(buffer) {
 
   const count = buffer.readUInt16LE(eocd + 10)
   let offset = buffer.readUInt32LE(eocd + 16)
-
-  let totalBytes = 0
-  let totalPacked = 0
-  let maxEntryBytes = 0
+  const list = []
 
   for (let index = 0; index < count; index += 1) {
     if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== ENTRY_SIGNATURE) {
       throw new Error('xlsx 目录结构损坏')
     }
 
+    const method = buffer.readUInt16LE(offset + 10)
     const packed = buffer.readUInt32LE(offset + 20)
     const size = buffer.readUInt32LE(offset + 24)
     const nameLen = buffer.readUInt16LE(offset + 28)
     const extraLen = buffer.readUInt16LE(offset + 30)
     const commentLen = buffer.readUInt16LE(offset + 32)
+    const localOffset = buffer.readUInt32LE(offset + 42)
+    const nameEnd = offset + 46 + nameLen
+    const name = nameEnd <= buffer.length ? buffer.toString('utf8', offset + 46, nameEnd) : ''
 
-    totalBytes += size
-    totalPacked += packed
-    maxEntryBytes = Math.max(maxEntryBytes, size)
+    list.push({ name, method, packed, size, localOffset })
 
     offset += 46 + nameLen + extraLen + commentLen
   }
 
+  return list
+}
+
+/** 本地文件头 → 压缩数据起始位置（中央目录里的偏移指向这里） */
+function localDataStart(buffer, localOffset) {
+  if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== LOCAL_SIGNATURE) {
+    throw new Error('xlsx 条目头损坏或偏移被伪造，不解析')
+  }
+  const nameLen = buffer.readUInt16LE(localOffset + 26)
+  const extraLen = buffer.readUInt16LE(localOffset + 28)
+  const start = localOffset + 30 + nameLen + extraLen
+  if (start > buffer.length) throw new Error('xlsx 条目偏移越界，不解析')
+  return start
+}
+
+/**
+ * 汇总中央目录里声明的大小。只用于快速失败，不能当作安全依据。
+ */
+export function inspectZip(buffer) {
+  const entries = zipEntries(buffer)
+
+  let totalBytes = 0
+  let totalPacked = 0
+  let maxEntryBytes = 0
+
+  for (const entry of entries) {
+    totalBytes += entry.size
+    totalPacked += entry.packed
+    maxEntryBytes = Math.max(maxEntryBytes, entry.size)
+  }
+
   return {
-    entries: count,
+    entries: entries.length,
     totalBytes,
     totalPacked,
     maxEntryBytes,
@@ -140,25 +176,90 @@ export function inspectZip(buffer) {
   }
 }
 
-/** 解压炸弹前置检查：声明大小超限就别交给解析库，直接把子进程打挂不值得 */
+/**
+ * 实测解压：逐条目真解一遍，用 maxOutputLength 卡住单条目输出。
+ *
+ * 只信中央目录的声明值是不够的——8MB 重复数据能压到 8.3KB，
+ * 只要把中央目录里的 uncompressedSize 改写成 100，声明检查就一路放行，
+ * 而 deflate 流照样解出 8MB。防御不能建立在「攻击者会诚实填 size」上。
+ *
+ * 解出来的内容用完即弃，不驻留内存；累计超过总量上限立刻停。
+ */
+export function measureInflation(buffer, limits = ZIP_LIMITS) {
+  const entries = zipEntries(buffer)
+  const entryCap = Math.max(1, limits.maxEntryBytes)
+  const totalCap = Math.max(1, limits.maxTotalBytes)
+
+  let totalBytes = 0
+  let maxEntryBytes = 0
+
+  for (const entry of entries) {
+    const start = localDataStart(buffer, entry.localOffset)
+    let actual = 0
+
+    if (entry.method === METHOD_STORED) {
+      // 不压缩：文件里有多少字节就是多少，不可能超过文件本身
+      actual = Math.min(entry.packed, buffer.length - start)
+    } else if (entry.method === METHOD_DEFLATE) {
+      if (entry.packed === 0) continue
+      try {
+        actual = inflateRawSync(buffer.subarray(start), { maxOutputLength: entryCap }).length
+      } catch (error) {
+        if (error?.code === 'ERR_BUFFER_TOO_LARGE') {
+          throw new Error(
+            `表格里单个条目实际解压超过 ${Math.round(entryCap / 1048576)}MB 上限，疑似解压炸弹，不解析`,
+          )
+        }
+        throw new Error(`xlsx 条目解压失败（${entry.name || '未知条目'}）：文件损坏或伪造，不解析`)
+      }
+    } else {
+      throw new Error(`xlsx 里有不支持的压缩方式（method ${entry.method}），不解析`)
+    }
+
+    totalBytes += actual
+    maxEntryBytes = Math.max(maxEntryBytes, actual)
+
+    if (totalBytes > totalCap) {
+      throw new Error(
+        `表格实际解压超过 ${Math.round(totalCap / 1048576)}MB 上限，疑似解压炸弹，不解析`,
+      )
+    }
+  }
+
+  return {
+    entries: entries.length,
+    totalBytes,
+    totalPacked: buffer.length,
+    maxEntryBytes,
+    ratio: buffer.length > 0 ? totalBytes / buffer.length : 1,
+  }
+}
+
+/**
+ * 解压炸弹前置检查：先看声明值（便宜），再实测（可信）。
+ * 超限就别交给解析库——炸弹在 load() 阶段才爆，那时子进程已经挂了。
+ */
 export function assertZipSafe(buffer, limits = ZIP_LIMITS) {
-  const zip = inspectZip(buffer)
+  const declared = inspectZip(buffer)
 
-  if (zip.totalBytes > limits.maxTotalBytes) {
+  if (declared.totalBytes > limits.maxTotalBytes) {
     throw new Error(
-      `这个表格解压后有 ${(zip.totalBytes / 1048576).toFixed(0)}MB，超过 ${limits.maxTotalBytes / 1048576}MB 上限，不解析`,
+      `这个表格解压后有 ${(declared.totalBytes / 1048576).toFixed(0)}MB，超过 ${limits.maxTotalBytes / 1048576}MB 上限，不解析`,
     )
   }
-  if (zip.maxEntryBytes > limits.maxEntryBytes) {
+  if (declared.maxEntryBytes > limits.maxEntryBytes) {
     throw new Error(
-      `表格里单个条目解压后有 ${(zip.maxEntryBytes / 1048576).toFixed(0)}MB，超过上限，不解析`,
+      `表格里单个条目解压后有 ${(declared.maxEntryBytes / 1048576).toFixed(0)}MB，超过上限，不解析`,
     )
   }
-  if (zip.ratio > limits.maxRatio) {
-    throw new Error(`压缩比 ${zip.ratio.toFixed(0)}:1 异常（正常表格不会超过 100:1），疑似解压炸弹，不解析`)
+  if (declared.ratio > limits.maxRatio) {
+    throw new Error(
+      `压缩比 ${declared.ratio.toFixed(0)}:1 异常（正常表格不会超过 100:1），疑似解压炸弹，不解析`,
+    )
   }
 
-  return zip
+  // 声明值过关也可能是伪造的，实测一遍才算数
+  return measureInflation(buffer, limits)
 }
 
 // Excel 单元格的值可能是数字、日期、富文本、公式、超链接，统一转成可读字符串

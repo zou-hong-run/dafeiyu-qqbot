@@ -10,6 +10,7 @@ export {
   sendTyping,
   sendMarkdown,
   sendWithKeyboard,
+  rewriteMarkdownImages,
   sendWakeup,
   acknowledgeInteraction,
   onInteraction,

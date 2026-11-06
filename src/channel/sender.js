@@ -1,5 +1,5 @@
 import { env } from '../config/env.js'
-import { sendGroup, sendPrivate, openPrivateStream, postRaw } from '../bot.js'
+import { sendGroup, sendPrivate, openPrivateStream, postRaw, rewriteMarkdownImages } from '../bot.js'
 import { sanitizeText } from './qq.js'
 import { addPending } from '../chat/pending.js'
 import { noteSent } from './recall.js'
@@ -219,6 +219,9 @@ export async function postMessage(event, body, { reference = true } = {}) {
   if (typeof body?.content === 'string') body.content = sanitizeText(body.content)
   if (typeof body?.markdown?.content === 'string') {
     body.markdown.content = sanitizeText(body.markdown.content)
+    // 正文里的本地图片（![说明](downloads/x.png)）要先传成素材才能被平台渲染。
+    // 不在这层做的话，模型照 persona 写的图会原样显示成一行路径。
+    body.markdown.content = await rewriteMarkdownImages(body.markdown.content)
   }
 
   // 引用只能挂在被动回复上：主动消息没有可引用的会话上下文

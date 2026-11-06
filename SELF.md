@@ -49,7 +49,7 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - **输出支持 Markdown**：`**加粗**`、`*斜体*`、`~~删除线~~`、`- 无序列表`、`1. 有序列表`、`> 引用`、`[文字](链接)`、`---` 分割线
 - **不能用**：三反引号代码块、表格、图片语法（`![](url)` 除外）、`#` 标题（字号太大，用加粗代替）。写这些只会把原始符号露出来
 - 贴路径和代码直接给原文；里面有下划线会被当斜体（`/tmp/a_b_c` 会变斜），能拆就拆
-- **图可以嵌进正文**：`![说明](tmp/图.png)`，系统会自动上传成 QQ 素材再换成 `qqbot-media://` 引用。单张 ≤10MB，支持 png/jpeg/gif/webp；只有一张图时用 `send_image` 更省事
+- **图可以嵌进正文**：`![说明](downloads/图.png)`，系统会自动上传成 QQ 素材再换成 `qqbot-media://` 引用。图片放 downloads/，放 tmp/ 的传不出去（tmp 是草稿目录）。单张 ≤10MB，支持 png/jpeg/gif/webp；只有一张图时用 `send_image` 更省事
 - **群里 @ 具体某人**只有 markdown 消息支持（平台 2026-04 起全量开放，不用申请）；`@全体成员` 文本消息也行，但要求机器人是群管理员、每群每天 1 次
 - **选择题优先发按钮**，不需要在开放平台预建模板；平台拒绝时自动回落成回数字
 - 私聊发消息时系统会自动打「输入中」，不用自己处理
@@ -321,4 +321,4 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - shell 里跑 git archive / git status 报 fatal: detected dubious ownership in reposit → /qq 目录属主是 www，当前 shell 用户不是它，git 的 safe.directory 校验拦下 → 命令里加 -c 参数：git -c safe.directory=/qq archive ... 或 git -c safe.directory=/qq status，别改全局 config
 - fetch GitHub API 查仓库 star 数，返回长 JSON 被截断，看不到 stargazers_count → api.github.com 的 repo 信息太长，fetch 正文有长度上限，关键字段在后半段 → 改抓 https://img.shields.io/github/stars/<owner>/<repo>.json ，只返回几十字节，value 字段就是星数
 - send_to_group 带 at 参数时直接报「segment is not defined」 → src/app/factories.js 拼 at 消息段用了 segment.at()，但文件顶部没从 bot.js 引入 segment → import 里补上 segment，改完必须 restart_self 才生效
-- shell 里 pnpm check / pnpm test 跑不了，报 pnpm: command not found，node 也是 rc=127 → /usr/bin/node 软链指向 /www/server/nodejs/...，而 /www 在沙箱里被遮蔽成不存在；npm/pnpm 跟着一起没了，node_modules/.bin 里只有 pm2/dotenv 这类包自带的 → 沙箱里没法跑 pnpm check/test，别反复 which/重试；直接说明「沙箱里 node 不可见，没做语法验证」，靠 read_file 逐项核对改动后再 restart_self
+- shell 里 node / pnpm 报 command not found（rc=127）→ 沙箱遮掉了 /www 下除 server/nodejs 之外的目录，node 目录是留着的；真报这个错说明这台机器的 node 装在别处（/usr/local/bin、nvm 之类）→ 先用 `ls /www/server/nodejs/bin` 和 `command -v node` 确认；确认不了就别反复重试，直接说明「沙箱里 node 不可见，没做语法验证」，靠 read_file 逐项核对改动后再 restart_self

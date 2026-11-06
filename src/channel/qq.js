@@ -4,6 +4,8 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { QQBot } from '@tencent-connect/qqbot-nodejs'
 import { env } from '../config/env.js'
+import { sensitiveReason } from '../ops/file-policy.js'
+import { fetchPublic } from '../mcp-server/net-guard.js'
 
 // 官方 SDK 的适配层。
 //
@@ -137,6 +139,12 @@ const MAX_MATERIAL_BYTES = 10 * 1024 * 1024
 const MD_IMAGE = /!\[([^\]]*)\]\(([^)\s]+)\)/g
 
 async function uploadImageAsset(absPath) {
+  // 这条路径也可能是模型从用户原文里抄来的，黑名单必须在这里再判一次：
+  // data/ 里是别人的对话，backups/ 是它的每日副本，都不该被上传成群里的素材
+  const rel = path.relative(projectRoot, absPath).split(path.sep).join('/')
+  const blocked = sensitiveReason(rel)
+  if (blocked) throw new Error(`这个路径的图片不能上传（${rel}）：${blocked}`)
+
   const ext = path.extname(absPath).toLowerCase()
   const contentType = IMAGE_MIME[ext]
   if (!contentType) throw new Error(`markdown 图片只支持 png/jpeg/gif/webp：${path.basename(absPath)}`)
@@ -158,8 +166,9 @@ async function uploadImageAsset(absPath) {
     sha1,
   })
 
-  // 预签名 URL 走 COS 直传，不能带 QQBot 的 Authorization 头
-  const uploaded = await fetch(prepared.presigned_url, {
+  // 预签名 URL 走 COS 直传，不能带 QQBot 的 Authorization 头。
+  // 但它也是出网请求：过一遍地址校验，别让平台返回的 URL 把我们指到内网去
+  const uploaded = await fetchPublic(prepared.presigned_url, {
     method: 'PUT',
     headers: { 'Content-Type': contentType },
     body: buffer,
@@ -317,9 +326,14 @@ export function sendMarkdown(target, content, opts = {}) {
  * 带按钮的消息。
  * 官方文档：按钮是「在 markdown 消息的基础上」挂载的——发文本消息带 keyboard
  * 会被平台静默忽略（不报错，但用户看不到按钮），所以这里必须走 markdown。
+ *
+ * 这条路径不经过 postMessage()，是全项目唯一绕过出站过滤的口子：
+ * 题干常常是模型拼出来的、可能夹带用户原文，所以在这里自己过一遍
+ * sanitizeText + 本地图片上传，别把 <qqbot-at-everyone /> 原样送给平台。
  */
-export function sendWithKeyboard(target, content, keyboard) {
-  return bot.sendMarkdown({ ...target }, content, { keyboard })
+export async function sendWithKeyboard(target, content, keyboard) {
+  const safe = await rewriteMarkdownImages(sanitizeText(content))
+  return bot.sendMarkdown({ ...target }, safe, { keyboard })
 }
 
 /** C2C 唤醒消息：用户主动聊过之后 30 天内可以再敲一次，有频率限制 */

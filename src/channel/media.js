@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { env } from '../config/env.js'
 import { budgetFor } from '../ops/budget.js'
+import { sensitiveReason } from '../ops/file-policy.js'
 import { segment, sendGroup, uploadMedia } from '../bot.js'
 import { deliver, postMessage } from './sender.js'
 
@@ -302,11 +303,6 @@ export function videoSenderFor(event, send = (payload) => deliver(event, payload
   }
 }
 
-// 能发的文件范围：downloads/ 和项目根下的文件
-// 密钥、记忆、依赖目录一律不发——群里任何拿不到 shell 的人也能调这个工具
-// backups/ 是 data/ 的每日副本，logs/ 里是命令输出——两者都不能发出去
-const FILE_BLOCKED = ['.env', 'data/', 'node_modules/', '.git/', '.ssh/', 'backups/', 'logs/']
-
 // 上传前整个文件要读进内存（SDK 还要再复制一份），2G 内存的机器经不起 200MB
 const MAX_SEND_BYTES = Number(process.env.MAX_SEND_FILE_MB || budgetFor().maxSendFileMB) * 1024 * 1024
 const incomingRoot = path.join(projectRoot, 'downloads', 'incoming')
@@ -404,8 +400,9 @@ function resolveSendableFile(target) {
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue
 
     const rel = path.relative(projectRoot, resolved).split(path.sep).join('/')
-    if (FILE_BLOCKED.some((prefix) => rel === prefix || rel.startsWith(prefix.replace(/\/$/, '/')))) {
-      throw new Error(`这个文件不开放发送（${rel}）：密钥、记忆和依赖目录不在可发范围内`)
+    const reason = sensitiveReason(rel)
+    if (reason) {
+      throw new Error(`这个文件不开放发送（${rel}）：${reason}`)
     }
 
     return resolved

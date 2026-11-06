@@ -33,20 +33,53 @@ function sandboxPath() {
 // 目录挂空 tmpfs（整个目录变空），文件盖成 /dev/null（读到 0 字节）。
 const envFile = process.env.APP_ENV_FILE?.trim() || defaultEnvFile()
 
+// 宝塔把 node / pnpm 装在 /www/server/nodejs 下，整个 /www 一遮，
+// 沙箱里连 node 都跑不了，机器人改完代码没法自检。
+// 所以不是整块放开，而是逐个子目录遮：只留 node 所在的目录，其余照遮。
+const WWW_ROOT = '/www'
+const WWW_KEEP = [path.join(WWW_ROOT, 'server/nodejs')]
+
+/**
+ * 展开要遮的子目录：给了白名单就一路往下钻，白名单路径本身不遮，
+ * 它的兄弟目录全部挂空。这样 /www/server/mysql、/www/backup 都挡住，
+ * 而 /www/server/nodejs 留着能跑 node。
+ */
+export function shieldChildren(dir, keep, out = []) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const full = path.join(dir, entry.name)
+    if (keep.includes(full)) continue
+    if (keep.some((target) => target.startsWith(full + path.sep))) {
+      shieldChildren(full, keep, out)
+      continue
+    }
+    out.push(full)
+  }
+  return out
+}
+
 export const SHIELDED_DIRS = [
   path.dirname(envFile), // 外部密钥文件所在目录
   '/root', // 家目录：SSH 私钥、云凭据、bash_history、.pm2 快照都在这
   '/home', // 其他用户的家目录
-  // 宝塔的站点源码和面板数据。注意不能整个 /www 都遮：
-  // node / pnpm 装在 /www/server/nodejs，遮了之后沙箱里连 node 都跑不了，
-  // 机器人改完代码没法自检，只能靠猜。
-  '/www/wwwroot',
-  '/www/server/panel',
+  // 宝塔的站点源码、数据库、备份、面板数据都在 /www 下，逐个遮掉
+  ...shieldChildren(WWW_ROOT, WWW_KEEP),
   '/etc/sudoers.d',
 ]
 
 export const SHIELDED_FILES = [
   path.join(projectRoot, '.env'),
+  // node 目录必须留着才能跑 node，但里面的仓库凭据不该被读到
+  path.join(WWW_ROOT, 'server/nodejs/.npmrc'),
+  path.join(WWW_ROOT, 'server/nodejs/.yarnrc'),
+  path.join(WWW_ROOT, 'server/nodejs/.pnpmrc'),
   '/etc/shadow',
   '/etc/gshadow',
   '/etc/sudoers',
