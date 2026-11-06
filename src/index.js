@@ -514,8 +514,9 @@ onInteraction(async (interaction) => {
 
   const picked = resolveChoiceById(matched[1], Number(matched[2]))
   if (!picked) {
-    // 已过期或已经被选过：告诉对方「这个不行了」，别让人干等
-    await acknowledgeInteraction(interaction?.id, 2)
+    // 已过期或已经被选过：告诉对方「这个不行了」，别让人干等。
+    // code=1 是「操作失败」，比 code=2（操作频繁）更贴合这个场景
+    await acknowledgeInteraction(interaction?.id, 1)
     return
   }
 

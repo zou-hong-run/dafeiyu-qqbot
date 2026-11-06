@@ -327,9 +327,17 @@ export function sendWakeup(userId, content) {
   return bot.sendWakeup({ scope: 'c2c', targetId: String(userId) }, content)
 }
 
-/** 按钮点击要 5 秒内回执，code: 0 成功 / 1 失败 / 2 频繁 / 3 重复 / 4 无权限 / 5 仅管理员 */
+/**
+ * 按钮点击要 5 秒内回执。code: 0 成功 / 1 失败 / 2 频繁 / 3 重复 / 4 无权限 / 5 仅管理员。
+ * 文档特别注明：interaction_id 不带 `INTERACTION_CREATE:` 前缀，
+ * 万一上游传了带前缀的，这里剥掉再发，否则会报 630001。
+ */
 export function acknowledgeInteraction(id, code = 0) {
-  return bot.acknowledgeInteraction(String(id), code).catch(() => null)
+  const clean = String(id ?? '')
+    .replace(/^INTERACTION_CREATE[:：]\s*/i, '')
+    .trim()
+  if (!clean) return Promise.resolve(null)
+  return bot.acknowledgeInteraction(clean, code).catch(() => null)
 }
 
 /** 按钮/交互回调 */
