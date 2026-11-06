@@ -51,6 +51,9 @@ async function createCompletion(payload) {
 }
 
 const summarizing = new Set()
+// 只能读当前群的工具：调用前由系统注入 group_id，模型传什么都不作数
+const GROUP_SCOPED_TOOLS = new Set(['group_recent_speakers'])
+
 const LOCAL_TOOL_NAMES = new Set([
   'remember',
   'note_situation',
@@ -1197,6 +1200,14 @@ async function runTool(
 
   if (!isToolAllowed(name, scope, actor)) {
     return `工具 ${name} 在${SCOPE_LABEL[scope] ?? scope}场景不可用，请直接用已有知识回答。`
+  }
+
+  // 群相关的工具强制绑定当前群：模型不传 group_id 或传错，都会读到别的群记录。
+  // 这类数据不该由模型自己决定读哪个群。
+  if (GROUP_SCOPED_TOOLS.has(name) && String(sessionKey).startsWith('group:')) {
+    args.group_id = String(sessionKey).slice('group:'.length)
+  } else if (GROUP_SCOPED_TOOLS.has(name)) {
+    return `工具 ${name} 只能在群里用，私聊里没有群记录可读。`
   }
 
   try {

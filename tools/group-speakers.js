@@ -19,7 +19,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         days: { type: 'number', description: '回溯天数，默认 7' },
-        group_id: { type: 'string', description: '群号标识，可选；不填则合并所有群记录' },
+        group_id: { type: 'string', description: '群 openid，**必填**：只读这个群的记录，不填就返回空' },
         limit: { type: 'number', description: '最多返回人数，默认 30' },
       },
     },
@@ -44,13 +44,17 @@ function readLines(file) {
 
 function listGroupFiles(groupId) {
   if (!fs.existsSync(GROUP_DIR)) return []
+
   const files = fs
     .readdirSync(GROUP_DIR)
     .filter((f) => f.endsWith('.jsonl'))
     .map((f) => ({ file: path.join(GROUP_DIR, f), id: f.replace(/\.jsonl$/, '') }))
-  if (!groupId) return files
-  const hit = files.filter((f) => f.id === groupId)
-  return hit.length ? hit : files
+
+  // 必须指定群：不传或者传错都不许退回到「所有群」——
+  // 那等于把别的群的发言记录混进来，抽签会抽到外群的人。
+  const id = String(groupId ?? '').trim()
+  if (!id) return []
+  return files.filter((f) => f.id === id)
 }
 
 async function groupRecentSpeakers({ days = 7, group_id, limit = 30 } = {}) {
@@ -75,7 +79,9 @@ async function groupRecentSpeakers({ days = 7, group_id, limit = 30 } = {}) {
     .slice(0, Number(limit))
 
   if (!list.length) {
-    return `最近 ${days} 天没有记录到任何人发言（检查群主是否开了「获取群内全部消息」）。`
+    return group_id
+      ? `这个群最近 ${days} 天没有记录到任何人发言（检查群主是否开了「获取群内全部消息」）。`
+      : '没有指定 group_id，所以一条记录都没查。这个工具必须带当前群 openid，不能跨群。'
   }
 
   const lines = list.map((p, i) => `${i + 1}. ${p.name}（发言 ${p.count} 条，最后 ${new Date(p.last).toLocaleString('zh-CN')}）`)
