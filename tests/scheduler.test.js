@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs'
-import { addSchedule, cronMatches, listSchedules, nextMatchOf, parseSchedules, removeSchedule, schedulerStatus, useSchedulesDir } from '../src/tasks/scheduler.js'
+import { addSchedule, cronMatches, listSchedules, nextMatchOf, parseSchedules, removeSchedule, schedulerStatus, updateSchedule, useSchedulesDir } from '../src/tasks/scheduler.js'
 
 // 别写到真实的 data/schedules.json：那会把用户正在用的定时任务清空
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-test-'))
@@ -150,4 +150,72 @@ test('管理员在任意会话都能删别的会话的任务', () => {
 
   // 管理员可以
   assert.ok(removeSchedule(task.id, 'group:other', { actor: 'admin', isAdmin: true }))
+})
+
+// 以前只能增和删：想改一句话得删了重建，id 变了、记住的 id 就失效。
+test('能就地改时间、内容和启停', () => {
+  const task = addSchedule({
+    sessionKey: 'group:gU',
+    target: { type: 'group', id: 'gU' },
+    cron: '30 8 * * *',
+    prompt: '每天早上推早报',
+    createdBy: 'user-a',
+  })
+
+  const updated = updateSchedule(task.id, 'group:gU', { cron: '30 7 * * *' }, { actor: 'user-a' })
+  assert.equal(updated.cron, '30 7 * * *')
+  assert.equal(updated.prompt, '每天早上推早报', '没传 prompt 就不动它')
+
+  updateSchedule(task.id, 'group:gU', { prompt: '只报科技新闻，五条以内' }, { actor: 'user-a' })
+  const list = listSchedules('group:gU')
+  assert.match(list[0].prompt, /只报科技新闻/)
+
+  updateSchedule(task.id, 'group:gU', { enabled: false }, { actor: 'user-a' })
+  assert.equal(listSchedules('group:gU')[0].enabled, false, '暂停后仍然是停用状态')
+
+  removeSchedule(task.id, 'group:gU', { actor: 'user-a', isAdmin: true })
+})
+
+test('改任务要验身份，改不动别人的', () => {
+  const task = addSchedule({
+    sessionKey: 'group:gV',
+    target: { type: 'group', id: 'gV' },
+    cron: '0 9 * * *',
+    prompt: '每天九点推抽签',
+    createdBy: 'user-a',
+  })
+
+  assert.throws(() => updateSchedule(task.id, 'group:gV', { cron: '0 10 * * *' }, { actor: 'user-b' }), /别人建的/)
+  assert.ok(updateSchedule(task.id, 'group:gV', { cron: '0 10 * * *' }, { actor: 'admin', isAdmin: true }))
+  removeSchedule(task.id, 'group:gV', { actor: 'admin', isAdmin: true })
+})
+
+test('改任务的入参要校验', () => {
+  const task = addSchedule({
+    sessionKey: 'group:gW',
+    target: { type: 'group', id: 'gW' },
+    cron: '0 9 * * *',
+    prompt: '每天九点推抽签',
+    createdBy: 'user-a',
+  })
+
+  assert.throws(() => updateSchedule(task.id, 'group:gW', { cron: '乱写' }, { actor: 'user-a' }), /cron/)
+  assert.throws(() => updateSchedule(task.id, 'group:gW', { prompt: '短' }, { actor: 'user-a' }), /太短/)
+  assert.throws(() => updateSchedule(task.id, 'group:gW', {}, { actor: 'user-a' }), /至少给一个/)
+  removeSchedule(task.id, 'group:gW', { actor: 'user-a', isAdmin: true })
+})
+
+test('改完时间不会立刻补发一条', () => {
+  const task = addSchedule({
+    sessionKey: 'group:gX',
+    target: { type: 'group', id: 'gX' },
+    cron: '30 8 * * *',
+    prompt: '每天早上推早报',
+    createdBy: 'user-a',
+  })
+  const before = task.lastRunAt
+
+  const updated = updateSchedule(task.id, 'group:gX', { cron: '0 7 * * *' }, { actor: 'user-a' })
+  assert.ok(updated.lastRunAt > (before ?? 0), 'lastRunAt 要挪到现在，补跑逻辑才不会用新 cron 立刻补一条')
+  removeSchedule(task.id, 'group:gX', { actor: 'user-a', isAdmin: true })
 })

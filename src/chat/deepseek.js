@@ -79,6 +79,7 @@ const LOCAL_TOOL_NAMES = new Set([
   'start_task',
   'schedule_task',
   'list_schedules',
+  'update_schedule',
   'remove_schedule',
 ])
 
@@ -420,6 +421,27 @@ const LOCAL_TOOLS = [
         type: 'object',
         properties: {
           id: { type: 'string', description: '任务 id，可先用 list_schedules 查' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_schedule',
+      description:
+        '修改已有的定时任务：改触发时间、改到点要做什么、临时停掉或重新启用。' +
+        '用户说「早报改到七点半」「那个任务先别跑了」「内容改成只报科技新闻」时用它——' +
+        '不要删了重建，那样任务 id 会变，之前记住的 id 就失效了。' +
+        '三个字段至少给一个，只传要改的；只有创建者本人或管理员能改。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '任务 id，可先用 list_schedules 查' },
+          cron: { type: 'string', description: '新的触发时间，5 段 cron，例如 30 7 * * *' },
+          prompt: { type: 'string', description: '新的任务内容，写清楚到点要做什么' },
+          enabled: { type: 'boolean', description: 'true=启用，false=暂停（暂停后不再触发，但不会被删掉）' },
         },
         required: ['id'],
       },
@@ -1189,6 +1211,28 @@ async function runTool(
       return `已删除定时任务 ${removed.id}（${removed.prompt}）`
     } catch (error) {
       return `删除失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'update_schedule') {
+    if (!isToolAllowed('update_schedule', scope, actor)) {
+      return `${denyReason('update_schedule', scope, actor)}。`
+    }
+    if (typeof scheduler?.update !== 'function') {
+      return '当前场景改不了定时任务。'
+    }
+
+    const patch = {}
+    if (args.cron !== undefined) patch.cron = args.cron
+    if (args.prompt !== undefined) patch.prompt = args.prompt
+    if (args.enabled !== undefined) patch.enabled = args.enabled
+
+    try {
+      const task = scheduler.update(String(args.id ?? '').trim(), patch)
+      const state = task.enabled ? '启用' : '已暂停'
+      return `已修改 ${task.id}：${task.cron}（${state}）\n${String(task.prompt).slice(0, 80)}`
+    } catch (error) {
+      return `改任务失败：${error?.message ?? error}`
     }
   }
 

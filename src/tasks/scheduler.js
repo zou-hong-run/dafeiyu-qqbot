@@ -229,31 +229,80 @@ export function listSchedules(sessionKey, { all = false } = {}) {
 }
 
 /**
- * 删除任务。remove_schedule 是 OPEN 工具——群里任何人都能调，
- * 所以这里要验身份：只有创建者本人或管理员能删。
+ * 找到任务并校验操作权限，remove / update 共用。
  *
- * 旧任务没有 createdBy（这一版之前建的），一律按「只有管理员能删」处理：
- * 宁可让管理员多动一下手，也不能让群友一句话清空别人的日程。
+ * remove_schedule 和 update_schedule 都是 OPEN 工具——群里任何人都能调，
+ * 所以身份校验必须在调度层做：只有创建者本人或管理员能动。
+ * 旧任务没有 createdBy（这一版之前建的），一律按「只有管理员能动」处理。
  */
-export function removeSchedule(id, sessionKey, { actor = '', isAdmin = false } = {}) {
+function locateTask(id, sessionKey, { actor = '', isAdmin = false, action = '操作' } = {}) {
   let index = tasks.findIndex((task) => task.id === id && task.sessionKey === sessionKey)
-  // 管理员在任何一个会话里都能删任何任务：不用先跑去那个群再说一遍
+  // 管理员在任何一个会话里都能操作任何任务：不用先跑去那个群再说一遍
   if (index < 0 && isAdmin) index = tasks.findIndex((task) => task.id === id)
   if (index < 0) throw new Error(`找不到定时任务 ${id}`)
 
   const target = tasks[index]
   if (!isAdmin) {
     if (!target.createdBy) {
-      throw new Error('这条是旧版本建的任务，没有创建者记录，只有管理员能删')
+      throw new Error(`这条是旧版本建的任务，没有创建者记录，只有管理员能${action}`)
     }
     if (target.createdBy !== String(actor ?? '')) {
-      throw new Error('这个任务是别人建的，只有他本人或管理员能删')
+      throw new Error(`这个任务是别人建的，只有他本人或管理员能${action}`)
     }
   }
 
+  return { index, target }
+}
+
+export function removeSchedule(id, sessionKey, { actor = '', isAdmin = false } = {}) {
+  const { index } = locateTask(id, sessionKey, { actor, isAdmin, action: '删' })
   const [removed] = tasks.splice(index, 1)
   persist()
   return removed
+}
+
+/**
+ * 改任务：时间、内容、启停。
+ *
+ * 之前只有增和删，想改一句话得删了重建——建出来的 id 变了，
+ * 之前记住的 id 就失效了。现在能就地改。
+ *
+ * 改 cron 时把 lastRunAt 一起刷新：否则补跑逻辑会拿新 cron 去算「上次该跑的时刻」，
+ * 把刚改完的任务立刻补发一条。
+ */
+export function updateSchedule(id, sessionKey, patch = {}, { actor = '', isAdmin = false } = {}) {
+  const { target } = locateTask(id, sessionKey, { actor, isAdmin, action: '改' })
+
+  const next = {}
+
+  if (patch.cron !== undefined) {
+    const error = validateCron(patch.cron)
+    if (error) throw new Error(error)
+    next.cron = String(patch.cron).trim()
+  }
+
+  if (patch.prompt !== undefined) {
+    const text = String(patch.prompt ?? '').trim()
+    if (text.length < 5) throw new Error('任务描述太短，写清楚到点要做什么')
+    next.prompt = text.slice(0, 1000)
+  }
+
+  if (patch.enabled !== undefined) {
+    next.enabled = Boolean(patch.enabled)
+  }
+
+  if (Object.keys(next).length === 0) {
+    throw new Error('没有要改的字段：cron（时间）/ prompt（内容）/ enabled（启停）至少给一个')
+  }
+
+  Object.assign(target, next)
+  if (next.cron !== undefined || next.enabled === true) {
+    // 时间变了或者重新启用：把基准时间挪到现在，别让它立刻补发一条
+    target.lastRunAt = Date.now()
+  }
+
+  persist()
+  return target
 }
 
 // 群被解散/机器人被踢出去后，QQ 会一直回 11255，这种重试和自愈都没意义，直接停用任务

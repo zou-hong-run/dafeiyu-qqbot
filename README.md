@@ -487,7 +487,7 @@ pm2 startup               # 生成开机自启脚本，然后执行它打印出�
 | `list_groups` / `send_to_group` | 列出待过的群 / 主动往指定群发消息（不需要有人 @，管理员限定）。带 `at` 时走 markdown，没权限会自动降级成纯文本 |
 | `broadcast` | 全服通报：同一段话推给所有待过的群，默认跳过当前群；群数超 3 个必须传 `confirm:true` 才真发，正文超长自动分段 |
 | `start_task` | 把复杂任务丢给后台子助手，边做边汇报 |
-| `schedule_task` / `list_schedules` / `remove_schedule` | 定时任务增删查 |
+| `schedule_task` / `list_schedules` / `update_schedule` / `remove_schedule` | 定时任务增删改查（改时间、改内容、启停都不用重建） |
 | `git_sync` | 代码仓库操作：`status` 看状态 / `push` 提交推送 / `pull` 拉最新（管理员） |
 | `goal` | 跨轮目标跟踪：目标没完成就继续推进 |
 | `todo_write` | 任务清单：三步以上的活先拆步骤，做完一项打一次勾，清单挂进提示词防跑偏 |

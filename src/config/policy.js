@@ -132,6 +132,7 @@ export const TOOL_POLICY = {
   schedule_task: OPEN,
   list_schedules: READ_ONLY,
   remove_schedule: OPEN,
+  update_schedule: OPEN,
 
   write_file: OPEN,
   edit_file: OPEN,

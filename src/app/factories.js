@@ -10,7 +10,7 @@ import { formatProfile } from '../memory/profiles.js'
 import { commitAndPush, describeStatus, pullLatest } from '../ops/sync.js'
 import { filterTools, isAdmin, resolveHistoryTarget } from '../config/policy.js'
 import { getTools, toDeepSeekTools } from '../mcp/client.js'
-import { addSchedule, listSchedules, removeSchedule } from '../tasks/scheduler.js'
+import { addSchedule, listSchedules, removeSchedule, updateSchedule } from '../tasks/scheduler.js'
 import { putChoice, choiceKeyboard, choiceText } from '../chat/choices.js'
 import { sendReply } from '../channel/sender.js'
 
@@ -398,10 +398,12 @@ export function choiceSenderFor(event) {
 }
 
 export function schedulerForTarget(sessionKey, target) {
+  // 定时任务内部调用：actor 是 scheduler，按管理员处理（它建的任务没有人类创建者）
   return {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt }),
     list: () => listSchedules(sessionKey),
-    remove: (id) => removeSchedule(id, sessionKey),
+    remove: (id) => removeSchedule(id, sessionKey, { actor: 'scheduler', isAdmin: true }),
+    update: (id, patch) => updateSchedule(id, sessionKey, patch, { actor: 'scheduler', isAdmin: true }),
   }
 }
 
@@ -420,9 +422,10 @@ export function schedulerFor(event) {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt, createdBy: actor }),
     // 管理员看到的是所有会话的任务：「所有群的定时任务正常吗」按当前群过滤答不了
     list: () => listSchedules(sessionKey, { all: admin }),
-    // 删除要验身份：remove_schedule 是 OPEN 工具，群里谁都能调。
+    // 删除和修改都要验身份：这两个都是 OPEN 工具，群里谁都能调。
     // 不校验的话，一个群友说「把定时任务都删了」就能清空别人建的早报。
     remove: (id) => removeSchedule(id, sessionKey, { actor, isAdmin: admin }),
+    update: (id, patch) => updateSchedule(id, sessionKey, patch, { actor, isAdmin: admin }),
   }
 }
 
