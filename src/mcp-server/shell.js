@@ -415,7 +415,7 @@ async function shell({ command, cwd, timeout_ms: timeoutMs, retries, background 
     `尝试：${attempts.length} 次${attempts.length > 1 ? `（失败后自动重试，最多 ${maxRetries} 次）` : ''}`,
     `耗时：${last.ms}ms`,
     `预估内存：约 ${estimate.memMB}MB${estimate.tight ? '（当前可用内存偏紧）' : ''}`,
-    `环境变量：仅 PATH 等基础变量 + DeepSeek key，不含 QQ 密钥`,
+    `环境变量：仅 PATH 等基础变量，不含任何密钥`,
   ]
 
   if (attempts.length > 1) {

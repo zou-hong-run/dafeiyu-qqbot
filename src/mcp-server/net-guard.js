@@ -46,6 +46,36 @@ function ipv4FromMappedIPv6(host) {
   return null
 }
 
+/**
+ * 把 IPv6 文本展开成 8 组 16 位整数，失败返回 null。
+ * 只为了判断「这个地址实质上是不是内网」，不做完整实现。
+ */
+function expandIPv6(host) {
+  let text = String(host).toLowerCase()
+  if (!text.includes(':')) return null
+
+  // 末尾的 IPv4 写法（::ffff:1.2.3.4）先转成两段十六进制
+  const tail = text.match(/^(.*:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
+  if (tail) {
+    const octets = tail[2].split('.').map(Number)
+    if (octets.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null
+    text = `${tail[1]}${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`
+  }
+
+  const halves = text.split('::')
+  if (halves.length > 2) return null
+
+  const left = halves[0] ? halves[0].split(':').filter(Boolean) : []
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':').filter(Boolean) : []
+  const fill = 8 - left.length - right.length
+  if (halves.length === 1 && fill !== 0) return null
+  if (fill < 0) return null
+
+  const groups = [...left, ...Array(fill).fill('0'), ...right].map((item) => parseInt(item, 16))
+  if (groups.length !== 8 || groups.some((n) => !Number.isFinite(n))) return null
+  return groups
+}
+
 function isBlockedIPv6(host) {
   if (!host.includes(':')) return false
 
@@ -55,6 +85,29 @@ function isBlockedIPv6(host) {
   if (host === '::1' || host === '::') return true
   if (/^fe[89ab]/i.test(host)) return true // fe80::/10 link-local
   if (/^f[cd]/i.test(host)) return true // fc00::/7 unique local
+
+  // IPv4 兼容写法：::7f00:1 其实就是 127.0.0.1，URL 解析会把 [::127.0.0.1] 变成这个样子。
+  // 规则：前 6 组全空时，最后两组按 IPv4 处理。
+  const groups = expandIPv6(host)
+  if (!groups) return false
+
+  const headEmpty = groups.slice(0, 6).every((n) => n === 0)
+  if (headEmpty) {
+    const ipv4 = [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.')
+    if (isBlockedIPv4(ipv4)) return true
+  }
+
+  // ::ffff:0:127.0.0.1 这种「翻译过的」，展开成 [0,0,0,0,ffff,0,7f00,1]
+  if (groups.slice(0, 4).every((n) => n === 0) && groups[4] === 0xffff && groups[5] === 0) {
+    const ipv4 = [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.')
+    if (isBlockedIPv4(ipv4)) return true
+  }
+
+  // ::ffff:127.0.0.1 展开成 [0,0,0,0,0,ffff,7f00,1]
+  if (groups.slice(0, 5).every((n) => n === 0) && groups[5] === 0xffff) {
+    const ipv4 = [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.')
+    if (isBlockedIPv4(ipv4)) return true
+  }
 
   return false
 }

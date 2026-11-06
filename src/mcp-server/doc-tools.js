@@ -11,7 +11,8 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const MAX_BYTES = 20 * 1024 * 1024
 const MAX_TEXT = 8000
 
-const BLOCKED = [/^\.env/, /^data\//, /^node_modules\//, /^\.git\//]
+// backups/ 是 data/ 的副本、logs/ 是命令输出，和 data/ 一样不该进模型上下文
+const BLOCKED = [/^\.env/, /^data\//, /^node_modules\//, /^\.git\//, /^backups\//, /^logs\//]
 
 function resolvePath(input) {
   const raw = String(input ?? '').trim()

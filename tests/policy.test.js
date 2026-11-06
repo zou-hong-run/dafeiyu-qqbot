@@ -68,3 +68,20 @@ test('filterTools 会按场景过滤', () => {
 test('isAdmin 在没有 actor 时不放行', () => {
   assert.equal(isAdmin('group', ''), false)
 })
+
+test('驼峰和点号写法的工具名也能判出危险', () => {
+  // 外部 MCP 的工具名五花八门，只认下划线会被绕过
+  for (const name of ['writeFile', 'execCommand', 'runScript', 'deleteItem', 'spawnProc', 'filesystem.write_file']) {
+    assert.equal(isDangerousTool(name), true, `${name} 应该判为高危`)
+  }
+  // 纯读取不该误伤
+  for (const name of ['readFile', 'read_file', 'listDir', 'list_dir', 'getWeather']) {
+    assert.equal(isDangerousTool(name), false, `${name} 不该判为高危`)
+  }
+})
+
+test('没在权限表里的工具默认拒绝', () => {
+  // add_mcp 注册进来的服务不自动获得权限，要在 TOOL_POLICY 里显式加条目
+  assert.equal(isToolAllowed('some_unknown_tool', 'private', 'u1'), false)
+  assert.equal(isToolAllowed('some_unknown_tool', 'group', 'u1'), false)
+})

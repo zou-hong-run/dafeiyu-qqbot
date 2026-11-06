@@ -9,6 +9,11 @@ import path from 'node:path'
 
 const ALLOWED_COMMANDS = new Set(['node', 'npx'])
 
+// node 除了内存上限，其余选项一律拒绝。
+// --require / --import / --loader / -e 都能在宿主侧加载并执行任意 JS，
+// 而 MCP 服务本身就是主进程 spawn 的，绕过了 bwrap 和 shell-guard。
+const SAFE_NODE_FLAG = /^--max-old-space-size=\d+$/
+
 function insideDir(root, target) {
   const base = path.resolve(root)
   const resolved = path.resolve(target)
@@ -56,12 +61,28 @@ export function assertMcpCommand(command, argList = [], { projectRoot } = {}) {
     if (args.some((item) => item === '-y' || item === '--yes')) {
       throw new Error('npx 不允许带 -y/--yes：那会联网下载并执行任意包。请先安装好，再用 node 启动')
     }
+
+    // 其余选项也拒：npx 会把部分参数透传给 node，--node-options 之类同样能注入
+    const npxFlags = args.filter((item) => item.startsWith('-'))
+    if (npxFlags.length > 0) {
+      throw new Error(`npx 不接受额外选项（收到 ${npxFlags.join(' ')}），参数里只写包名`)
+    }
+
     const pkg = args.find((item) => !item.startsWith('-'))
     if (!pkg) throw new Error('npx 要指定包名')
     if (projectRoot && !hasInstalledPackage(pkg, projectRoot)) {
       throw new Error(`包「${pkg}」还没装，或者不在 node_modules 里。先用 install_package 装上`)
     }
     return
+  }
+
+  // 选项全部拒掉：只要放行 --require 这一类，脚本路径校验就等于没做
+  const flags = args.filter((item) => item.startsWith('-') && !SAFE_NODE_FLAG.test(item))
+  if (flags.length > 0) {
+    throw new Error(
+      `node 启动参数里不允许带选项（收到 ${flags.join(' ')}）。` +
+        `--require / --import / --loader / -e 会在宿主侧执行任意代码，绕开整个沙箱。`,
+    )
   }
 
   const target = args.find((item) => !item.startsWith('-'))

@@ -76,3 +76,23 @@ test('没传 projectRoot 时退化成保守检查', () => {
   assert.throws(() => assertMcpCommand('node', ['tools/../../tmp/x.js']), /不能跳出/)
   assert.throws(() => assertMcpCommand('node', ['/etc/passwd']), /不能跳出/)
 })
+
+test('node 的选项一律拒绝', () => {
+  // 这些都能在宿主侧加载任意 JS，绕过 bwrap —— 只校验脚本路径是不够的
+  blocked('node', ['tools/ok.js', '--require', '/tmp/evil.js'], /不允许带选项/)
+  blocked('node', ['tools/ok.js', '--import', '/tmp/evil.mjs'], /不允许带选项/)
+  blocked('node', ['tools/ok.js', '--loader', '/tmp/evil.js'], /不允许带选项/)
+  blocked('node', ['tools/ok.js', '-e', 'require("fs")'], /不允许带选项/)
+  blocked('node', ['--require', '/tmp/evil.js', 'tools/ok.js'], /不允许带选项/)
+})
+
+test('内存上限允许，其余选项不允许', () => {
+  ok('node', ['--max-old-space-size=160', 'tools/ok.js'])
+  blocked('node', ['--max-old-space-size=160', '--require', '/tmp/x.js', 'tools/ok.js'], /不允许带选项/)
+})
+
+test('npx 不接受额外选项', () => {
+  fakeInstalled('installed-pkg')
+  ok('npx', ['installed-pkg'])
+  blocked('npx', ['--node-options=--require=/tmp/x', 'installed-pkg'], /不接受额外选项/)
+})

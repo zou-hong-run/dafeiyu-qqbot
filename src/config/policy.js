@@ -21,6 +21,10 @@ export const DANGEROUS_TOOLS = new Set([
   'send_to_group',
   'broadcast',
   'git_sync',
+  // 能写进系统提示词的：note_lesson 改 SELF.md，clear_memory 清掉记忆，
+  // 群成员如果能调，等于可以持久化污染提示词或者把别人的记忆抹掉
+  'note_lesson',
+  'clear_memory',
   // 能写项目文件的 MCP 工具：它们是外部注册进来的，名字不固定，
   // 漏一个就等于给所有人开了一条改代码的路。这里按「能落盘」这个能力列，不按名字猜。
   'file_copy',
@@ -29,14 +33,28 @@ export const DANGEROUS_TOOLS = new Set([
 // 兜底：名字里带这些词的 MCP 工具一律按高危处理。
 // 不然 add_mcp 注册进来的新工具会默认对所有人开放——它只要能写文件或执行命令，
 // 就等于绕过了上面那张表。
-const DANGEROUS_NAME_PATTERN =
-  /(^|_)(write|copy|edit|exec|run|install|spawn|shell|delete|remove|move|rename|kill|restart|upload|save)(_|$)/i
+const DANGEROUS_WORDS = new Set([
+  'write', 'copy', 'edit', 'exec', 'run', 'install', 'spawn', 'shell',
+  'delete', 'remove', 'move', 'rename', 'kill', 'restart', 'upload', 'save',
+])
+
+// writeFile / execCommand / filesystem.read_file 这些写法都要能识别出来，
+// 所以先统一成小写下划线形式再分词，别指望名字一定用下划线。
+function normalizeToolName(name) {
+  return String(name ?? '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[.\-\s]+/g, '_')
+    .toLowerCase()
+}
 
 /** 这个工具要不要走白名单：先看名单，再看名字里的能力词 */
 export function isDangerousTool(name) {
   const toolName = String(name ?? '')
   if (DANGEROUS_TOOLS.has(toolName)) return true
-  return DANGEROUS_NAME_PATTERN.test(toolName)
+  return normalizeToolName(toolName)
+    .split('_')
+    .filter(Boolean)
+    .some((part) => DANGEROUS_WORDS.has(part))
 }
 
 // 管理员判定：配了白名单就只认名单，没配就只认私聊
@@ -139,7 +157,9 @@ export function isToolAllowed(toolName, scope, actor = '') {
   // 未知工具按「能写/能执行」的名字特征判，避免 add_mcp 注册进来的新工具直接对所有人开放。
   if (isDangerousTool(toolName)) return dangerAllowed(scope, actor)
 
-  if (!rule) return scope === 'private'
+  // 未知工具默认拒绝：add_mcp 注册进来的服务不自动获得权限，
+  // 要在 TOOL_POLICY 里显式加条目才算授权。宁可让管理员多写一行。
+  if (!rule) return false
   return rule.scopes.includes(scope)
 }
 

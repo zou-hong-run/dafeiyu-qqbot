@@ -75,3 +75,15 @@ test('返回的是 URL 对象', () => {
   assert.equal(url.hostname, 'www.baidu.com')
   assert.equal(url.pathname, '/a/b')
 })
+
+test('IPv4 兼容写法的 IPv6 也要拦住', () => {
+  // [::127.0.0.1] 会被 URL 规范化成 [::7f00:1]，字面量看不出是内网
+  blocked('http://[::127.0.0.1]/')
+  blocked('http://[::7f00:1]/')
+  blocked('http://[::ffff:0:127.0.0.1]/')
+  blocked('http://[::ffff:0:a9fe:a9fe]/')
+})
+
+test('公网 IPv6 放行', () => {
+  allowed('http://[2400:3200::1]/')
+})

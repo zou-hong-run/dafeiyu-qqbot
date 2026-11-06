@@ -12,7 +12,20 @@ const execFileAsync = promisify(execFile)
 const GIT_TIMEOUT = 60_000
 
 // 双保险：.gitignore 已经挡了这些，但代码里再挡一次——漏一次就是密钥上公网
-const BLOCKED_PATHS = [/^\.env/, /^data\//, /^logs\//, /^downloads\//, /^node_modules\//, /^tmp\//]
+// .github/ 改的是 CI 的执行环境，package.json 改的是 scripts 和依赖——
+// 这两个被自动 push 出去，等于把「模型写的代码」直接接进流水线。
+const BLOCKED_PATHS = [
+  /^\.env/,
+  /^data\//,
+  /^logs\//,
+  /^downloads\//,
+  /^node_modules\//,
+  /^tmp\//,
+  /^backups\//,
+  /^\.github\//,
+  /^package\.json$/,
+  /^pnpm-lock\.yaml$/,
+]
 
 // 提交内容里出现这些模式就拒绝提交
 const SECRET_PATTERNS = [

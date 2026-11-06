@@ -63,6 +63,8 @@ function formatDuration(seconds) {
 async function findVideo({ url = '', maxSizeMB = DEFAULT_MAX_MB } = {}) {
   const link = String(url ?? '').trim()
   if (!/^https?:\/\//i.test(link)) throw new Error('需要一个完整的 http/https 链接')
+  // 四个视频工具都要过同一份出网校验：yt-dlp 会直接请求这个地址
+  assertPublicUrl(link)
 
   if (!(await checkYtdlp())) {
     throw new Error(

@@ -336,6 +336,7 @@ export const COMMANDS = [
   {
     name: '/clean',
     match: (text) => text === '/clean' || text === '/clean all',
+    adminOnly: true,
     run: async ({ text, reply }) => {
       const includeDownloads = text === '/clean all'
 
@@ -366,6 +367,7 @@ export const COMMANDS = [
   {
     name: '/kill',
     match: (text) => text.startsWith('/kill '),
+    adminOnly: true,
     run: async ({ text, reply }) => {
       const id = text.slice(6).trim()
       try {

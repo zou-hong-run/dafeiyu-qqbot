@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# 默认只读。仓库里的代码会被这里执行（冒烟启动），
+# 不给写权限等于断了「注入 → push → CI 改仓库」这条链。
+permissions:
+  contents: read
+
 jobs:
   test:
     name: 引用检查 + 单元测试
@@ -44,7 +49,10 @@ jobs:
       - name: 单元测试
         run: pnpm test
 
+      # 冒烟启动会真的执行仓库里的代码。只在 push 到 main 时跑，
+      # PR 不跑——PR 可能来自 fork，执行它的代码等于给外部提交一个执行入口。
       - name: 冒烟启动（不连 QQ，只验证装配）
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           # 5 秒后强杀：能起来、工具注册成功就算过
           timeout 5 node src/index.js 2>&1 | tee boot.log || true
