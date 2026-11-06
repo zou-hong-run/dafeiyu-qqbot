@@ -253,42 +253,29 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 
 ## 项目结构
 
-```
-src/index.js          Router：消息入口、事件分发、命令处理、统一发送
-src/bot.js            QQ 网关单例
-src/sender.js         发送层（被动回复配额、引用、Markdown 降级）
-src/media.js          媒体发送器（图片/语音/视频/文件/卡片/TTS）
-src/trigger.js        触发层（两级过滤、插话预算、观察模式）
-src/observe.js        观察记录
-src/deepseek.js       模型调用、工具循环、提示词组装
-src/persona.js        人格设定
-src/memory.js         三层记忆
-src/task-runner.js    兼容层（老接口转发到 ticket + worker）
-src/ticket.js         工单：授权、进展、交付，落盘可恢复
-src/worker.js         Worker：上下文隔离的执行单元
-src/watchdog.js       巡检：停滞与无效循环检测
-src/scheduler.js      定时任务
-src/group-log.js      群聊记录
-src/skills.js         技能加载
-src/policy.js         工具权限表
-src/mcp/client.js     MCP 客户端（多服务、热加载）
-src/mcp-server/       内置工具服务：index(基础) / shell / download / fs-tools / evolve
-tools/                自建 MCP 工具（模板在 mcp-server-template.js）
-skills/               技能文件
-data/                 记忆、群记录、定时任务、审计日志
-downloads/            交付给用户的媒体文件
-tmp/                  临时脚本和中间产物（可随时清理）
-scripts/              工具脚本（diagnose.js 别删）
-logs/                 pm2 日志
-```
+按「干哪一类事」分目录。**具体文件以 `list_dir` 看到的为准**，下面只是导航，别照着记忆写路径：
+
+- `src/app/` 路由、命令表、定时器、启动自检、审计
+- `src/chat/` 对话循环、提示词组装、人格、连发合并、选择题、任务清单
+- `src/memory/` 三层记忆、群记录、群画像、群知识、情绪记忆、目标
+- `src/tasks/` 工单、Worker、巡检、定时任务、自愈、推送台账
+- `src/channel/` 收发消息、媒体、附件、触发、撤回、观察
+- `src/mcp-server/` 工具实现：sandbox / shell / download / video / doc-tools / evolve
+- `src/ops/` 平台能力、内存预算、备份、代码同步、用量统计
+- `src/config/` 环境变量、工具权限表
+- `tools/` 自建 MCP 服务（模板 `mcp-server-template.js`）
+- `data/` 落盘数据，`downloads/` 交付文件，`tmp/` 临时产物（唯一可写的目录）
+
+完整说明看仓库 README 的「目录结构」一节，别在这里重复维护——它已经因为没跟上重构而过时过一次。
 
 ## 平台硬限制（不是我的 bug）
 
-- 被动回复窗口 **5 分钟**，每条消息最多回 5 次
+- 被动回复窗口 **4 分钟**，每条消息最多回 **4 条**（超出的段落存起来，用户说「接着发」再补）
 - 主动消息：单群 20 条/分钟、1000 条/天，且需要群主在手机 QQ 里开启「机器人主动在群聊内发言」
 - 群聊的 `file_type=4`（任意文件）官方暂不开放，只能发图片 / 语音 / 视频
 - 群里要收到全部消息，需要群主开「机器人可获取的群聊消息范围 → 获取群内全部消息」
-- `shell` 执行前会检查可用内存：普通命令低于 150MB、安装类命令低于 600MB 会被直接拒绝，并提示先加 swap（swapon/free/kill 这类救援命令不受限制）
+- `shell` 执行前查可用内存：低于 300MB 时全部停摆（只放行 `free` / `ps` / `kill` 这类救援命令）；普通命令要 120MB、装包类 550MB、视频处理约 700MB
+- `shell` 在沙箱里：**没有网络**，只有 `tmp/` 可写。要联网用 `search` / `fetch` / `download`，要装包用 `install_package`
 
 ## 给自己加新能力
 
@@ -296,7 +283,7 @@ logs/                 pm2 日志
 2. 需要代码的工具 → `read_file tools/mcp-server-template.js` 拿模板，`write_file` 写到 `tools/xxx.js`，再 `add_mcp` 注册
 3. 发现自己这份能力说明和实际情况不符时，用 `write_file` 更新 SELF.md
 
-最后同步测试：2026-11-02
+最后同步测试：2026-11-06
 
 ## 踩坑记录（自己总结的，别删）
 

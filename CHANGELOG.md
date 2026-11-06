@@ -1,5 +1,32 @@
 # 变更日志
 
+## v3.0.0 — 2026-11-06
+
+安全架构重做：从「能跑命令的机器人」变成「命令跑在能说清楚边界的地方」。功能没变，边界全换了。完整说明见 [docs/release-v3.0.0.md](docs/release-v3.0.0.md)。
+
+### 破坏性变更
+
+- **沙箱恒定断网**：原来命令里出现 `curl`/`git`/`pnpm` 就放行网络，现在一律没网
+- **可写目录收窄**：从整个项目根收到只剩 `tmp/`
+- **密钥外置**：推荐 `/etc/dafeiyu/env`，项目根 `.env` 仅兜底
+
+### 安全
+
+- 真接 bwrap：只读根、唯一可写 `tmp/`、`--clearenv`、`--die-with-parent`、capability 按目录属主按需
+- 自检 fail-closed：装了 bwrap 但探针跑不过时直接拒绝执行，不降级成裸跑
+- 遮蔽扩到 `/root`、`/home`、`/www`、密钥目录、`/etc/shadow`、`/etc/sudoers`
+- `tools/` 路径穿越堵死（先 `path.resolve` 再判）
+- 注册表热加载复用 MCP 启动白名单，env 字段清空
+- 模型 key 只注入内置 MCP 服务
+- 出网校验抽成 `net-guard.js`：重定向逐跳复核、IPv6 映射还原、域名解析结果也过一遍
+- `file_copy` 这类能写文件的工具收进高危名单，未登记工具按名字里的能力词兜底
+
+### 修复
+
+- `list_groups`、`broadcast`、主动接话扫描、`/config` 内存显示——四个功能因漏 `import fs` 静默失效
+- `pnpm check` 补上「Node 模块别名未 import」检查
+- pm2 启动时补齐 PATH，修 `/usr/local/bin` 不在 PATH 导致工具找不到
+
 ## v2.0.0 — 2026-11-03
 
 架构级重写：从「一个能聊天的脚本」变成「分层的 agent 运行时」。行为上最大的变化是它开始**自己判断该不该动手、动手之后怎么收尾**，而不是等你催第二遍。
