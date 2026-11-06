@@ -148,6 +148,9 @@ export const env = {
   // 连发合并窗口：同一个人连着发的几句合成一次理解，0 = 关闭（逐条处理）
   mergeWindowMs: nonNegativeNumber('MERGE_WINDOW_MS', 2500),
 
+  // 群里的广告提醒：广告词 + 链接/联系方式同时出现才 @ 对方一句，默认开
+  adGuard: process.env.AD_GUARD !== 'false',
+
   // 退出前自动把改过的代码提交回仓库（「自己进化」靠它）；间隔 0 = 只靠退出时提交
   autoSyncOnExit: process.env.AUTO_SYNC_ON_EXIT !== 'false',
   autoSyncIntervalMinutes: nonNegativeNumber('AUTO_SYNC_INTERVAL_MINUTES', 30),

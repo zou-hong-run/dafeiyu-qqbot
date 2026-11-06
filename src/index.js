@@ -30,7 +30,8 @@ import { runCommand } from './app/commands.js'
 import { progressReporter, runFollowUps, runHotTake, runProactiveScan, runScheduledTask } from './app/timers.js'
 import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf, wakeSenderFor } from './app/factories.js'
 import { QUIET_MS, flushQuiet, isMuted, isUnmuteCommand, muteGroup, oncePer, parseMuteCommand, unmuteGroup } from './engage/quiet.js'
-import { acknowledgeInteraction, onInteraction, onLifecycle, onMessage, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
+import { isLikelyAd, pickAdReply, takeWarnSlot } from './engage/ad-guard.js'
+import { acknowledgeInteraction, onInteraction, onLifecycle, onMessage, segment, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendMarkdownTo, sendReply, splitMarkdown } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
 import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSenderFor, videoSenderFor } from './channel/media.js'
@@ -332,6 +333,34 @@ async function handleQuietCommand(event, text) {
   return false
 }
 
+// 群里有明显广告时，@ 对方一句软提醒，然后这条不再走后续判断。
+// 判定是纯规则（广告词 + 链接/联系方式），限频在 ad-guard 里：
+// 同一个人 24 小时只提一次，同一个群一小时最多 3 次。
+async function warnIfAd(event, text) {
+  if (!env.adGuard) return false
+  if (!event.group_id || !event.user_id) return false
+  if (env.adminOpenIds.includes(String(event.user_id))) return false
+  if (!isLikelyAd(text)) return false
+  if (hasReplied(event.message_id)) return false
+
+  if (!takeWarnSlot(event.group_id, event.user_id)) {
+    console.log(`[广告] ${event.group_id.slice(0, 12)}… 命中广告词，但限频中，跳过提醒`)
+    return false
+  }
+
+  markReplied(event.message_id)
+  const notice = pickAdReply()
+  try {
+    // 用消息段拼 @：flatten 会生成 <qqbot-at-user>，dispatch 自动改走 markdown 发送
+    await sendGroup(event.group_id, [segment.at(event.user_id), segment.text(` ${notice}`)])
+    console.log(`[广告] 已提醒 ${String(event.user_id).slice(0, 8)}…：${text.slice(0, 40)}`)
+  } catch (error) {
+    console.warn('[广告] 提醒发送失败：', error?.message ?? error)
+  }
+
+  return true
+}
+
 async function handleGroupAll(event) {
   const text = (event.content ?? '').trim()
   recordGroupMessage(event, text || '[附件]')
@@ -379,6 +408,10 @@ async function handleGroupAll(event) {
   // 名字触发和自动判断：被喊安静之后都不做，只保留 @ 和 /总结
   if (isMuted(event.group_id)) return
 
+  // 广告提醒放在所有正常处理之后、接话判断之前：
+  // 命中就 @ 对方一句软提醒，这条不再往下走（免得机器人跟广告聊起来）
+  if (await warnIfAd(event, text)) return
+
   if (env.groupAutoReply && mentionsBot(text)) {
     if (hasReplied(event.message_id)) return
 
@@ -406,6 +439,9 @@ async function handleGroupAt(event, overrideText = '') {
   recordGroupMessage(event, raw || '[附件]')
 
   if (await handleQuietCommand(event, text)) return
+
+  // @ 我的消息里也可能带广告，一样提醒一次
+  if (await warnIfAd(event, raw)) return
 
   // 只 @ 不说话、也没带附件：以前是静默丢，用户会以为坏了，这里给一句引导（每群 60 秒最多一次）
   if (!text && extractInbound(event).length === 0) {
