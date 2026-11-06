@@ -119,28 +119,32 @@ export function choiceText({ question, options }) {
 /**
  * 构造按钮布局。每个选项一个按钮，点了触发 INTERACTION_CREATE。
  * action.type=1 是回调按钮（不往会话里发指令），permission.type=2 表示所有人可点。
+ *
+ * 按钮要分行：5 个挤在一行时每个按钮宽度只剩一点，群里看到的是「1. ...」，
+ * 完全看不出点什么。每行最多 3 个，空间留给文字。
  */
+const BUTTONS_PER_ROW = 3
+
 export function choiceKeyboard(entry) {
-  return {
-    content: {
-      rows: [
-        {
-          buttons: entry.options.map((label, index) => ({
-            id: `b_${entry.id}_${index}`,
-            render_data: {
-              label: `${index + 1}. ${label}`.slice(0, 20),
-              visited_label: `已选 ${index + 1}`,
-              style: index === 0 ? 1 : 0,
-            },
-            action: {
-              type: 1,
-              permission: { type: 2 },
-              data: `choice:${entry.id}:${index}`,
-              click_limit: 1,
-            },
-          })),
-        },
-      ],
+  const buttons = entry.options.map((label, index) => ({
+    id: `b_${entry.id}_${index}`,
+    render_data: {
+      label: `${index + 1}. ${label}`.slice(0, 20),
+      visited_label: `已选 ${index + 1}`,
+      style: index === 0 ? 1 : 0,
     },
+    action: {
+      type: 1,
+      permission: { type: 2 },
+      data: `choice:${entry.id}:${index}`,
+      click_limit: 1,
+    },
+  }))
+
+  const rows = []
+  for (let i = 0; i < buttons.length; i += BUTTONS_PER_ROW) {
+    rows.push({ buttons: buttons.slice(i, i + BUTTONS_PER_ROW) })
   }
+
+  return { content: { rows } }
 }

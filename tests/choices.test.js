@@ -35,6 +35,19 @@ test('按钮布局带上全部选项和回调数据', () => {
   assert.equal(buttons[2].action.data, `choice:${entry.id}:2`)
 })
 
+test('选项多时按钮分行，不挤成一行', () => {
+  // 群里实际看到过「1. ...」：5 个按钮挤一行，每个宽度只够显示省略号
+  const entry = putChoice('test:btn-5', { question: 'q', options: ['一', '二', '三', '四', '五'] })
+  const rows = choiceKeyboard(entry).content.rows
+
+  assert.equal(rows.length, 2, '5 个选项应该分两行')
+  assert.equal(rows[0].buttons.length, 3)
+  assert.equal(rows[1].buttons.length, 2)
+  // 序号要接着排，不能每行都从 1 开始
+  assert.equal(rows[1].buttons[0].render_data.label, '4. 四')
+  assert.equal(rows[1].buttons[1].action.data, `choice:${entry.id}:4`)
+})
+
 test('少于两个选项时不创建', () => {
   assert.equal(putChoice('test:btn-4', { question: 'q', options: ['只有一个'] }), null)
 })
