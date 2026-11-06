@@ -174,7 +174,7 @@ export function broadcastSenderFor(event) {
       try {
         for (let i = 0; i < parts.length; i += 1) {
           if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
-          await sendGroup(groupId, parts[i])
+          await sendGroup(groupId, parts[i], { markdown: env.markdownReply })
         }
         sent.push(groupId)
       } catch (error) {
