@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { systemSnapshot } from '../ops/budget.js'
 import { pageImagesOf } from './page-images.js'
+import { citationLine, formatSearchResults } from './search-format.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 config({ path: path.join(projectRoot, '.env'), quiet: true })
@@ -49,16 +50,7 @@ async function search({ query, count = 5 }) {
   const results = data.results ?? []
   if (results.length === 0) return '没有搜到相关结果。'
 
-  const lines = results.map((item, index) => {
-    const parts = [`${index + 1}. ${item.title}`]
-    parts.push(`   链接: ${item.url}`)
-    if (item.date) parts.push(`   时间: ${item.date}`)
-    if (item.site_name) parts.push(`   来源: ${item.site_name}`)
-    parts.push(`   摘要: ${truncate(item.summary || item.snippet, 400)}`)
-    return parts.join('\n')
-  })
-
-  return `共 ${results.length} 条结果：\n\n${lines.join('\n\n')}`
+  return formatSearchResults(results)
 }
 
 async function fetchPage({ url }) {
@@ -69,6 +61,7 @@ async function fetchPage({ url }) {
   })
 
   const title = data.title ? `标题: ${data.title}\n` : ''
+  const cite = citationLine(data.title, url)
 
   // 配图单独抓一次：抓取接口只回正文，不给图。
   // 失败不报错，正文照常返回。
@@ -78,7 +71,7 @@ async function fetchPage({ url }) {
       ? '配图: 无（这个页面抓不到可用配图，别自己画图充数）\n'
       : `配图: ${images.join('\n      ')}\n`
 
-  return `${title}链接: ${url}\n${imageLine}\n正文（Markdown）：\n${truncate(data.content, contentLimit)}`
+  return `${title}${cite}${imageLine}\n正文（Markdown）：\n${truncate(data.content, contentLimit)}`
 }
 
 function now() {
