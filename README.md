@@ -391,7 +391,6 @@ node --check src/index.js
 | `TOOL_TIMEOUT_SECONDS` | 单个工具调用超时（60） |
 | `TASK_MAX_ROUNDS` | 子助手最多执行几步（20） |
 | `CONTEXT_WINDOW_TOKENS` | 模型上下文窗口（128000），超出预算的早期内容压成摘要 |
-| `MARKDOWN_REPLY` | 用 Markdown 发回复（false）。平台已开放自定义 Markdown |
 | `QUOTE_REPLY` | 引用气泡：`false` 关（默认）/ `judge` 只在插话时 / `always` 每条都引用 |
 | `TTS_VOICE` | `speak` 工具用的 edge-tts 音色（`zh-CN-XiaoxiaoNeural`） |
 | `ADMIN_OPENIDS` | 高危工具白名单（逗号分隔 openid）。机器人里发 `/id` 查自己的 openid |
@@ -406,6 +405,7 @@ node --check src/index.js
 | `HOT_TAKE_ENABLED` | 热点吐槽：搜当天新闻在群里损两句（默认关） |
 | `MERGE_WINDOW_MS` | 连发合并的基础窗口（2500）。短句/明显没说完的自动延长到 1.6 倍，完整句子 0.8 秒就回；0 = 逐条处理 |
 | `STREAM_REPLY` | 私聊长回复走流式（默认关，需要开放平台开通 `/stream_messages`） |
+| `MARKDOWN_REPLY` | 用 Markdown 发回复（默认关）。群聊和单聊的自定义 markdown 已全量开放，不需要申请；默认关是因为模型输出里的 `* _ #` 会被当格式解析 |
 | `PROGRESS_MAX` | 私聊一轮最多报几次进度（3），群里固定 1 次 |
 | `TOOL_DEBUG` | 打每轮请求和工具调用的详细日志（默认关，排查时开） |
 

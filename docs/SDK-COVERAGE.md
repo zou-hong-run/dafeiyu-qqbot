@@ -11,7 +11,7 @@
 | WebSocket 连接 + 自动重连 | `client.js` | 心跳、RESUME、按关闭码分类处理都是 SDK 做的 |
 | **session 持久化** | `data/qq-session.json` | 重启后先试 RESUME，不用重新 IDENTIFY，少丢几条消息 |
 | 文本发送 | `sendGroup` / `sendPrivate` | 有 `msgId` 走被动回复，没有走主动消息 |
-| **@ 成员** | `segment.at()` | 拼成 `<qqbot-at-user id="..." />`。**群聊里 @ 具体某人只有 markdown 消息支持**，没权限时自动摘掉标签降级成纯文本；`@全体成员` 文本消息也支持（需群管理员，每群每天 1 次） |
+| **@ 成员** | `segment.at()` | 拼成 `<qqbot-at-user id="..." />`。**群聊里 @ 具体某人只有 markdown 消息支持**（平台对群聊/单聊的自定义 markdown 自 2026-04-23 起全量开放，无需申请）；`@全体成员` 文本消息也支持（需群管理员，每群每天 1 次） |
 | 图片 / 语音 / 视频 / 文件 | `segment.image` 等 | 转成 `sendImage/sendVoice/sendVideo/sendFile` |
 | **大文件分块上传** | 自动 | ≥5MB 自动走 `upload_prepare → PUT → complete`，调用方无感 |
 | **上传去重** | 内置 | 同字节同目标 TTL 内只传一次 |
@@ -28,7 +28,9 @@
 
 **Markdown 消息**
 
-技术上身已经通了（`postRaw` 发 `msg_type: 2` + `markdown`），但需要开放平台单独给 markdown 权限。没权限时服务端返 `304036` / `40034127`，`sender.js` 会捕获并永久降级为纯文本。`MARKDOWN_REPLY=true` 可开。
+群聊和单聊的自定义 markdown **自 2026-04-23 起对所有机器人开放**，不需要申请模版（频道场景才要内邀）。
+
+但我们默认**不用**它发普通回复：`markdownSupport: true` 会让所有文本都走 `msg_type: 2`，模型输出里的 `*`、`_`、`#` 会被当格式解析，贴代码和路径容易变形。所以只在两处用 markdown：`@` 成员（平台硬要求），以及手动打开 `MARKDOWN_REPLY=true`。
 
 **按钮 + 交互事件**
 

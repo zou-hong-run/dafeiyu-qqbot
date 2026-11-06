@@ -51,7 +51,10 @@ const logger = {
 export const bot = new QQBot({
   appId: env.appId,
   appSecret: env.appSecret,
-  // 我们的机器人没有 markdown 权限，开着会被服务端拒；要用时单独走 sendMarkdown
+  // 保持 false：开了之后 sendText 会把所有文本包成 markdown 消息（msg_type 2），
+  // 模型输出里的 * _ # 会被当格式解析，贴代码和路径容易变形。
+  // 平台对群聊/单聊的自定义 markdown 已经全量开放（2026-04-23 起无需申请），
+  // 需要 @ 成员或真正的富文本时，单独走 sendMarkdown，把范围控制在需要的地方。
   markdownSupport: false,
   logger,
   sessionPersistence,
