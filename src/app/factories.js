@@ -65,6 +65,8 @@ export function gitSyncFor() {
 }
 
 // 主动往别的群发消息：私聊里也能把话送到指定的群
+// 长文自动分段，但不能无限分——段数上限防的是一次性刷屏
+const MAX_TEXT_PARTS = 8
 export function groupSenderFor(event) {
   const currentGroup = event?.group_id
 
@@ -107,6 +109,13 @@ export function groupSenderFor(event) {
     } else {
       parts = env.markdownReply ? splitMarkdown(text) : chunkText(text)
       if (parts.length === 0) parts = [clip(text)]
+    }
+
+    // 段数兜底：一次塞进来 100 万字会被切成上千段，连发几分钟，群里直接刷屏
+    if (parts.length > MAX_TEXT_PARTS) {
+      throw new Error(
+        `内容 ${text.length} 字，会分成 ${parts.length} 段发出去，超过 ${MAX_TEXT_PARTS} 段上限——精简要点后再发`,
+      )
     }
 
     let sent

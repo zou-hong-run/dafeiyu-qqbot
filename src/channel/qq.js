@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { QQBot } from '@tencent-connect/qqbot-nodejs'
 import { env } from '../config/env.js'
 import { sensitiveReason } from '../ops/file-policy.js'
-import { assertPublicUrl, fetchPublic } from '../mcp-server/net-guard.js'
+import { assertPublicUrlResolved, fetchPublic } from '../mcp-server/net-guard.js'
 
 // 官方 SDK 的适配层。
 //
@@ -189,7 +189,11 @@ async function uploadImageAsset(absPath) {
  * 已经是 http / qqbot-media 的原样保留；读不到或上传失败就把那一张去掉，
  * 不让整条消息因为一张图发不出去。
  */
-export async function rewriteMarkdownImages(text, baseDir = projectRoot) {
+export async function rewriteMarkdownImages(
+  text,
+  baseDir = projectRoot,
+  { checkUrl = assertPublicUrlResolved } = {},
+) {
   const source = String(text ?? '')
   if (!source.includes('![')) return source
 
@@ -202,7 +206,7 @@ export async function rewriteMarkdownImages(text, baseDir = projectRoot) {
       // 外链图会交给平台去抓。地址是模型从网页里抄来的，同样要过一遍校验：
       // 网页作者把 og:image 写成元数据地址，模型抄进正文，平台就去访问了。
       try {
-        assertPublicUrl(src)
+        await checkUrl(src)
       } catch {
         console.warn(`[qq] markdown 里这张外链图地址不可用，已去掉：${src.slice(0, 60)}`)
         result = result.replace(full, '')

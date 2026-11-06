@@ -1,7 +1,7 @@
 // 从网页 HTML 里挑可用的配图。
 // 抽成独立模块是为了能单测：index.js 一被 import 就会读 .env、起 MCP 服务，测不了。
 
-import { assertPublicUrl, fetchPublic } from './net-guard.js'
+import { assertPublicUrl, assertPublicUrlResolved, fetchPublic } from './net-guard.js'
 
 // 页面里大量 <img> 是二维码、logo、头像、占位图，拿它们当配图等于发垃圾
 const IMAGE_JUNK =
@@ -106,7 +106,10 @@ async function readLimited(response, limit) {
  * 原来的裸 fetch 是「群聊里任何人给个网址就能让服务器去请求」——fetch 工具
  * 原本交给服务端抓，本地不出网，配图这一步把它变成了本地出网，必须收回来。
  */
-export async function pageImagesOf(url, { timeout = 15_000, fetchImpl = fetchPublic } = {}) {
+export async function pageImagesOf(
+  url,
+  { timeout = 15_000, fetchImpl = fetchPublic, resolveImpl = assertPublicUrlResolved } = {},
+) {
   try {
     assertPublicUrl(url)
 
@@ -117,7 +120,20 @@ export async function pageImagesOf(url, { timeout = 15_000, fetchImpl = fetchPub
     if (!response.ok) return []
 
     const html = await readLimited(response, MAX_HTML_BYTES)
-    return pickImages(html, url)
+    const candidates = pickImages(html, url)
+
+    // pickImages 只做字面量校验（同步、能单测）。这里再补 DNS 解析：
+    // `127.0.0.1.nip.io`、`localtest.me` 这类域名字面量看着是公网，解析出来是内网。
+    const safe = []
+    for (const image of candidates) {
+      try {
+        await resolveImpl(image)
+        safe.push(image)
+      } catch {
+        // 解析不了或指向内网的图直接丢掉，不因为一张图毁掉整条正文
+      }
+    }
+    return safe
   } catch {
     return []
   }

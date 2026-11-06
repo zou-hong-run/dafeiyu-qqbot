@@ -7,7 +7,8 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const MAX_CONTENT = 200_000
 
 // 工具输出超过上限时会落盘到这里，模型需要能读回来。
-// 它是 file-policy 里 tmp/ 的唯一例外，读放行、写不拦（写了也只是临时文件）。
+// 它是 file-policy 里 tmp/ 的唯一例外：读放行；写仍然按黑名单拒（模型不需要往这儿写，
+// 落盘由 chat 层自己做）。
 const SPILL_PREFIX = 'tmp/tool-output/'
 
 function resolveSafe(input, { write = false } = {}) {

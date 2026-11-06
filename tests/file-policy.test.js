@@ -102,5 +102,6 @@ test('markdown 外链图也要过地址校验（源码级守门）', () => {
   assert.ok(start > 0)
 
   const body = source.slice(start, start + 1500)
-  assert.match(body, /assertPublicUrl\(/, '外链图地址要校验')
+  assert.match(body, /checkUrl\(/, '外链图地址要校验（默认走带 DNS 的 assertPublicUrlResolved）')
+  assert.match(body, /checkUrl = assertPublicUrlResolved/, '默认校验器必须是带 DNS 解析的那个')
 })

@@ -7,6 +7,9 @@ import { pickImages, pageImagesOf, usableImage } from '../src/mcp-server/page-im
 
 const BASE = 'https://www.news.cn/politics/20261104/c.html'
 
+// 单测不真做 DNS：默认放行，需要时注入一个会抛的
+const allowDns = async () => {}
+
 test('usableImage 只认 http 图片地址', () => {
   assert.equal(usableImage('/pic/a.jpg', BASE), 'https://www.news.cn/pic/a.jpg')
   assert.equal(usableImage('https://cdn.x.com/b.png?w=600', BASE), 'https://cdn.x.com/b.png?w=600')
@@ -69,17 +72,17 @@ test('pageImagesOf 抓页面后返回图片', async () => {
     new Response('<meta property="og:image" content="https://cdn.x.com/cover.jpg">', {
       headers: { 'Content-Type': 'text/html' },
     })
-  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl }), ['https://cdn.x.com/cover.jpg'])
+  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl, resolveImpl: allowDns }), ['https://cdn.x.com/cover.jpg'])
 })
 
 test('pageImagesOf 出错或非 200 时返回空，不抛', async () => {
   const notOk = async () => new Response('', { status: 404 })
-  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl: notOk }), [])
+  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl: notOk, resolveImpl: allowDns }), [])
 
   const boom = async () => {
     throw new Error('network down')
   }
-  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl: boom }), [])
+  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl: boom, resolveImpl: allowDns }), [])
 })
 
 test('页面里指向内网或云元数据的图一律丢掉', () => {
@@ -108,13 +111,30 @@ test('pageImagesOf 拒绝抓内网地址，一个请求都不发', async () => {
     return new Response('<img src="https://cdn.x.com/a.jpg">')
   }
 
-  assert.deepEqual(await pageImagesOf('http://127.0.0.1:8080/admin', { fetchImpl }), [])
-  assert.deepEqual(await pageImagesOf('http://169.254.169.254/latest/meta-data/', { fetchImpl }), [])
+  assert.deepEqual(await pageImagesOf('http://127.0.0.1:8080/admin', { fetchImpl, resolveImpl: allowDns }), [])
+  assert.deepEqual(await pageImagesOf('http://169.254.169.254/latest/meta-data/', { fetchImpl, resolveImpl: allowDns }), [])
   assert.equal(called, false, '内网地址根本不该发出请求')
 })
 
 test('响应体超大时只读前面一段', async () => {
   const huge = '<img src="https://cdn.x.com/a.jpg">' + 'x'.repeat(5_000_000)
   const fetchImpl = async () => new Response(huge)
-  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl }), ['https://cdn.x.com/a.jpg'])
+  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl, resolveImpl: allowDns }), ['https://cdn.x.com/a.jpg'])
+})
+
+test('解析到内网的域名图片被丢掉（字面量看不出来）', async () => {
+  const fetchImpl = async () =>
+    new Response(
+      [
+        '<img src="http://127.0.0.1.nip.io/x.jpg">',
+        '<img src="https://cdn.x.com/ok.jpg">',
+      ].join('\n'),
+    )
+
+  // 模拟 DNS：nip.io 解析到回环，cdn.x.com 正常
+  const resolveImpl = async (raw) => {
+    if (String(raw).includes('nip.io')) throw new Error('不允许访问内网或云元数据地址')
+  }
+
+  assert.deepEqual(await pageImagesOf(BASE, { fetchImpl, resolveImpl }), ['https://cdn.x.com/ok.jpg'])
 })

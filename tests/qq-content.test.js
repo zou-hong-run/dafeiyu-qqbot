@@ -57,7 +57,19 @@ test('媒体段单独收集，不进 content', () => {
 test('markdown 图片：公网地址和已有引用不动', async () => {
   const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
   const text = '![图](https://a.com/x.png) 和 ![图2](qqbot-media://image/v1/abc)'
-  assert.equal(await rewriteMarkdownImages(text), text)
+  // 单测不真做 DNS
+  const checkUrl = async () => {}
+  assert.equal(await rewriteMarkdownImages(text, undefined, { checkUrl }), text)
+})
+
+test('markdown 图片：内网地址被摘掉', async () => {
+  const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
+  const text = '正文 ![图](http://169.254.169.254/latest/meta-data/) 结束'
+  const checkUrl = async (raw) => {
+    if (String(raw).includes('169.254.169.254')) throw new Error('不允许访问内网')
+  }
+  const output = await rewriteMarkdownImages(text, undefined, { checkUrl })
+  assert.equal(output, '正文  结束')
 })
 
 test('markdown 图片：读不到的本地路径原样保留', async () => {
