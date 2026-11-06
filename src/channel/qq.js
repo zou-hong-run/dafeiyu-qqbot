@@ -137,7 +137,7 @@ const MEDIA_SEND = {
   file: (target, source, opts) => bot.sendFile(target, source, opts),
 }
 
-async function dispatch(target, payload, msgId) {
+async function dispatch(target, payload, msgId, { markdown = false } = {}) {
   const { text, media } = flatten(payload)
 
   if (media.length === 0) {
@@ -159,6 +159,9 @@ async function dispatch(target, payload, msgId) {
         return bot.sendText({ ...target, msgId }, plain || text)
       }
     }
+
+    // 调用方明确要求 markdown（定时任务、对外推送）：失败往外抛，由上层决定要不要降级
+    if (markdown) return bot.sendMarkdown({ ...target, msgId }, text)
 
     return bot.sendText({ ...target, msgId }, text)
   }
@@ -184,13 +187,13 @@ async function dispatch(target, payload, msgId) {
 }
 
 /** 发到群。不传 msgId 就是主动消息（受平台额度限制） */
-export function sendGroup(groupId, payload, { msgId } = {}) {
-  return dispatch({ scope: 'group', targetId: String(groupId) }, payload, msgId)
+export function sendGroup(groupId, payload, { msgId, markdown = false } = {}) {
+  return dispatch({ scope: 'group', targetId: String(groupId) }, payload, msgId, { markdown })
 }
 
 /** 发到私聊 */
-export function sendPrivate(userId, payload, { msgId } = {}) {
-  return dispatch({ scope: 'c2c', targetId: String(userId) }, payload, msgId)
+export function sendPrivate(userId, payload, { msgId, markdown = false } = {}) {
+  return dispatch({ scope: 'c2c', targetId: String(userId) }, payload, msgId, { markdown })
 }
 
 export function recallGroup(groupId, messageId) {

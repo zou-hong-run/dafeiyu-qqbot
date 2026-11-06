@@ -7,6 +7,9 @@ import { noteSent } from './recall.js'
 // 对外只暴露 clip / sendReply / deliver / postMessage
 let markdownState = null
 
+// 平台明确说「不支持 markdown」的错误码。命中就不再尝试，避免每条消息都白跑一次。
+const MARKDOWN_UNAVAILABLE = /304036|40034127|markdown\s*(模板)?\s*权限|无\s*markdown/i
+
 // 撤回要 message_id，而发送接口的返回值以前被直接丢掉了，这里统一捞一次。
 // 不同接口返回结构不完全一致：可能是 { id }、{ data: { id } }，取不到就返回空串，不影响发送。
 export function pickMessageId(result) {
@@ -263,6 +266,44 @@ async function sendMarkdownMessage(event, content) {
 }
 
 // 长文本切分：优先在换行 / 句末 / 逗号处断开，尽量不切断词句
+/**
+ * 按「块」切分 markdown 文本。
+ *
+ * 不能用 chunkText：它按行和句子切，会把列表、引用、加粗符号从中间劈开，
+ * 结果就是一条消息里出现半截 ** 和断掉的列表。
+ * 这里以空行（段落边界）为最小单位，尽量让每段是完整的 markdown 结构。
+ */
+export function splitMarkdown(text, limit = Math.max(200, env.replyMaxChars)) {
+  const blocks = String(text ?? '')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+
+  if (blocks.length === 0) return []
+
+  const parts = []
+  let current = ''
+
+  for (const block of blocks) {
+    const candidate = current ? `${current}\n\n${block}` : block
+    if (current && candidate.length > limit) {
+      parts.push(current)
+      current = block
+    } else {
+      current = candidate
+    }
+  }
+  if (current) parts.push(current)
+
+  // 某一块本身就超长（比如一大段没有空行的文字），只能硬切
+  return parts.flatMap((part) => {
+    if (part.length <= limit) return [part]
+    const chunks = []
+    for (let i = 0; i < part.length; i += limit) chunks.push(part.slice(i, i + limit))
+    return chunks
+  })
+}
+
 export function chunkText(text, limit = Math.max(200, env.replyMaxChars)) {
   const raw = String(text ?? '').trim()
   if (!raw) return []
@@ -404,6 +445,32 @@ async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 320 } = {}
     // 已经发出去一部分了，别再整条重发，否则用户看到两遍开头
     console.warn(`[流式] 发到第 ${sent} 段中断，后半截没发出去：`, message.slice(0, 80))
     return true
+  }
+}
+
+/**
+ * 主动推送一条 markdown 消息（定时任务、对外通报用）。
+ * 没开 markdown 或发送失败就返回 null，调用方自己回退纯文本。
+ *
+ * @param {{type:'group'|'private', id:string}} target
+ */
+export async function sendMarkdownTo(target, text) {
+  const body = String(text ?? '').trim()
+  if (!body) return null
+  if (!env.markdownReply || markdownState === false) return null
+
+  try {
+    const send = target.type === 'group' ? sendGroup : sendPrivate
+    return await send(target.id, body, { markdown: true })
+  } catch (error) {
+    const message = String(error?.message ?? error)
+    if (MARKDOWN_UNAVAILABLE.test(message)) {
+      markdownState = false
+      console.warn(`[Markdown] 平台拒绝 markdown，本次进程内改用纯文本：${message.slice(0, 80)}`)
+    } else {
+      console.warn('[Markdown] 主动推送失败：', message.slice(0, 80))
+    }
+    return null
   }
 }
 

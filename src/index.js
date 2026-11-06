@@ -31,7 +31,7 @@ import { progressReporter, runFollowUps, runHotTake, runProactiveScan, runSchedu
 import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf, wakeSenderFor } from './app/factories.js'
 import { QUIET_MS, flushQuiet, isMuted, isUnmuteCommand, muteGroup, oncePer, parseMuteCommand, unmuteGroup } from './engage/quiet.js'
 import { onLifecycle, onMessage, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
-import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendReply } from './channel/sender.js'
+import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendMarkdownTo, sendReply, splitMarkdown } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
 import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSenderFor, videoSenderFor } from './channel/media.js'
 import { claim, coolingDown, enqueue, hasReplied, initTrigger, markReplied, mentionsBot, recordGroupMessage, scheduleJudge, touch, worthJudging } from './channel/trigger.js'
@@ -736,8 +736,10 @@ try {
         return []
       }
 
-      // 定时任务的日报可能很长：分段发，别用 clip 截断
-      const parts = chunkText(text)
+      // 定时任务的日报可能很长：分段发，别用 clip 截断。
+      // 开了 markdown 就按「块」切（列表和引用不会被劈开），否则还是按句子切。
+      const useMarkdown = env.markdownReply
+      const parts = useMarkdown ? splitMarkdown(text) : chunkText(text)
       const ids = []
       // 撤回要 message_id：这里把发送结果捞出来，既给调度器记账，也写进撤回台账
       const event =
@@ -747,10 +749,16 @@ try {
 
       for (let i = 0; i < parts.length && i < 6; i += 1) {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
-        const result =
-          target.type === 'group'
-            ? await sendGroup(target.id, parts[i])
-            : await sendPrivate(target.id, parts[i])
+
+        // 先试 markdown，平台拒绝就退回纯文本——定时任务发不出去比格式难看严重得多
+        let result = useMarkdown ? await sendMarkdownTo(target, parts[i]) : null
+        if (!result) {
+          result =
+            target.type === 'group'
+              ? await sendGroup(target.id, parts[i])
+              : await sendPrivate(target.id, parts[i])
+        }
+
         const id = pickMessageId(result)
         if (id) {
           ids.push(id)
