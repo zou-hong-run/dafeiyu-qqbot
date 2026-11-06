@@ -197,8 +197,9 @@ const LOCAL_TOOLS = [
     function: {
       name: 'ask_choice',
       description:
-        '拿不准对方要哪个的时候，发一个带编号的选择题，对方回数字就算选中。' +
-        '一次 2 到 5 个选项，每个选项写清楚具体做什么（不要写「其他」「再说」这种空选项）。' +
+        '要让用户做选择时**一律用这个**：它会发一条带按钮的消息，对方点一下就选中，比让人回数字省事。' +
+        '一次 2 到 5 个选项，每个写清楚具体做什么（不要写「其他」「再说」这种空选项）。' +
+        '平台拒绝按钮时会自动回落成编号选项，对方回数字也算。' +
         '适合：要不要继续、选哪种方案、挑哪个文件。别拿它做问卷或连环追问。',
       parameters: {
         type: 'object',
@@ -857,7 +858,9 @@ async function runTool(
     }
     try {
       const sent = await choiceSender({ question: args.question, options: args.options })
-      return `选择题已发出（${sent.count} 个选项），对方回数字就算选中：${sent.text.split('\n')[0]}`
+      return sent.keyboard
+        ? `选择题已发出：${sent.count} 个按钮，对方点一下就算选中`
+        : `选择题已发出（平台不支持按钮，回落成编号），对方回数字就算选中`
     } catch (error) {
       return `发选择题失败：${error?.message ?? error}`
     }
