@@ -102,14 +102,10 @@ export function groupSenderFor(event) {
     // 长文自动分段，模型不用自己拆。
     // 它拆过一次就出过事：把 [华尔街见闻](https://wallstreetcn.com/...) 从
     // https://walls | treetcn.com/... 切成两条消息，第一条里的链接就死了。
-    // 有 at 时只发一条（@ 只对第一条有意义），照旧 clip。
-    let parts
-    if (atIds.length > 0) {
-      parts = [clip(text)]
-    } else {
-      parts = env.markdownReply ? splitMarkdown(text) : chunkText(text)
-      if (parts.length === 0) parts = [clip(text)]
-    }
+    // 带 at 也一样分段，@ 只挂在第一段。原来这条分支直接 clip，
+    // 超过 900 字就被截成「（内容过长，已截断）」，后半段内容直接没了。
+    let parts = env.markdownReply ? splitMarkdown(text) : chunkText(text)
+    if (parts.length === 0) parts = [text]
 
     // 段数兜底：一次塞进来 100 万字会被切成上千段，连发几分钟，群里直接刷屏
     if (parts.length > MAX_TEXT_PARTS) {
@@ -400,24 +396,38 @@ export function notifierFor(event) {
   let passiveUsed = 0
 
   return async (text) => {
-    const body = clip(text)
-    const canPassive = Date.now() - startedAt < 4 * 60_000 && passiveUsed < 3
+    const raw = String(text ?? '').trim()
+    if (!raw) return
 
-    if (canPassive) {
-      passiveUsed += 1
-      try {
-        await sendReply(event, body)
-        return
-      } catch (error) {
-        console.warn('[任务通知] 被动回复失败，改用主动消息：', error?.message ?? error)
+    // 超长就分段，别用 clip 截断——截掉的是半个汇报，群里只看到「（内容过长，已截断）」，
+    // 后半段说了什么没人知道。短文本仍然一次发完。
+    const parts =
+      raw.length <= env.replyMaxChars ? [raw] : env.markdownReply ? splitMarkdown(raw) : chunkText(raw)
+    let first = true
+
+    for (const body of parts) {
+      const canPassive = first && Date.now() - startedAt < 4 * 60_000 && passiveUsed < 3
+      first = false
+
+      if (canPassive) {
+        passiveUsed += 1
+        try {
+          await sendReply(event, body)
+          continue
+        } catch (error) {
+          console.warn('[任务通知] 被动回复失败，改用主动消息：', error?.message ?? error)
+        }
       }
-    }
 
-    try {
-      if (isGroup) await sendGroup(groupId, body, { markdown: env.markdownReply })
-      else await sendPrivate(userId, body, { markdown: env.markdownReply })
-    } catch (error) {
-      console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
+      try {
+        if (isGroup) await sendGroup(groupId, body, { markdown: env.markdownReply })
+        else await sendPrivate(userId, body, { markdown: env.markdownReply })
+      } catch (error) {
+        console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
+        return
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 400))
     }
   }
 }

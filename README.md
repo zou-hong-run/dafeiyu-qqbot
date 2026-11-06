@@ -9,9 +9,9 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D20.12-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-![群聊里画图、发语音，并列出还能做什么](image-2.png)
-![实时查询、联网搜索、点歌、画图、语音朗读的完整演示](image-3.png)
-![发 B 站视频片段、带按钮的交互消息](image-4.png)
+![选择题发成按钮，一行一个，文字完整可读](image-6.png)
+![像素画、语音朗读、视频片段、联网搜索，全是现场跑出来的](image-7.png)
+![搜热点新闻，配图直接嵌在正文里](image-8.png)
 
 > 动手能力（跑命令、发媒体、定时任务、自我扩展）看下面的[能力一览](#能力一览)。
 
