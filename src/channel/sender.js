@@ -301,14 +301,20 @@ const URL_IN_TEXT = /https?:\/\/[^\s)）]+/g
 function safeCutIndex(text, limit) {
   if (text.length <= limit) return text.length
 
+  // 切点正好夹在 ! 和 [ 之间：那是 ![配图](地址) 的开头，
+  // ! 留在上一段就成了一个孤零零的感叹号，下一段的图片标记也坏了
+  if (text[limit - 1] === '!' && text[limit] === '[') return limit - 1
+
   // 先看切点是不是落在 markdown 链接里：往前找最近的 '['，
   // 如果它到切点之间还没有 ')'，说明这个链接没闭合，整段挪到 '[' 前面。
   let cursor = limit - 1
   while (cursor >= 0) {
     if (text[cursor] === '[') {
       if (!text.slice(cursor, limit).includes(')')) {
+        // ![配图](...) 的 ! 要跟 [ 一起走，否则图片标记被劈成两半
+        const from = cursor > 0 && text[cursor - 1] === '!' ? cursor - 1 : cursor
         // 链接从这行开头就开始，往前没地方挪了：整段不切，宁可超长也不切坏
-        return cursor > 0 ? cursor : text.length
+        return from > 0 ? from : text.length
       }
       break
     }

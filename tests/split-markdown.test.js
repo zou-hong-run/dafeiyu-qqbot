@@ -90,3 +90,32 @@ test('looksSliced 认得出被切开的链接', () => {
   assert.equal(looksSliced('看这里 [华尔街见闻](https://wallstreetcn.com/articles/3785302) 就明白了'), false)
   assert.equal(looksSliced('今天天气不错。'), false)
 })
+
+// markdown 支持内嵌图片：![说明](地址)。切在 ! 和 [ 之间、或切在地址中间，
+// 图片都会坏——上半段一个孤零零的感叹号，下半段是半截 URL。
+const WITH_IMAGE = `11月7日凌晨 热点
+1. 今早 5:30，金星伴月
+东方低空，一弯残月旁边挂着启明星。用望远镜看，金星也是月牙形状。
+![香山红叶](https://imgpai.thepaper.cn/newpai/image/1793969301237_XjzCwp_1793969301448.png)
+2. 法国爆发今秋最大规模抗议
+跨工会联盟称，巴黎有 4 万到 8 万人上街，全法实际参与人数在 60 万到 160 万之间。`
+
+test('图片标记不会被切开', () => {
+  for (const limit of [200, 300, 400, 600, 900]) {
+    for (const part of chunkText(WITH_IMAGE, limit)) {
+      assert.doesNotMatch(part, /!\s*$/, `limit=${limit} 段尾留下孤立的感叹号`)
+      assert.ok(
+        !/!\[[^\]]*\]\(https:\/\/[^)]*$/.test(part),
+        `limit=${limit} 图片地址被切断：${JSON.stringify(part.slice(-30))}`,
+      )
+    }
+    const joined = chunkText(WITH_IMAGE, limit).join('')
+    assert.match(joined, /!\[香山红叶\]\(https:\/\/imgpai[^)]+\)/, `limit=${limit} 图片标记没保住`)
+  }
+})
+
+test('切点正好落在 ! 和 [ 之间时往前挪一位', () => {
+  const text = `${'a'.repeat(19)}![图](https://x.com/a.png)`
+  const parts = chunkText(text, 20)
+  assert.ok(parts.every((part) => !/!\s*$/.test(part)), '不能把 ! 留在段尾')
+})
