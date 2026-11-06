@@ -126,6 +126,20 @@ export function clear(groupId) {
   return true
 }
 
+// 昵称 → openid 对照表，只列真人（跳过 bot），按最后发言时间倒序
+// 给模型看的：要 @ 人、要长期记人，都得知道 openid，光有昵称不管用
+export function memberTable(entries, max = 40) {
+  const seen = new Map()
+  for (let i = entries.length - 1; i >= 0 && seen.size < max; i -= 1) {
+    const entry = entries[i]
+    const id = String(entry.u ?? '')
+    if (!id || id === 'bot') continue
+    if (seen.has(id)) continue
+    seen.set(id, entry.n || `用户${id.slice(-4)}`)
+  }
+  return [...seen.entries()].map(([id, name]) => `${name} → ${id}`)
+}
+
 export function formatForSummary(entries) {
   return entries
     .map((entry) => {

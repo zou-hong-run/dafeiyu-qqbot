@@ -198,18 +198,29 @@ export function historyReaderForGroup(groupId) {
     if (String(mode) === 'people') {
       const people = new Map()
       for (const entry of entries) {
-        const name = entry.n || `用户${String(entry.u ?? '').slice(-4)}`
-        people.set(name, (people.get(name) ?? 0) + 1)
+        const id = String(entry.u ?? '')
+        if (!id || id === 'bot') continue
+        const current = people.get(id) ?? { name: '', count: 0 }
+        current.count += 1
+        if (entry.n) current.name = entry.n
+        people.set(id, current)
       }
 
-      const list = [...people.entries()].sort((a, b) => b[1] - a[1])
-      const lines = list.map(([name, times], index) => `${index + 1}. ${name}（${times} 条）`)
-      return `当前群最近 ${entries.length} 条记录里出现过 ${list.length} 个人：\n${lines.join('\n')}`
+      const list = [...people.entries()].sort((a, b) => b[1].count - a[1].count)
+      const lines = list.map(
+        ([id, info], index) =>
+          `${index + 1}. ${info.name || `用户${id.slice(-4)}`}（${info.count} 条） openid: ${id}`,
+      )
+      return `当前群最近 ${entries.length} 条记录里出现过 ${list.length} 个人（后面那串 openid 是 @ 人用的）：\n${lines.join('\n')}`
     }
+
+    const table = groupLog.memberTable(entries)
+    const tableBlock = table.length > 0 ? `\n\n【本群成员对照】（要 @ 谁就用后面这串 openid）\n${table.join('\n')}` : ''
 
     return (
       `当前群最近 ${entries.length} 条（库里共 ${info.count} 条，最早 ${info.from ?? '-'}）：\n` +
-      groupLog.formatForSummary(entries)
+      groupLog.formatForSummary(entries) +
+      tableBlock
     )
   }
 }

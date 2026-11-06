@@ -160,7 +160,7 @@ export function formatProfile(groupId, member = '') {
 
   for (const [index, item] of profile.members.entries()) {
     lines.push(
-      `${index + 1}. ${item.name}｜${item.count} 条（${item.share}%）｜${item.activeDays} 天｜${item.peak ? `常在${item.peak}` : '时段不定'}`,
+      `${index + 1}. ${item.name}｜${item.count} 条（${item.share}%）｜${item.activeDays} 天｜${item.peak ? `常在${item.peak}` : '时段不定'}｜openid: ${item.userId}`,
     )
   }
 
