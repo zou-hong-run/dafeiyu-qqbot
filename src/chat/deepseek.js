@@ -522,6 +522,24 @@ const LOCAL_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'wake_user',
+      description:
+        '给一个私聊用户发「唤醒消息」：对方主动找过你之后 30 天内，可以用这个通道再敲一次，' +
+        '比普通主动消息更容易送达。只对私聊有效，群里没有这个接口。' +
+        '平台有频率限制，别连着发；只管理员可用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          userId: { type: 'string', description: '对方的 openid（不是 QQ 号）' },
+          text: { type: 'string', description: '要发的内容，500 字以内' },
+        },
+        required: ['userId', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'broadcast',
       description:
         '全服通报：把同一条消息推给机器人待过的所有群。默认跳过当前群（避免和回复撞车），' +
@@ -722,6 +740,7 @@ async function runTool(
     choiceSender,
     historyReader,
     groupSender,
+    wakeSender,
     groupsReader,
     gitSync,
     startTask,
@@ -1038,6 +1057,19 @@ async function runTool(
       return `已发往群 ${sent.groupId}（${sent.chars} 字${atNote}）`
     } catch (error) {
       return `发群失败：${error?.message ?? error}`
+    }
+  }
+
+  if (name === 'wake_user') {
+    if (!isToolAllowed('wake_user', scope, actor)) {
+      return `${denyReason('wake_user', scope, actor)}。`
+    }
+    if (typeof wakeSender !== 'function') return '当前场景不能唤醒私聊。'
+    try {
+      const result = await wakeSender({ userId: args.userId, text: args.text })
+      return `已给 ${result.userId} 发唤醒消息（${result.chars} 字）`
+    } catch (error) {
+      return `唤醒失败：${error?.message ?? error}`
     }
   }
 
@@ -1563,6 +1595,7 @@ export async function chat(sessionKey, userText, options = {}) {
     choiceSender = null,
     historyReader = null,
     groupSender = null,
+    wakeSender = null,
     groupsReader = null,
     broadcastSender = null,
     profileReader = null,
@@ -1807,6 +1840,7 @@ export async function chat(sessionKey, userText, options = {}) {
         historyReader,
         profileReader,
         groupSender,
+        wakeSender,
         broadcastSender,
         groupsReader,
         gitSync,
@@ -1878,6 +1912,7 @@ export async function runTaskAgent({
   cardSender,
   speakSender,
   groupSender,
+  wakeSender,
   broadcastSender,
   profileReader,
   groupsReader,
@@ -1973,6 +2008,7 @@ export async function runTaskAgent({
         cardSender,
         speakSender,
         groupSender,
+        wakeSender,
         broadcastSender,
         profileReader,
         groupsReader,

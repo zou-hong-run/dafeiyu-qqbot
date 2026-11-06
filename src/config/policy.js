@@ -25,6 +25,7 @@ export const DANGEROUS_TOOLS = new Set([
   // 群成员如果能调，等于可以持久化污染提示词或者把别人的记忆抹掉
   'note_lesson',
   'clear_memory',
+  'wake_user',
   // 能写项目文件的 MCP 工具：它们是外部注册进来的，名字不固定，
   // 漏一个就等于给所有人开了一条改代码的路。这里按「能落盘」这个能力列，不按名字猜。
   'file_copy',
@@ -121,6 +122,7 @@ export const TOOL_POLICY = {
   read_document: READ_ONLY,
   // 外部注册进来、能写项目文件的工具。名字不固定，但都会命中 isDangerousTool 的能力词
   file_copy: PRIVATE_ONLY,
+  wake_user: OPEN,
 
   shell: SHELL,
   run_script: SHELL,

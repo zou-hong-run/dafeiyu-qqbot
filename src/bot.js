@@ -1,5 +1,3 @@
-// SDK 适配层的统一出口。
-// 业务代码从这里拿 bot / segment / 发送函数，不直接依赖任何 SDK。
 export {
   bot,
   segment,
@@ -9,6 +7,15 @@ export {
   recallPrivate,
   uploadMedia,
   postRaw,
+  sendTyping,
+  sendMarkdown,
+  sendWithKeyboard,
+  sendWakeup,
+  acknowledgeInteraction,
+  onInteraction,
+  onLifecycle,
+  tokenStatus,
+  selfInfo,
   openPrivateStream,
   onMessage,
   toLegacyEvent,

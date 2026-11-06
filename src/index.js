@@ -28,9 +28,9 @@ import { audit } from './app/audit.js'
 import { reportMemory } from './app/display.js'
 import { runCommand } from './app/commands.js'
 import { progressReporter, runFollowUps, runHotTake, runProactiveScan, runScheduledTask } from './app/timers.js'
-import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf } from './app/factories.js'
+import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf, wakeSenderFor } from './app/factories.js'
 import { QUIET_MS, flushQuiet, isMuted, isUnmuteCommand, muteGroup, oncePer, parseMuteCommand, unmuteGroup } from './engage/quiet.js'
-import { onMessage, selfOpenid, sendGroup, sendPrivate, start as startBot, stop as stopBot } from './bot.js'
+import { onLifecycle, onMessage, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendReply } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
 import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSenderFor, videoSenderFor } from './channel/media.js'
@@ -52,6 +52,7 @@ const AUDITED_TOOLS = new Set([
   'write_file',
   'edit_file',
   'git_sync',
+  'wake_user',
 ])
 const SUMMARY_CMD = /^(?:\/)?(?:总结|复盘)/
 
@@ -204,6 +205,9 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
       }
     }
 
+    // 私聊先给个「输入中」：模型跑几秒也不至于像死机
+    if (scope === 'private') sendTyping(event.user_id, event.message_id)
+
     const answer = await chat(key, input || '（只发了附件，没有文字）', {
       images,
       scope,
@@ -221,6 +225,7 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
       historyReader: historyReaderFor(event),
       profileReader: profileReaderFor(event),
       groupSender: groupSenderFor(event),
+      wakeSender: wakeSenderFor(event),
       groupsReader: groupsReaderFor(),
       gitSync: gitSyncFor(),
       scheduler: schedulerFor(event),
@@ -684,6 +689,14 @@ try {
 console.log(`[启动] 正在连接 QQ 开放平台（AppID: ${env.appId}）...`)
 
 try {
+  onLifecycle({
+    ready: () => console.log('[网关] 已就绪'),
+    resumed: () => console.log('[网关] 已恢复上次会话（RESUME）'),
+    disconnected: ({ code, willReconnect } = {}) =>
+      console.warn(`[网关] 连接断开 code=${code ?? '?'}，${willReconnect ? '将自动重连' : '不再重连'}`),
+    error: (error) => console.warn('[网关] 可恢复错误：', String(error?.message ?? error).slice(0, 100)),
+  })
+
   await startBot()
   console.log('[启动] 已连接。私聊直接发消息，群聊 @ 我即可对话。')
   console.log(`[启动] 人格: ${env.personaName}，模型: ${env.model}，记忆: 短期 ${env.historyTurns} 轮 / 中期摘要 / 长期事实`)

@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { QQBot } from '@tencent-connect/qqbot-nodejs'
 import { env } from '../config/env.js'
 
@@ -5,10 +8,36 @@ import { env } from '../config/env.js'
 //
 // 目的：业务代码不直接依赖 SDK。所有差异——事件形状、消息段拼装、
 // 媒体上传、撤回、流式——都收在这一个文件里，换 SDK 只改这里。
-//
-// 两个关键翻译：
-//   1. 入站：QQBotInboundMessage → 老的 event 形状（message_type / group_id / reply…）
-//   2. 出站：{ type, data } 消息段 → 官方 SDK 的 content 字符串或媒体 API
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SESSION_FILE = path.join(projectRoot, 'data', 'qq-session.json')
+
+// 把 sessionId / lastSeq 落盘：进程重启后先试 RESUME，不用重新 IDENTIFY，
+// 也少丢几条消息（QQ 没有历史补拉接口，能续上就是赚）。
+const sessionPersistence = {
+  load() {
+    try {
+      return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'))
+    } catch {
+      return null
+    }
+  },
+  save(state) {
+    try {
+      fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true })
+      fs.writeFileSync(SESSION_FILE, JSON.stringify(state))
+    } catch {
+      // 存不下就算了，下次重新 IDENTIFY
+    }
+  },
+  clear() {
+    try {
+      fs.unlinkSync(SESSION_FILE)
+    } catch {
+      // 本来就没有
+    }
+  },
+}
 
 const logger = {
   info: () => {},
@@ -20,9 +49,10 @@ const logger = {
 export const bot = new QQBot({
   appId: env.appId,
   appSecret: env.appSecret,
-  // 我们的机器人没有 markdown 权限，开着会被服务端拒
+  // 我们的机器人没有 markdown 权限，开着会被服务端拒；要用时单独走 sendMarkdown
   markdownSupport: false,
   logger,
+  sessionPersistence,
 })
 
 /** 消息段构造：形状和旧 SDK 一致，业务代码不用改 */
@@ -142,6 +172,69 @@ export async function postRaw(scope, targetId, body) {
   const path =
     scope === 'group' ? `/v2/groups/${targetId}/messages` : `/v2/users/${targetId}/messages`
   return bot.apiClient.request(token, 'POST', path, body)
+}
+
+/** C2C 的「输入中」提示，只在私聊有效 */
+export function sendTyping(userId, msgId, seconds = 30) {
+  if (!userId) return Promise.resolve(null)
+  return bot
+    .sendTyping({ scope: 'c2c', targetId: String(userId), msgId: msgId ? String(msgId) : undefined }, seconds)
+    .catch(() => null)
+}
+
+/** 发 Markdown。需要平台给权限，没权限会抛 ApiError，调用方自己降级 */
+export function sendMarkdown(target, content, opts = {}) {
+  return bot.sendMarkdown({ ...target }, content, opts)
+}
+
+/** 带按钮的文本。按钮点击会走 interaction 事件 */
+export function sendWithKeyboard(target, content, keyboard) {
+  return bot.sendTextWithKeyboard({ ...target }, content, keyboard)
+}
+
+/** C2C 唤醒消息：用户主动聊过之后 30 天内可以再敲一次，有频率限制 */
+export function sendWakeup(userId, content) {
+  return bot.sendWakeup({ scope: 'c2c', targetId: String(userId) }, content)
+}
+
+/** 按钮点击要 5 秒内回执，code: 0 成功 / 1 失败 / 2 频繁 / 3 重复 / 4 无权限 / 5 仅管理员 */
+export function acknowledgeInteraction(id, code = 0) {
+  return bot.acknowledgeInteraction(String(id), code).catch(() => null)
+}
+
+/** 按钮/交互回调 */
+export function onInteraction(handler) {
+  bot.on('interaction', (ctx, event) => {
+    Promise.resolve(handler(event)).catch((error) => {
+      console.error('[qq] 处理交互失败：', error?.message ?? error)
+    })
+  })
+}
+
+/** 连接生命周期：接日志和重启播报到这儿 */
+export function onLifecycle({ ready, resumed, disconnected, error } = {}) {
+  if (ready) bot.on('ready', (data) => ready(data))
+  if (resumed) bot.on('resumed', (data) => resumed(data))
+  if (disconnected) bot.on('disconnected', (info) => disconnected(info))
+  if (error) bot.on('error', (err) => error(err))
+}
+
+/** token 状态，/diag 里用 */
+export function tokenStatus() {
+  try {
+    return bot.tokenManager.getStatus(env.appId.trim())
+  } catch {
+    return null
+  }
+}
+
+/** 自检信息：自己是谁、有哪些权限位 */
+export async function selfInfo() {
+  try {
+    return await bot.getSelfInfo()
+  } catch {
+    return null
+  }
 }
 
 /**

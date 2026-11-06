@@ -1,4 +1,4 @@
-import { selfOpenid, sendGroup, sendPrivate } from '../bot.js'
+import { selfOpenid, sendGroup, sendPrivate, sendWakeup } from '../bot.js'
 import { env } from '../config/env.js'
 import * as groupLog from '../memory/group-log.js'
 import { clip, withSendRetry } from '../channel/sender.js'
@@ -172,6 +172,21 @@ export function broadcastSenderFor(event) {
     )
 
     return { total: ids.length, sent, failed, parts: parts.length }
+  }
+}
+
+// 唤醒私聊：对方主动找过之后 30 天内可以用这个通道再敲一次，比普通主动消息更容易送达
+export function wakeSenderFor(event) {
+  return async ({ userId, text } = {}) => {
+    const id = String(userId ?? '').trim()
+    const body = clip(String(text ?? '').trim())
+    if (!id) throw new Error('缺少 userId')
+    if (!body) throw new Error('内容不能为空')
+    if (body.length > 500) throw new Error(`唤醒消息最多 500 字，这条 ${body.length} 字`)
+
+    await sendWakeup(id, body)
+    audit(auditKeyOf(event), 'wake_user', { userId: id, chars: body.length }, `已唤醒 ${body.length} 字`)
+    return { userId: id, chars: body.length }
   }
 }
 

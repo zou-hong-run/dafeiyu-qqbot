@@ -98,6 +98,10 @@ function collectParams(source, into) {
 
 function collectDefinitions(source, into) {
   for (const matched of source.matchAll(/function\s+([A-Za-z_$][\w$]*)/g)) into.add(matched[1])
+  // 对象字面量里的方法简写：load() { ... }、save(state) { ... }
+  for (const matched of source.matchAll(/(?:^|[{,]\s*)([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm)) {
+    into.add(matched[1])
+  }
   for (const matched of source.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) into.add(matched[1])
   for (const matched of source.matchAll(/import\s+\{([^}]+)\}/g)) {
     for (const item of matched[1].split(',')) into.add(item.trim().split(/\s+as\s+/).pop().trim())
