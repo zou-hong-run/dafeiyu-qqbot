@@ -53,3 +53,20 @@ test('媒体段单独收集，不进 content', () => {
   assert.equal(result.media.length, 1)
   assert.equal(result.media[0].type, 'image')
 })
+
+test('markdown 图片：公网地址和已有引用不动', async () => {
+  const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
+  const text = '![图](https://a.com/x.png) 和 ![图2](qqbot-media://image/v1/abc)'
+  assert.equal(await rewriteMarkdownImages(text), text)
+})
+
+test('markdown 图片：读不到的本地路径原样保留', async () => {
+  const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
+  const text = '![图](tmp/not-exist-12345.png)'
+  assert.equal(await rewriteMarkdownImages(text), text)
+})
+
+test('markdown 图片：没有图片语法时快速返回', async () => {
+  const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
+  assert.equal(await rewriteMarkdownImages('纯文本没有图'), '纯文本没有图')
+})

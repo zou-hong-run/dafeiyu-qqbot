@@ -26,6 +26,11 @@
 
 ## 部分可用
 
+**Markdown 内嵌图片**
+
+本地图片不能直接写进 markdown：平台只认公网 URL 或 `qqbot-media://` 引用。
+所以 `rewriteMarkdownImages()` 会扫出 `![说明](tmp/x.png)` 这类本地路径，按「素材管理」三步上传（prepare → PUT 到 COS → complete），拿回引用再替换进去。单张 ≤10MB，支持 png/jpeg/gif/webp；读不到或上传失败就把那张图去掉，不让整条消息发不出去。
+
 **Markdown 消息**
 
 群聊和单聊的自定义 markdown **自 2026-04-23 起对所有机器人开放**，不需要申请模版（频道场景才要内邀）。

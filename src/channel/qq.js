@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { QQBot } from '@tencent-connect/qqbot-nodejs'
 import { env } from '../config/env.js'
@@ -122,6 +123,88 @@ export function flatten(payload) {
   return { text, media }
 }
 
+// ── Markdown 内嵌图片 ──
+// 本地图片不能直接写进 markdown：平台只认公网 URL 或 qqbot-media:// 引用。
+// 所以先按「素材管理」三步上传（prepare → PUT → complete），拿回引用再替换进去。
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+}
+const MAX_MATERIAL_BYTES = 10 * 1024 * 1024
+const MD_IMAGE = /!\[([^\]]*)\]\(([^)\s]+)\)/g
+
+async function uploadImageAsset(absPath) {
+  const ext = path.extname(absPath).toLowerCase()
+  const contentType = IMAGE_MIME[ext]
+  if (!contentType) throw new Error(`markdown 图片只支持 png/jpeg/gif/webp：${path.basename(absPath)}`)
+
+  const buffer = fs.readFileSync(absPath)
+  if (buffer.length > MAX_MATERIAL_BYTES) {
+    throw new Error(`图片超过 10MB：${path.basename(absPath)}`)
+  }
+
+  const md5 = crypto.createHash('md5').update(buffer).digest('hex')
+  const sha1 = crypto.createHash('sha1').update(buffer).digest('hex')
+  const token = await bot.tokenManager.getAccessToken(env.appId, env.appSecret)
+
+  const prepared = await bot.apiClient.request(token, 'POST', '/v2/media-images/prepare', {
+    file_name: path.basename(absPath),
+    file_size: buffer.length,
+    content_type: contentType,
+    md5,
+    sha1,
+  })
+
+  // 预签名 URL 走 COS 直传，不能带 QQBot 的 Authorization 头
+  const uploaded = await fetch(prepared.presigned_url, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: buffer,
+  })
+  if (!uploaded.ok) throw new Error(`图片上传失败 HTTP ${uploaded.status}`)
+
+  const etag = String(uploaded.headers.get('etag') ?? '').replace(/"/g, '') || md5
+  const done = await bot.apiClient.request(token, 'POST', '/v2/media-images/complete', {
+    upload_id: prepared.upload_id,
+    md5: etag,
+  })
+
+  return done.url
+}
+
+/**
+ * 把 markdown 里的本地图片路径换成 qqbot-media:// 引用。
+ * 已经是 http / qqbot-media 的原样保留；读不到或上传失败就把那一张去掉，
+ * 不让整条消息因为一张图发不出去。
+ */
+export async function rewriteMarkdownImages(text, baseDir = projectRoot) {
+  const source = String(text ?? '')
+  if (!source.includes('![')) return source
+
+  let result = source
+  for (const matched of [...source.matchAll(MD_IMAGE)]) {
+    const [full, alt, src] = matched
+    if (/^(https?:|qqbot-media:)/i.test(src)) continue
+
+    const abs = path.resolve(baseDir, src)
+    if (!abs.startsWith(path.resolve(baseDir) + path.sep)) continue
+    if (!fs.existsSync(abs)) continue
+
+    try {
+      const url = await uploadImageAsset(abs)
+      result = result.replace(full, `![${alt}](${url})`)
+    } catch (error) {
+      console.warn(`[qq] markdown 图片上传失败，已去掉这张：${String(error?.message ?? error).slice(0, 80)}`)
+      result = result.replace(full, '')
+    }
+  }
+
+  return result
+}
+
 /** 媒体来源：路径 / Buffer / http 地址，对应 SDK 的三种入参 */
 function sourceOf(file) {
   if (Buffer.isBuffer(file)) return { buffer: file }
@@ -147,25 +230,13 @@ async function dispatch(target, payload, msgId, { markdown = false } = {}) {
     // 纯文本发出去的话，标签会原样显示成一段字符串。@全体成员例外，文本消息也支持。
     const needsMarkdown = target.scope === 'group' && /<qqbot-at-user/.test(text)
 
-    if (needsMarkdown) {
+    if (needsMarkdown || markdown) {
       try {
-        return await bot.sendMarkdown({ ...target, msgId }, text)
+        // 本地图片先传成素材，换成 qqbot-media:// 引用——平台只认公网 URL 或这个引用
+        const body = await rewriteMarkdownImages(text)
+        return await bot.sendMarkdown({ ...target, msgId }, body)
       } catch (error) {
-        // 没开通 markdown 权限：把标签摘掉退回纯文本，别把标签露给用户看
-        const plain = text.replace(TAG_PATTERN, '').replace(/[ \t]{2,}/g, ' ').trim()
-        console.warn(
-          `[qq] @ 需要 markdown 权限，已降级为纯文本：${String(error?.message ?? error).slice(0, 80)}`,
-        )
-        return bot.sendText({ ...target, msgId }, plain || text)
-      }
-    }
-
-    // 调用方明确要求 markdown（定时任务、对外推送）：失败就降级成纯文本，
-    // 不把异常往上抛——发不出去比格式难看严重得多。
-    if (markdown) {
-      try {
-        return await bot.sendMarkdown({ ...target, msgId }, text)
-      } catch (error) {
+        // 没开通 markdown 或发送失败：把标签摘掉退回纯文本，别把标签露给用户看
         const plain = text.replace(TAG_PATTERN, '').replace(/[ \t]{2,}/g, ' ').trim()
         console.warn(`[qq] markdown 发送失败，降级纯文本：${String(error?.message ?? error).slice(0, 80)}`)
         return bot.sendText({ ...target, msgId }, plain || text)
