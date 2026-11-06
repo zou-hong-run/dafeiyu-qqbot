@@ -16,8 +16,14 @@ const KEYWORDS = new Set([
   'async', 'import', 'export', 'const', 'let', 'var', 'class', 'super', 'extends',
 ])
 
-// Node 内置模块的常用别名：用了却没 import，就是运行期 ReferenceError
-const NODE_MODULE_ALIASES = ['fs', 'path', 'os', 'url', 'crypto', 'util', 'child_process', 'stream']
+// Node 内置模块的常用别名 + 项目里容易漏 import 的关键导出。
+// 用了却没 import，就是运行期 ReferenceError。
+const CRITICAL_IMPORTS = [
+  // Node 内置
+  'fs', 'path', 'os', 'url', 'crypto', 'util', 'child_process', 'stream',
+  // 项目里的高频名：漏一次就是「功能静默失效」
+  'segment', 'bot', 'env',
+]
 
 const GLOBALS = new Set([
   'console', 'process', 'require', 'Math', 'JSON', 'Object', 'Array', 'String', 'Number',
@@ -103,6 +109,20 @@ function collectDefinitions(source, into) {
     into.add(matched[1])
   }
   for (const matched of source.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) into.add(matched[1])
+
+  // 解构赋值：const { a, b: c } = obj / const [x, y] = arr
+  for (const matched of source.matchAll(/(?:const|let|var)\s*\{([^}]*)\}/g)) {
+    for (const part of matched[1].split(',')) {
+      const name = part.split(':').pop().split('=')[0].replace(/^\.{3}/, '').trim()
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) into.add(name)
+    }
+  }
+  for (const matched of source.matchAll(/(?:const|let|var)\s*\[([^\]]*)\]/g)) {
+    for (const part of matched[1].split(',')) {
+      const name = part.split('=')[0].replace(/^\.{3}/, '').trim()
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) into.add(name)
+    }
+  }
   for (const matched of source.matchAll(/import\s+\{([^}]+)\}/g)) {
     for (const item of matched[1].split(',')) into.add(item.trim().split(/\s+as\s+/).pop().trim())
   }
@@ -146,13 +166,17 @@ for (const file of files) {
     problems.push(`${rel}: 调用了未定义的 ${name}()`)
   }
 
-  // ③ 用了 Node 内置模块的别名但没 import。
-  // ① 那条只抓 `name(` 形式，`fs.readdirSync(...)` 这种成员访问会整个漏掉，
-  // 一旦漏了就是运行期 ReferenceError，被 catch 吞掉后表现成「功能静默失效」。
-  for (const alias of NODE_MODULE_ALIASES) {
-    if (defined.has(alias)) continue
-    if (!new RegExp(`(?<![.\\w$])${alias}\\s*\\.`).test(src)) continue
-    problems.push(`${rel}: 用了 ${alias}. 但没有 import`)
+  // ③ 用了但没 import 的关键标识符。
+  // ① 那条只抓 `name(` 形式，`fs.readdirSync(...)`、`segment.at(...)` 这种
+  // 成员访问会整个漏掉——漏了就是运行期 ReferenceError，被 catch 吞掉后
+  // 表现成「功能静默失效」，查起来极慢。
+  //
+  // 只查清单里的名字，不做「所有未定义标识符」的通用检查：那个误报太多，
+  // 解构、剩余参数、for-of 都要精确识别才不误伤，维护成本高过收益。
+  for (const name of CRITICAL_IMPORTS) {
+    if (defined.has(name)) continue
+    if (!new RegExp(`(?<![.\\w$])${name}\\s*[.(]`).test(src)) continue
+    problems.push(`${rel}: 用了 ${name} 但当前文件没有 import / 定义`)
   }
 
   // ② import 的名字目标模块没导出

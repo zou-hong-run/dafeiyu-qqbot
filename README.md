@@ -719,9 +719,9 @@ pnpm diagnose                # 逐层体检：配置 → MCP 工具 → 裸 API 
 
 1. 调用了但当前文件没定义的名字（改名、搬函数时最容易漏）
 2. `import` 了但目标模块没导出的名字
-3. 用了 `fs.` / `path.` 这类 Node 模块别名却没 `import`
+3. 用了 `fs`、`path`、`segment` 这类关键标识符却没 `import`
 
-第 3 条是补上去的——之前 `list_groups`、`broadcast`、主动接话扫描、`/config` 的内存显示全都因为漏了 `import fs` 而静默失效：`ReferenceError` 被 `catch` 吞掉，表现成「功能不存在」而不是报错。这种最难查，所以交给工具盯。
+第 3 条抓过两次真问题：`list_groups`、`broadcast`、主动接话扫描、`/config` 全都因为漏了 `import fs` 而静默失效；还有一次迁移 SDK 后 `factories.js` 漏了 `segment`，`@` 功能一用就炸。`ReferenceError` 被 `catch` 吞掉后表现成「功能不存在」而不是报错，最难受，所以交给工具盯。
 
 `TOOL_DEBUG=false` 可以关掉每轮的 `[请求]` `[执行]` `[结果]` 日志，日志量会小很多。
 
