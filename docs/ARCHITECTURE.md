@@ -11,7 +11,7 @@
 ```
 pm2 (fork, 单实例)
 └── 主进程  src/index.js
-      ├── QQ 网关 WebSocket（qq-official-bot）
+      ├── QQ 网关 WebSocket（@tencent-connect/qqbot-nodejs，适配层在 src/qq/client.js）
       ├── 对话循环 / 工单调度 / 定时器 / 记忆
       └── MCP 客户端  src/mcp/client.js
             └── MCP 子进程  src/mcp-server/index.js   ← 独立 node 进程，stdio JSON-RPC

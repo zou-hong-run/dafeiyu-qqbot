@@ -3,10 +3,9 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { segment } from 'qq-official-bot'
 import { env } from '../config/env.js'
 import { budgetFor } from '../ops/budget.js'
-import { bot } from '../bot.js'
+import { segment, sendGroup, sendPrivate, uploadMedia } from '../bot.js'
 import { deliver, postMessage } from './sender.js'
 
 // 媒体发送器：每个工厂函数绑一个事件，返回「给模型调用的发送函数」
@@ -385,7 +384,7 @@ export async function sendMediaToGroup(groupId, inputPath, options = {}) {
     kind = '文件'
   }
 
-  await bot.group(group).send(payload)
+  await sendGroup(group, payload)
 
   return { groupId: group, kind, name: path.basename(filePath), sizeMB: Number(mb.toFixed(2)) }
 }
@@ -435,10 +434,18 @@ export function fileSenderFor(event, options = {}) {
 
     const isGroup = event.message_type === 'group'
     const id = isGroup ? event.group_id : event.user_id
-    const entry = isGroup ? bot.group(id) : bot.user(id)
+    const replyTarget = isGroup
+      ? { scope: 'group', targetId: String(id) }
+      : { scope: 'c2c', targetId: String(id) }
     const fileName = String(options.fileName ?? path.basename(resolved)).slice(0, 120)
 
-    const upload = await entry.upload(fs.readFileSync(resolved), { fileType: 4, fileName })
+    // 文件消息要自己传一遍拿到 file_info，再拼 msg_type=7 的消息体
+    const upload = await uploadMedia({
+      target: replyTarget,
+      fileType: 4, // FILE
+      buffer: fs.readFileSync(resolved),
+      srvSendMsg: false,
+    })
 
     const body = {
       content: '',

@@ -1,12 +1,18 @@
-import { Bot, ReceiverMode } from 'qq-official-bot'
-import { env } from './config/env.js'
-
-// QQ 网关只建一次连接：发送层、媒体发送器、巡检都共用这一个实例
-export const bot = new Bot({
-  appid: env.appId,
-  secret: env.appSecret,
-  intents: ['GROUP_AND_C2C_EVENT'],
-  mode: ReceiverMode.WEBSOCKET,
-  removeAt: true,
-  logLevel: env.logLevel,
-})
+// SDK 适配层的统一出口。
+// 业务代码从这里拿 bot / segment / 发送函数，不直接依赖任何 SDK。
+export {
+  bot,
+  segment,
+  sendGroup,
+  sendPrivate,
+  recallGroup,
+  recallPrivate,
+  uploadMedia,
+  postRaw,
+  openPrivateStream,
+  onMessage,
+  toLegacyEvent,
+  start,
+  stop,
+  selfOpenid,
+} from './qq/client.js'

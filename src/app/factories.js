@@ -1,5 +1,4 @@
-import { segment } from 'qq-official-bot'
-import { bot } from '../bot.js'
+import { selfOpenid, sendGroup, sendPrivate } from '../bot.js'
 import { env } from '../config/env.js'
 import * as groupLog from '../memory/group-log.js'
 import { clip, withSendRetry } from '../channel/sender.js'
@@ -104,7 +103,7 @@ export function groupSenderFor(event) {
     const payload =
       atIds.length > 0 ? [...atIds.map((id) => segment.at(id)), segment.text(body)] : body
 
-    const sent = await bot.group(groupId).send(payload)
+    const sent = await sendGroup(groupId, payload)
     noteSentToGroup(groupId, sent?.id, text, 'text')
     console.log(
       `[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字${atIds.length ? `，@${atIds.join('/')}` : ''}）`,
@@ -154,7 +153,7 @@ export function broadcastSenderFor(event) {
       try {
         for (let i = 0; i < parts.length; i += 1) {
           if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
-          await bot.group(groupId).send(parts[i])
+          await sendGroup(groupId, parts[i])
         }
         sent.push(groupId)
       } catch (error) {
@@ -255,9 +254,9 @@ export function profileReaderFor(event) {
 // 按 target 主动发消息（定时任务、跨群播报都用它，不依赖 event）
 export function sendToTarget(target, payload) {
   if (target?.type === 'group') {
-    return withSendRetry(() => bot.group(target.id).send(payload), '主动群消息')
+    return withSendRetry(() => sendGroup(target.id, payload), '主动群消息')
   }
-  return withSendRetry(() => bot.user(target.id).send(payload), '主动私聊消息')
+  return withSendRetry(() => sendPrivate(target.id, payload), '主动私聊消息')
 }
 
 // 主对话用：从 event 取群 id
@@ -277,7 +276,7 @@ export function atMe(event) {
   if (!raw) return false
 
   const items = Array.isArray(raw) ? raw : [raw]
-  const selfId = String(bot.self_id ?? process.env.QQ_APP_ID ?? '')
+  const selfId = String(selfOpenid() || process.env.QQ_APP_ID || '')
   const appId = String(env.appId ?? '')
 
   return items.some((item) => {
@@ -351,8 +350,8 @@ export function notifierFor(event) {
     }
 
     try {
-      if (isGroup) await bot.group(groupId).send(body)
-      else await bot.user(userId).send(body)
+      if (isGroup) await sendGroup(groupId, body)
+      else await sendPrivate(userId, body)
     } catch (error) {
       console.error('[任务通知] 主动发送也失败：', error?.message ?? error)
     }

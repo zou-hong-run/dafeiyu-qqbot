@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { bot } from '../bot.js'
+import { recallGroup, recallPrivate } from '../bot.js'
 
 // 撤回：先把「我发出去的消息」记下来（QQ 撤回要 message_id，事后拿不到），
 // 再按 id 调官方 DELETE 接口。只撤自己发的，别人的动不了。
@@ -98,8 +98,8 @@ export function listSent(event, limit = 5) {
 }
 
 async function recallOne(entry) {
-  if (entry.kind === 'group') return bot.recallGroupMessage(entry.target, entry.messageId)
-  return bot.recallPrivateMessage(entry.target, entry.messageId)
+  if (entry.kind === 'group') return recallGroup(entry.target, entry.messageId)
+  return recallPrivate(entry.target, entry.messageId)
 }
 
 function describe(item) {

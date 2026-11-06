@@ -30,7 +30,7 @@ import { runCommand } from './app/commands.js'
 import { progressReporter, runFollowUps, runHotTake, runProactiveScan, runScheduledTask } from './app/timers.js'
 import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf } from './app/factories.js'
 import { QUIET_MS, flushQuiet, isMuted, isUnmuteCommand, muteGroup, oncePer, parseMuteCommand, unmuteGroup } from './engage/quiet.js'
-import { bot } from './bot.js'
+import { onMessage, selfOpenid, sendGroup, sendPrivate, start as startBot, stop as stopBot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendReply } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
 import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSenderFor, videoSenderFor } from './channel/media.js'
@@ -350,7 +350,7 @@ async function handleGroupAll(event) {
 
   if (env.toolDebug && Array.isArray(event.mentions) && event.mentions.length > 0) {
     console.log(
-      `[@诊断] mentions=${JSON.stringify(event.mentions).slice(0, 240)} self_id=${bot.self_id} appId=${env.appId}`,
+      `[@诊断] mentions=${JSON.stringify(event.mentions).slice(0, 240)} self_id=${selfOpenid()} appId=${env.appId}`,
     )
   }
 
@@ -428,68 +428,71 @@ initTrigger({
   judge: (event) => handleMessage(event, 'judge'),
 })
 
-bot.on('message.private.friend', (event) => {
-  // 平台偶尔会重推同一条，没这道去重会回两遍
-  if (!claim(event.message_id, 'private')) return
+// 官方 SDK 只有一个 message 事件，类型靠 event.message_type 区分。
+// 这里按私聊 / 群内 @ / 普通群消息三条路分流，下游逻辑和换 SDK 之前完全一样。
+onMessage((event) => {
+  if (event.message_type === 'private') {
+    // 平台偶尔会重推同一条，没这道去重会回两遍
+    if (!claim(event.message_id, 'private')) return
 
-  const key = sessionKeyOf(event)
-  const hasInbound = extractInbound(event).length > 0
+    const key = sessionKeyOf(event)
+    const hasInbound = extractInbound(event).length > 0
 
-  // 连发合并：连着几句合成一次理解，别只理解最后一句
-  mergeMessage(
-    {
-      sessionKey: key,
-      userId: event.user_id ?? '',
-      text: event.content,
-      event,
-      windowMs: env.mergeWindowMs,
-      immediate: hasInbound,
-    },
-    ({ text }) => enqueue(key, () => handleMessage(event, 'private', text)),
-  )
-})
+    // 连发合并：连着几句合成一次理解，别只理解最后一句
+    mergeMessage(
+      {
+        sessionKey: key,
+        userId: event.user_id ?? '',
+        text: event.content,
+        event,
+        windowMs: env.mergeWindowMs,
+        immediate: hasInbound,
+      },
+      ({ text }) => enqueue(key, () => handleMessage(event, 'private', text)),
+    )
+    return
+  }
 
-bot.on('message.group.at', (event) => {
-  if (env.toolDebug) console.log(`[事件] group.at mentions=${event.mentions?.length ?? 0}`)
+  if (atMe(event)) {
+    if (env.toolDebug) console.log(`[事件] group.at mentions=${event.mentions?.length ?? 0}`)
 
-  const key = sessionKeyOf(event)
-  const hasInbound = extractInbound(event).length > 0
+    const key = sessionKeyOf(event)
+    const hasInbound = extractInbound(event).length > 0
 
-  mergeMessage(
-    {
-      sessionKey: key,
-      userId: event.user_id ?? '',
-      text: event.content,
-      event,
-      windowMs: env.mergeWindowMs,
-      immediate: hasInbound,
-    },
-    ({ events, text }) => {
-      // 同一条消息可能已经从 message.group 走过一遍，过滤掉已处理的
-      const fresh = events.filter((item) => !hasReplied(item.message_id))
-      if (fresh.length === 0) return
+    mergeMessage(
+      {
+        sessionKey: key,
+        userId: event.user_id ?? '',
+        text: event.content,
+        event,
+        windowMs: env.mergeWindowMs,
+        immediate: hasInbound,
+      },
+      ({ events, text }) => {
+        const fresh = events.filter((item) => !hasReplied(item.message_id))
+        if (fresh.length === 0) return
 
-      for (const item of fresh) {
-        markReplied(item.message_id)
-        recordGroupMessage(item, (item.content ?? '').trim() || '[附件]')
-      }
+        for (const item of fresh) {
+          markReplied(item.message_id)
+          recordGroupMessage(item, (item.content ?? '').trim() || '[附件]')
+        }
 
-      const last = fresh[fresh.length - 1]
-      const merged = fresh
-        .map((item) => (item.content ?? '').trim())
-        .filter(Boolean)
-        .join('\n')
+        const last = fresh[fresh.length - 1]
+        const merged = fresh
+          .map((item) => (item.content ?? '').trim())
+          .filter(Boolean)
+          .join('\n')
 
-      if (env.toolDebug && fresh.length > 1) {
-        console.log(`[合并] ${key} 连发 ${fresh.length} 条合成一次理解`)
-      }
+        if (env.toolDebug && fresh.length > 1) {
+          console.log(`[合并] ${key} 连发 ${fresh.length} 条合成一次理解`)
+        }
 
-      enqueue(key, () => handleGroupAt(last, merged || text))
-    },
-  )
-})
+        enqueue(key, () => handleGroupAt(last, merged || text))
+      },
+    )
+    return
+  }
 
-bot.on('message.group', (event) => {
   enqueue(sessionKeyOf(event), () => handleGroupAll(event))
 })
 
@@ -626,7 +629,7 @@ async function shutdown(signal) {
   stopWatchdog()
 
   await withTimeout(stopMcp(), 5000)
-  await withTimeout(bot.stop(), 5000)
+  await withTimeout(Promise.resolve(stopBot()), 5000)
 
   console.log('[退出] 已清理完毕')
   process.exit(0)
@@ -681,7 +684,7 @@ try {
 console.log(`[启动] 正在连接 QQ 开放平台（AppID: ${env.appId}）...`)
 
 try {
-  await bot.start()
+  await startBot()
   console.log('[启动] 已连接。私聊直接发消息，群聊 @ 我即可对话。')
   console.log(`[启动] 人格: ${env.personaName}，模型: ${env.model}，记忆: 短期 ${env.historyTurns} 轮 / 中期摘要 / 长期事实`)
   console.log(
@@ -733,8 +736,8 @@ try {
         if (i > 0) await new Promise((resolve) => setTimeout(resolve, 600))
         const result =
           target.type === 'group'
-            ? await bot.group(target.id).send(parts[i])
-            : await bot.user(target.id).send(parts[i])
+            ? await sendGroup(target.id, parts[i])
+            : await sendPrivate(target.id, parts[i])
         const id = pickMessageId(result)
         if (id) {
           ids.push(id)
@@ -826,7 +829,7 @@ try {
 
     for (const [key, target] of targets) {
       try {
-        await bot.user(target.id).send(text)
+        await sendPrivate(target.id, text)
         console.log(`[启动] 已向 ${key} 播报复活`)
       } catch (error) {
         console.warn(`[启动] 向 ${key} 播报失败：`, error?.message ?? error)
@@ -848,7 +851,7 @@ try {
     try {
       // 同样只在私聊说：群里的工单中断通知会变成噪音
       if (task.target?.type === 'user' && task.target?.id) {
-        await bot.user(task.target.id).send(body)
+        await sendPrivate(task.target.id, body)
       } else {
         console.log(`[工单] ${task.id} 是在群里发起的，跳过中断通知（重启后发 /tasks 能查到）`)
       }
@@ -872,8 +875,8 @@ try {
   startWatchdog({
     send: async (target, text) => {
       const body = clip(text)
-      if (target?.type === 'group') await bot.group(target.id).send(body)
-      else if (target?.id) await bot.user(target.id).send(body)
+      if (target?.type === 'group') await sendGroup(target.id, body)
+      else if (target?.id) await sendPrivate(target.id, body)
     },
     abort: (ticketId) => {
       try {

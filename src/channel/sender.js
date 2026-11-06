@@ -1,5 +1,5 @@
 import { env } from '../config/env.js'
-import { bot } from '../bot.js'
+import { sendGroup, sendPrivate, openPrivateStream, postRaw } from '../bot.js'
 import { addPending } from '../chat/pending.js'
 import { noteSent } from './recall.js'
 
@@ -196,10 +196,10 @@ export async function deliver(event, payload) {
   }
 
   if (event.message_type === 'group') {
-    const result = await withSendRetry(() => bot.group(event.group_id).send(payload), '群消息')
+    const result = await withSendRetry(() => sendGroup(event.group_id, payload), '群消息')
     rememberSent(event, result, payload)
   } else {
-    const result = await withSendRetry(() => bot.user(event.user_id).send(payload), '私聊消息')
+    const result = await withSendRetry(() => sendPrivate(event.user_id, payload), '私聊消息')
     rememberSent(event, result, payload)
   }
 }
@@ -224,7 +224,7 @@ export async function postMessage(event, body, { reference = true } = {}) {
   }
 
   try {
-    const result = await withSendRetry(() => bot.request.post(apiPath, body), '接口发送')
+    const result = await withSendRetry(() => postRaw(event.message_type === 'group' ? 'group' : 'c2c', endpointOf(event).id, body), '接口发送')
     rememberSent(event, result, body)
     if (usePassive) notePassive(event)
   } catch (error) {
@@ -235,7 +235,7 @@ export async function postMessage(event, body, { reference = true } = {}) {
     delete body.msg_id
     delete body.msg_seq
     delete body.message_reference
-    const fallback = await withSendRetry(() => bot.request.post(apiPath, body), '主动发送')
+    const fallback = await withSendRetry(() => postRaw(event.message_type === 'group' ? 'group' : 'c2c', endpointOf(event).id, body), '主动发送')
     rememberSent(event, fallback, body)
   }
 }
@@ -357,7 +357,7 @@ let streamState = null // null = 还没试过，false = 已知平台不支持
 
 const STREAM_UNAVAILABLE = /stream_messages|404|not found|无权限|权限不足|不支持|not support|3040/i
 
-export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 80 } = {}) {
+export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 320 } = {}) {
   const body = String(text ?? '').trim()
   if (event?.message_type !== 'private' || !event?.user_id) return false
   if (!env.streamReply) return false
@@ -366,7 +366,7 @@ export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 80 
 
   let stream
   try {
-    stream = bot.user(event.user_id).createStream()
+    stream = openPrivateStream(event.user_id, event.message_id)
   } catch (error) {
     console.warn('[流式] 创建流失败，改普通发送：', String(error?.message ?? error).slice(0, 60))
     return false
@@ -374,17 +374,16 @@ export async function sendStreamReply(event, text, { chunkSize = 36, gapMs = 80 
 
   let sent = 0
   try {
+    // 官方接口是「同一条消息原地改写」，每次传截至目前的全文，不是增量
     for (let i = 0; i < body.length; i += chunkSize) {
-      const chunk = body.slice(i, i + chunkSize)
-      if (i + chunkSize >= body.length) {
-        await stream.end(chunk)
-        sent += 1
-      } else {
-        await stream.write(chunk)
-        sent += 1
-        if (gapMs > 0) await new Promise((resolve) => setTimeout(resolve, gapMs))
+      const shown = body.slice(0, Math.min(i + chunkSize, body.length))
+      await stream.update(shown)
+      sent += 1
+      if (gapMs > 0 && i + chunkSize < body.length) {
+        await new Promise((resolve) => setTimeout(resolve, gapMs))
       }
     }
+    await stream.complete()
     return true
   } catch (error) {
     const message = String(error?.message ?? error)

@@ -213,7 +213,7 @@ sequenceDiagram
 
 | 组件 | 用途 |
 | --- | --- |
-| [qq-official-bot](https://www.npmjs.com/package/qq-official-bot) | QQ 官方 API v2 的 WebSocket 接收 + 发送封装 |
+| [@tencent-connect/qqbot-nodejs](https://github.com/tencent-connect/qqbot-nodejs) | 腾讯官方的 QQ 机器人 SDK：WebSocket / Webhook、媒体分块上传、C2C 流式 |
 | [DeepSeek API](https://platform.deepseek.com/) | `deepseek-flash`（V4.1-Flash），OpenAI 兼容协议，原生支持图片输入 |
 | [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | 内置工具服务用 MCP 协议跑在子进程里 |
 | [cron-parser](https://www.npmjs.com/package/cron-parser) | 定时任务的 cron 解析与上下次时刻计算 |
