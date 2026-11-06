@@ -1,6 +1,6 @@
 # 万能大肥鱼 · 会自己长大的 QQ 机器人
 
-基于 **QQ 官方开放平台 API** + **DeepSeek** 的群聊机器人：有三层记忆、54 个工具、可以自己给自己装技能和新 MCP 服务，还能把耗时任务丢给后台子助手边做边汇报。
+基于 **QQ 官方开放平台 API** + **DeepSeek** 的群聊机器人：有三层记忆、55 个工具、可以自己给自己装技能和新 MCP 服务，还能把耗时任务丢给后台子助手边做边汇报。
 
 不是聊天壳子，是一个能动手的 agent：能搜网页、跑 shell、装包、生成图片和视频、发语音、定时爬起来干活。
 
@@ -22,7 +22,7 @@
 
 | 层 | 职责 |
 |---|---|
-| **权限表** | 13 个高危工具只对白名单开放，不在名单里的人连工具名都看不见 |
+| **权限表** | 16 个高危工具只对白名单开放，不在名单里的人连工具名都看不见 |
 | **bwrap 沙箱** | 只读根、只有 `tmp/` 可写、恒定断网、密钥目录挂空、自检不过就拒绝执行 |
 | **出网校验** | 内网和云元数据段一律拒，重定向逐跳复核，域名解析结果也过一遍 |
 
@@ -49,7 +49,7 @@
 - **私聊流式**：私聊长回复可以走 QQ 单聊流式接口逐段出现。默认**关**——这个接口要在开放平台单独申请权限，没开通时每次都失败；开通了再设 `STREAM_REPLY=true`
 - **连发合并**：同一个人连着发的几段话合成一次输入理解，「帮我查一下 / 今天北京天气 / 要带伞吗」是一条请求，不是三条。窗口按内容判断——话说完 0.8 秒就回，短句或没说完的多等 4 秒（`MERGE_WINDOW_MS=0` 关掉）
 - **不吵人**：群里「还在处理」一轮最多一条、且卡 45 秒才说；工单进度最多两条；重启播报只发私聊、群里一律不发；兜底道歉 10 分钟一条；群友发「安静」「别吵 30」就能让它闭嘴（期间只回 @），说「可以说话了」恢复
-- **54 个工具**：25 个本地工具 + 29 个内置 MCP 工具，外加可热加载的外部 MCP 服务；联网搜索、shell、文件读写、图片/语音/视频/文件/图文卡片、文字转语音、像素画、定时任务、跨群发言、全服通报、技能与 MCP 自我扩展。完整清单和「哪个场景能用哪些」见 [docs/CAPABILITIES.md](docs/CAPABILITIES.md)
+- **55 个工具**：26 个本地工具 + 29 个内置 MCP 工具，外加可热加载的外部 MCP 服务；联网搜索、shell、文件读写、图片/语音/视频/文件/图文卡片、文字转语音、像素画、定时任务、跨群发言、全服通报、技能与 MCP 自我扩展。完整清单和「哪个场景能用哪些」见 [docs/CAPABILITIES.md](docs/CAPABILITIES.md)
 - **后台子助手**：复杂任务用 `start_task` 交给子 agent，最多 20 步，期间往群里推进度，做完自动汇报
 - **定时任务**：cron 五段表达式，到点执行并把结果推到群里（`schedule_task`）
 - **能看图**：对方发的图片直接喂给 V4.1-Flash（`deepseek-flash`）做多模态理解，能看截图、读文档照片
@@ -117,7 +117,7 @@ sequenceDiagram
 |---|---|
 | **能聊** | 人格化对话、看图（多模态）、连发合并、引用上下文、编号选择题、长回复分段、撤回自己 |
 | **能记** | 短期原文 → 中期摘要 → 长期事实三层，外加情绪记忆、群知识、群画像、目标跟踪、失败复盘，共八种 |
-| **能动手** | 54 个工具：联网搜索、抓网页、跑 shell、读写文件、解析 PDF/Word/Excel、下载、画像素图、搜歌、截视频、发图/语音/视频/文件/卡片 |
+| **能动手** | 55 个工具：联网搜索、抓网页、跑 shell、读写文件、解析 PDF/Word/Excel、下载、画像素图、搜歌、截视频、发图/语音/视频/文件/卡片 |
 | **能长大** | `write_skill` 写技能、`add_mcp` 热加载新服务、`install_package` 装包、改完自己源码每 30 分钟自动 `git push` |
 | **能主动** | 主动接话（有人问没人答）、回访没结的事、定时任务、后台工单边做边汇报、热点吐槽 |
 | **能自律** | 两道权限闸门、bwrap 沙箱、命令归一化校验、内存预算、审计日志、连续失败自动停下认错 |
@@ -186,9 +186,9 @@ sequenceDiagram
 
 ### 权限边界
 
-54 个工具里有 13 个是高危的，只对 `ADMIN_OPENIDS` 白名单开放（私聊群聊都算）：
+55 个工具里有 16 个是高危的，只对 `ADMIN_OPENIDS` 白名单开放（私聊群聊都算）：
 
-`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync`
+`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync` `note_lesson` `clear_memory` `wake_user`
 
 不在白名单的人，模型连这些工具名都看不见——不是调用被拒，是根本没发过去。
 
@@ -615,7 +615,7 @@ iptables -A OUTPUT -d 100.100.100.200 -j REJECT
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 
-- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`edit_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`、`restart_self`、`send_to_group`、`broadcast`、`git_sync` 这 13 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
+- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`edit_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`、`restart_self`、`send_to_group`、`broadcast`、`git_sync` 这 16 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
   没配白名单时：群里一律禁用，私聊放开。**一定要配**——否则任何 QQ 用户私聊机器人都能执行命令。
   机器人里发 `/id` 就能拿到自己的 openid。
 - `start_task` / `schedule_task` / `restart_self` 也算高危：前两个能间接调起子 agent 和定时任务去执行命令，后一个能重启服务，不挡住白名单就是摆设

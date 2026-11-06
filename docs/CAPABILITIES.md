@@ -1,6 +1,6 @@
 # 能力清单
 
-真实数量：本地工具 25 个 + 内置 MCP 工具 29 个 + 外部 MCP 工具（可无限扩展）。斜杠命令 15 个。
+真实数量：本地工具 26 个 + 内置 MCP 工具 29 个 + 外部 MCP 工具（可无限扩展）。斜杠命令 15 个。
 
 实际能用到多少看两个因素：**场景**（私聊/群聊）和**权限**（是否在 `ADMIN_OPENIDS` 白名单里）。群里高危工具默认不发给模型，所以群里看到的工具数会比私聊少一半。
 
@@ -61,6 +61,7 @@
 | 技能 | `read_skill` | ✓ |
 | 群聊读取 | `read_group_history` `read_profile` `list_groups` | ✓ |
 | 群聊发言 | `send_to_group` `broadcast` | 仅白名单 |
+| 私聊唤醒 | `wake_user`（30 天窗口，比普通主动消息更容易送达） | 仅白名单 |
 | 发图片 | `send_image` | ✓ |
 | 发语音 | `send_audio` `speak` | ✓ |
 | 发视频 | `send_video` | ✓ |
@@ -132,14 +133,14 @@
 | 开工前算账 | 按命令引用的文件类型乘系数估峰值内存，超「可用 × 75%」直接拒绝 |
 | 命令校验 | 归一化（全角/引号/反斜杠）后再匹配黑名单，敏感路径 + 外传工具组合拦截 |
 | OS 级沙箱 | Linux bwrap：只读根、工作目录可写、默认断网、密钥目录挂空、`CAP_DAC_OVERRIDE` 外全部丢弃 |
-| 权限隔离 | 13 个高危工具走 `ADMIN_OPENIDS` 白名单；模型连工具列表都看不见 |
+| 权限隔离 | 16 个高危工具走 `ADMIN_OPENIDS` 白名单；模型连工具列表都看不见 |
 | 密钥隔离 | 存项目外（Linux `/etc/dafeiyu/env`，600 root），子进程不继承，沙箱内遮蔽 |
 | 审计 | 所有高危调用写 `data/audit.log`（tab 分隔） |
 | 备份 | `data/` 每日快照到 `backups/`，`/config` 能看到最近几份 |
 | 代码自同步 | 每 30 分钟 + 退出时 `git commit` + `push`，提交前扫密钥和黑名单路径 |
 | 自愈 | 看门狗 30 秒巡检工单，卡住的回收，失败写 `data/heals.json` |
 
-**13 个高危工具**（必须白名单）：`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync`
+**16 个高危工具**（必须白名单）：`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync` `note_lesson` `clear_memory` `wake_user`
 
 ---
 
@@ -148,8 +149,8 @@
 | 场景 | 可用工具数 | 原因 |
 |---|---|---|
 | 私聊，你是管理员 | 全部（54 + 外部 MCP） | 权限全开 |
-| 私聊，你不在白名单 | 41 | 13 个高危工具被过滤 |
+| 私聊，你不在白名单 | 39 | 16 个高危工具被过滤 |
 | 群聊，你是管理员 | 54 | 群聊没额外限制 |
-| 群聊，你不在白名单 | 41 | 同上，且 `send_to_group` / `broadcast` 也用不了 |
+| 群聊，你不在白名单 | 39 | 同上，且 `send_to_group` / `broadcast` 也用不了 |
 
 （数字随外部 MCP 服务增减变化，`/config` 里能看到当前真实值。）
