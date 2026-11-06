@@ -289,7 +289,12 @@ export function atMe(event) {
       .filter(Boolean)
       .map(String)
 
-    return candidates.some((value) => value === selfId || value === appId)
+    if (candidates.some((value) => value === selfId || value === appId)) return true
+
+    // 兜底：有些事件里 mentions 只带昵称、id 对不上机器人，导致「@ 了但没反应」
+    // 昵称能对上别名也算 @ 我
+    const name = String(item.username ?? item.nickname ?? item.name ?? '').trim()
+    return Boolean(name) && env.botAliases.some((alias) => name.includes(alias))
   })
 }
 
