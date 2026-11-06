@@ -405,7 +405,9 @@ const LOCAL_TOOLS = [
     type: 'function',
     function: {
       name: 'list_schedules',
-      description: '列出当前会话已创建的定时任务，包括执行时间、内容和上次执行结果。',
+      description:
+        '列出定时任务：执行时间、内容、上次执行结果、下次触发时间。' +
+        '管理员调用时列出所有会话（群和私聊）的任务，并标明每条属于哪个会话；其他人只看得到当前会话的。',
       parameters: { type: 'object', properties: {} },
     },
   },

@@ -202,19 +202,30 @@ export function addSchedule({ sessionKey, target, cron, prompt, createdBy = '' }
   }
 }
 
-export function listSchedules(sessionKey) {
-  return tasks
-    .filter((task) => task.sessionKey === sessionKey)
-    .map((task) => ({
-      id: task.id,
-      when: describeCron(task.cron),
-      cron: task.cron,
-      prompt: task.prompt,
-      enabled: task.enabled,
-      lastRunAt: task.lastRunAt,
-      lastStatus: task.lastStatus,
-      createdBy: task.createdBy ?? '',
-    }))
+/**
+ * 列出定时任务。
+ *
+ * 默认只看当前会话——群友不该看到别的群有什么任务。
+ * all=true 是给管理员的：「所有群的定时任务是不是正常」这种问题，
+ * 只按 sessionKey 过滤根本答不了。
+ */
+export function listSchedules(sessionKey, { all = false } = {}) {
+  const scoped = all ? tasks : tasks.filter((task) => task.sessionKey === sessionKey)
+
+  return scoped.map((task) => ({
+    id: task.id,
+    when: describeCron(task.cron),
+    cron: task.cron,
+    prompt: task.prompt,
+    enabled: task.enabled,
+    lastRunAt: task.lastRunAt,
+    lastStatus: task.lastStatus,
+    createdBy: task.createdBy ?? '',
+    // 全局视图里要标明这条属于哪个会话，否则分不清是群还是私聊
+    sessionKey: all ? task.sessionKey : undefined,
+    target: all ? task.target : undefined,
+    nextAt: nextMatchOf(task.cron),
+  }))
 }
 
 /**
@@ -225,7 +236,9 @@ export function listSchedules(sessionKey) {
  * 宁可让管理员多动一下手，也不能让群友一句话清空别人的日程。
  */
 export function removeSchedule(id, sessionKey, { actor = '', isAdmin = false } = {}) {
-  const index = tasks.findIndex((task) => task.id === id && task.sessionKey === sessionKey)
+  let index = tasks.findIndex((task) => task.id === id && task.sessionKey === sessionKey)
+  // 管理员在任何一个会话里都能删任何任务：不用先跑去那个群再说一遍
+  if (index < 0 && isAdmin) index = tasks.findIndex((task) => task.id === id)
   if (index < 0) throw new Error(`找不到定时任务 ${id}`)
 
   const target = tasks[index]

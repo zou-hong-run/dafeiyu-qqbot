@@ -390,7 +390,8 @@ export function schedulerFor(event) {
 
   return {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt, createdBy: actor }),
-    list: () => listSchedules(sessionKey),
+    // 管理员看到的是所有会话的任务：「所有群的定时任务正常吗」按当前群过滤答不了
+    list: () => listSchedules(sessionKey, { all: admin }),
     // 删除要验身份：remove_schedule 是 OPEN 工具，群里谁都能调。
     // 不校验的话，一个群友说「把定时任务都删了」就能清空别人建的早报。
     remove: (id) => removeSchedule(id, sessionKey, { actor, isAdmin: admin }),

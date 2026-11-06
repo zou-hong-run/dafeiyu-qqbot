@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs'
-import { addSchedule, cronMatches, nextMatchOf, parseSchedules, removeSchedule, schedulerStatus, useSchedulesDir } from '../src/tasks/scheduler.js'
+import { addSchedule, cronMatches, listSchedules, nextMatchOf, parseSchedules, removeSchedule, schedulerStatus, useSchedulesDir } from '../src/tasks/scheduler.js'
 
 // 别写到真实的 data/schedules.json：那会把用户正在用的定时任务清空
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-test-'))
@@ -115,4 +115,39 @@ test('管理员能删任何人的任务，旧任务只有管理员能删', () =>
   })
   assert.throws(() => removeSchedule(legacy.id, 'group:g3', { actor: 'user-c' }), /旧版本/)
   assert.ok(removeSchedule(legacy.id, 'group:g3', { actor: 'admin', isAdmin: true }))
+})
+
+test('管理员能看到所有会话的任务，其他人只看自己会话的', () => {
+  const base = { cron: '30 8 * * *', prompt: '每天早上推早报', createdBy: 'user-a' }
+  addSchedule({ ...base, sessionKey: 'group:gA', target: { type: 'group', id: 'gA' } })
+  addSchedule({ ...base, sessionKey: 'group:gB', target: { type: 'group', id: 'gB' } })
+  addSchedule({ ...base, sessionKey: 'user:uA', target: { type: 'user', id: 'uA' } })
+
+  assert.equal(listSchedules('group:gA').length, 1, '普通视图只看本会话')
+  assert.equal(listSchedules('group:gA', { all: true }).length, 3, '管理员视图看全部')
+
+  const all = listSchedules('group:gA', { all: true })
+  assert.deepEqual(
+    all.map((item) => item.sessionKey).sort(),
+    ['group:gA', 'group:gB', 'user:uA'],
+    '全局视图要标明属于哪个会话',
+  )
+  // 每条都要有下次触发时间，这样「任务正常吗」才好回答
+  for (const item of all) assert.match(item.nextAt ?? '', /\d{4}/)
+})
+
+test('管理员在任意会话都能删别的会话的任务', () => {
+  const task = addSchedule({
+    sessionKey: 'group:gC',
+    target: { type: 'group', id: 'gC' },
+    cron: '0 9 * * *',
+    prompt: '每天九点推抽签',
+    createdBy: 'user-a',
+  })
+
+  // 从别的会话删不掉（非管理员）
+  assert.throws(() => removeSchedule(task.id, 'group:other', { actor: 'user-a' }), /找不到/)
+
+  // 管理员可以
+  assert.ok(removeSchedule(task.id, 'group:other', { actor: 'admin', isAdmin: true }))
 })
