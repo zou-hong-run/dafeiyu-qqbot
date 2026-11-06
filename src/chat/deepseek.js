@@ -508,6 +508,12 @@ const LOCAL_TOOLS = [
             description: '要发的文件：提示词里的附件路径（downloads/incoming/...）或 downloads 里的文件名',
           },
           fileName: { type: 'string', description: '文件显示名（可选，只在 path 是普通文件时有用）' },
+          at: {
+            type: 'string',
+            description:
+              '要 @ 的群成员 openid，多个用逗号分隔，all 表示全体成员。' +
+              'openid 从群聊记录的「昵称 → openid」对照表里查，昵称不管用；只在发文字时生效',
+          },
         },
         required: ['groupId'],
       },
@@ -1016,9 +1022,11 @@ async function runTool(
         text: args.text,
         path: args.path,
         fileName: args.fileName,
+        at: args.at,
       })
       if (sent.kind) return `已把${sent.kind}「${sent.name}」（${sent.sizeMB}MB）发到群 ${sent.groupId}`
-      return `已发往群 ${sent.groupId}（${sent.chars} 字）`
+      const atNote = Array.isArray(sent.at) && sent.at.length > 0 ? `，并 @ 了 ${sent.at.join('、')}` : ''
+      return `已发往群 ${sent.groupId}（${sent.chars} 字${atNote}）`
     } catch (error) {
       return `发群失败：${error?.message ?? error}`
     }

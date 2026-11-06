@@ -1,3 +1,4 @@
+import { segment } from 'qq-official-bot'
 import { bot } from '../bot.js'
 import { env } from '../config/env.js'
 import * as groupLog from '../memory/group-log.js'
@@ -92,13 +93,31 @@ export function groupSenderFor(event) {
     const groupId = !target || target === 'current' ? currentGroup : target
     if (!groupId) throw new Error('没指定群，也没法确定当前群：私聊里要传 groupId')
 
-    const result = await bot.group(groupId).send(clip(text))
-    noteSentToGroup(groupId, result?.id, text, 'text')
-    console.log(`[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字）`)
+    // at 传 openid（all 表示全体），多个用逗号分隔；走 SDK 的 at 消息段，对方才会真的收到提醒
+    const atIds = String(input?.at ?? '')
+      .split(/[,，\s]+/)
+      .map((id) => id.trim())
+      .filter(Boolean)
+    const body = clip(text)
+    // 有 at 时拼成消息段数组（正文也走 segment.text，避免裸字符串在数组里不被识别）；
+    // 没 at 就还是原来的纯文本发送，跟改之前完全一致
+    const payload =
+      atIds.length > 0 ? [...atIds.map((id) => segment.at(id)), segment.text(body)] : body
 
-    audit(auditKeyOf(event), 'send_to_group', { groupId, chars: text.length }, `已发送 ${text.length} 字`)
+    const sent = await bot.group(groupId).send(payload)
+    noteSentToGroup(groupId, sent?.id, text, 'text')
+    console.log(
+      `[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字${atIds.length ? `，@${atIds.join('/')}` : ''}）`,
+    )
 
-    return { groupId, chars: text.length, messageId: result?.id ?? '' }
+    audit(
+      auditKeyOf(event),
+      'send_to_group',
+      { groupId, chars: text.length, at: atIds.length },
+      `已发送 ${text.length} 字${atIds.length ? `，@${atIds.length} 人` : ''}`,
+    )
+
+    return { groupId, chars: text.length, messageId: sent?.id ?? '', at: atIds }
   }
 }
 
