@@ -99,11 +99,11 @@ export function groupSenderFor(event) {
       .filter(Boolean)
     const body = clip(text)
     // 有 at 时拼成消息段数组（正文也走 segment.text，避免裸字符串在数组里不被识别）；
-    // 没 at 就还是原来的纯文本发送，跟改之前完全一致
+    // 没 at 就是纯文本，但开了 markdown 就走 markdown 通道，让列表、加粗生效
     const payload =
       atIds.length > 0 ? [...atIds.map((id) => segment.at(id)), segment.text(body)] : body
 
-    const sent = await sendGroup(groupId, payload)
+    const sent = await sendGroup(groupId, payload, { markdown: atIds.length === 0 && env.markdownReply })
     noteSentToGroup(groupId, sent?.id, text, 'text')
     console.log(
       `[主动发送] 已发往群 ${groupId.slice(0, 12)}…（${text.length} 字${atIds.length ? `，@${atIds.join('/')}` : ''}）`,

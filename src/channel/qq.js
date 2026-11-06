@@ -160,8 +160,17 @@ async function dispatch(target, payload, msgId, { markdown = false } = {}) {
       }
     }
 
-    // 调用方明确要求 markdown（定时任务、对外推送）：失败往外抛，由上层决定要不要降级
-    if (markdown) return bot.sendMarkdown({ ...target, msgId }, text)
+    // 调用方明确要求 markdown（定时任务、对外推送）：失败就降级成纯文本，
+    // 不把异常往上抛——发不出去比格式难看严重得多。
+    if (markdown) {
+      try {
+        return await bot.sendMarkdown({ ...target, msgId }, text)
+      } catch (error) {
+        const plain = text.replace(TAG_PATTERN, '').replace(/[ \t]{2,}/g, ' ').trim()
+        console.warn(`[qq] markdown 发送失败，降级纯文本：${String(error?.message ?? error).slice(0, 80)}`)
+        return bot.sendText({ ...target, msgId }, plain || text)
+      }
+    }
 
     return bot.sendText({ ...target, msgId }, text)
   }
