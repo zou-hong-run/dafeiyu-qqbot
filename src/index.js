@@ -387,7 +387,17 @@ async function handleGroupAll(event) {
       text = spoken
       console.log(`[群附件] ${event.group_id?.slice(0, 12)}… 纯语音 ${inbound.length} 个，用识别文字继续处理`)
     } else if (inbound.length > 0) {
-      recordGroupMessage(event, labelInbound(event))
+      // 图片/文件：不主动接话（免得刷屏），但文件先落一份到磁盘。
+      // 不存的话群里发过的图我永远看不到——平台给的附件地址会过期，事后想补看也补不回来。
+      const saved = await describeInbound(inbound, sessionKeyOf(event)).catch(() => null)
+      const files = saved?.images ?? []
+      recordGroupMessage(
+        event,
+        `${labelInbound(event)}${files.length > 0 ? `（已存 ${files.join(' ')}）` : ''}`,
+      )
+      console.log(
+        `[群附件] ${String(event.group_id ?? '').slice(0, 12)}… 收到 ${inbound.length} 个，存下 ${files.length} 张图`,
+      )
       return
     }
   }
