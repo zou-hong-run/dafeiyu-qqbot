@@ -141,6 +141,10 @@ export const TOOL_POLICY = {
   list_schedules: READ_ONLY,
   remove_schedule: OPEN,
   update_schedule: OPEN,
+  // 主动给对方发一条消息（用于分步任务的中途汇报）
+  notify_user: OPEN,
+  // 撤回自己发出去的消息
+  recall_message: OPEN,
 
   write_file: OPEN,
   edit_file: OPEN,

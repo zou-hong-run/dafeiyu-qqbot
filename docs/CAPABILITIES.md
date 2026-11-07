@@ -50,7 +50,7 @@
 
 采集：群开了「获取群内全部消息」权限时，所有消息都记进 `data/groups/<群号>.jsonl`（每群 600 条滚动窗口）。没开的话只有 @ 它的那部分。
 
-## 四、本地工具（25）
+## 四、本地工具（28）
 
 内置在主进程里，不需要经过 MCP 子进程。
 
@@ -59,7 +59,7 @@
 | 记忆 | `remember` `note_situation` `clear_memory` `note_lesson` `goal` `todo_write` | ✓ |
 | 交互 | `ask_choice` | ✓ |
 | 技能 | `read_skill` | ✓ |
-| 群聊读取 | `read_group_history` `read_profile` `list_groups` | ✓ |
+| 群聊读取 | `read_group_history` `read_profile` `list_groups` | ✓（读别的群要管理员） |
 | 群聊发言 | `send_to_group` `broadcast` | 仅白名单 |
 | 私聊唤醒 | `wake_user`（30 天窗口，比普通主动消息更容易送达） | 仅白名单 |
 | 发图片 | `send_image` | ✓ |
@@ -69,7 +69,7 @@
 | 发卡片 | `send_card` | ✓ |
 | 撤回 | `recall_message` | ✓ |
 | 后台任务 | `start_task` `schedule_task` | 仅白名单 |
-| 定时任务管理 | `list_schedules` `remove_schedule` | ✓ |
+| 定时任务管理 | `list_schedules` `update_schedule` `remove_schedule` | ✓（改删要创建者或管理员） |
 | 代码同步 | `git_sync` | 仅白名单 |
 
 ## 五、内置 MCP 工具（29）

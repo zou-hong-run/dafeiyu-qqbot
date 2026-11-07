@@ -132,3 +132,24 @@ test('参数传全时不告警', (t) => {
   isAdmin('group', 'someone')
   assert.equal(warn.mock.callCount(), 0)
 })
+
+// 工具定义和权限表必须一一对应：有定义没登记，模型能看见工具、调用却被拒，
+// 表现是「它明明有这个能力却说做不到」。goal / notify_user 就这样漏过。
+test('每个已定义的工具都在权限表里有条目', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const source = fs.readFileSync(path.join(root, 'src/chat/deepseek.js'), 'utf8')
+
+  const start = source.indexOf('const LOCAL_TOOLS')
+  const end = source.indexOf('export async function chat')
+  assert.ok(start > 0 && end > start, '应该能找到 LOCAL_TOOLS 定义块')
+
+  const names = [...source.slice(start, end).matchAll(/name: '([a-z_]+)'/g)].map((m) => m[1])
+  assert.ok(names.length > 20, `应该解析出足够多的工具名，实际 ${names.length}`)
+
+  const missing = names.filter((name) => TOOL_POLICY[name] === undefined)
+  assert.deepEqual(missing, [], `这些工具没有权限表条目：${missing.join(', ')}`)
+})

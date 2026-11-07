@@ -51,11 +51,14 @@ function cleanContent(text) {
  * 摘要写歪了（漏事实、把没定的写成定了）的时候，这是唯一能翻回去核对的地方。
  * 只写不读——需要时人工去看，不给模型开读取口子。
  */
+const ARCHIVE_MAX_FILES = 200
+
 function archiveOverflow(key, messages) {
   try {
     // 跟着 dataDir 走：测试把记忆指到临时目录时，归档也跟着过去
     const archiveDir = path.join(dataDir, 'memory-archive')
     fs.mkdirSync(archiveDir, { recursive: true })
+    pruneArchive(archiveDir)
     const safeKey = String(key).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const file = path.join(archiveDir, `${stamp}-${safeKey}.jsonl`)
@@ -65,6 +68,27 @@ function archiveOverflow(key, messages) {
     fs.appendFileSync(file, `${lines.join('\n')}\n`)
   } catch (error) {
     console.error('[记忆] 溢出留档失败：', error?.message ?? error)
+  }
+}
+
+/** 归档只留最近 200 个文件：长期跑下去不清理会攒出几千个 */
+function pruneArchive(dir) {
+  try {
+    const files = fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl'))
+    if (files.length <= ARCHIVE_MAX_FILES) return
+
+    const dated = files
+      .map((name) => {
+        const full = path.join(dir, name)
+        return { name, time: fs.statSync(full).mtimeMs }
+      })
+      .sort((a, b) => a.time - b.time)
+
+    for (const item of dated.slice(0, dated.length - ARCHIVE_MAX_FILES)) {
+      fs.rmSync(path.join(dir, item.name), { force: true })
+    }
+  } catch {
+    // 清理失败不影响归档本身
   }
 }
 
@@ -165,6 +189,12 @@ export function restoreOverflow(key, messages) {
 
   const session = getSession(key)
   session.shortTerm.splice(HEAD_KEEP_MESSAGES, 0, ...list)
+
+  // 摘要失败要把统计退回去：否则会一直声称「省略了 N 轮」，而其实一段都没丢
+  const tokens = list.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  session.elidedRounds = Math.max(0, (Number(session.elidedRounds) || 0) - Math.ceil(list.length / 2))
+  session.elidedTokens = Math.max(0, (Number(session.elidedTokens) || 0) - tokens)
+
   scheduleSave()
 }
 

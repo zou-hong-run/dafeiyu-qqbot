@@ -114,3 +114,17 @@ test('溢出后记录省略了多少，并留档原文', () => {
   const content = fs.readFileSync(path.join(dir, files[0]), 'utf8')
   assert.match(content, /滚动 0/, '溢出内容要在归档里')
 })
+
+test('摘要失败回滚时，省略统计要退回去', () => {
+  const key = 'test:elision-rollback'
+  appendTurn(key, '锚点', '好')
+  for (let i = 0; i < 12; i += 1) appendTurn(key, `内容 ${i}`, `回 ${i}`)
+
+  const overflow = takeOverflow(key)
+  const afterTake = elisionInfo(key)
+  assert.ok(afterTake.rounds > 0)
+
+  // 摘要失败 → 回滚
+  restoreOverflow(key, overflow)
+  assert.equal(elisionInfo(key), null, '内容退回来了，就不能再声称省略过')
+})
