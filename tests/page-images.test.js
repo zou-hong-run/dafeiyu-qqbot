@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { pickImages, pageImagesOf, usableImage } from '../src/mcp-server/page-images.js'
+import { NET_ERROR } from '../src/mcp-server/net-guard.js'
 
 // 新闻页配图提取：og:image 优先，正文图兜底，二维码/logo 一律丢掉。
 // 网页内容由网站作者控制，所以每个候选地址还要过一遍出网校验。
@@ -133,8 +134,32 @@ test('解析到内网的域名图片被丢掉（字面量看不出来）', async
 
   // 模拟 DNS：nip.io 解析到回环，cdn.x.com 正常
   const resolveImpl = async (raw) => {
-    if (String(raw).includes('nip.io')) throw new Error('不允许访问内网或云元数据地址')
+    if (String(raw).includes('nip.io')) {
+      const error = new Error('不允许访问内网或云元数据地址')
+      error.code = NET_ERROR.BLOCKED_ADDRESS
+      throw error
+    }
   }
 
   assert.deepEqual(await pageImagesOf(BASE, { fetchImpl, resolveImpl }), ['https://cdn.x.com/ok.jpg'])
+})
+
+test('DNS 解析失败不丢图，只有指向内网才丢', async () => {
+  const fetchImpl = async () =>
+    new Response(
+      ['<img src="https://cdn-a.example/x.jpg">', '<img src="https://cdn-b.example/y.jpg">'].join('\n'),
+    )
+
+  // cdn-a 解析失败（DNS 抽风），cdn-b 解析到内网
+  const resolveImpl = async (raw) => {
+    if (String(raw).includes('cdn-b')) {
+      const error = new Error('不允许访问内网或云元数据地址')
+      error.code = NET_ERROR.BLOCKED_ADDRESS
+      throw error
+    }
+    if (String(raw).includes('cdn-a')) throw new Error('域名解析失败：cdn-a.example')
+  }
+
+  const images = await pageImagesOf(BASE, { fetchImpl, resolveImpl })
+  assert.deepEqual(images, ['https://cdn-a.example/x.jpg'], '解析失败的保留，指向内网的丢掉')
 })

@@ -29,6 +29,9 @@ export const DANGEROUS_TOOLS = new Set([
   // 能写项目文件的 MCP 工具：它们是外部注册进来的，名字不固定，
   // 漏一个就等于给所有人开了一条改代码的路。这里按「能落盘」这个能力列，不按名字猜。
   'file_copy',
+  // 撤回：跨群已经堵住了，但本群里还能撤早报、定时告警、重要通知。
+  // 这条不该是群友随手能用的，和 send_to_group 同级。
+  'recall_message',
 ])
 
 // 兜底：名字里带这些词的 MCP 工具一律按高危处理。
@@ -159,7 +162,7 @@ export const TOOL_POLICY = {
   // 主动给对方发一条消息（用于分步任务的中途汇报）
   notify_user: OPEN,
   // 撤回自己发出去的消息
-  recall_message: OPEN,
+  recall_message: OPEN, // 权限表保持 OPEN，实际门槛由 DANGEROUS_TOOLS 决定
 
   write_file: OPEN,
   edit_file: OPEN,

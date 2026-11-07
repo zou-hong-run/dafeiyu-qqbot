@@ -176,3 +176,9 @@ test('跨会话的读取判定改用 isConfiguredAdmin 之后，陌生人私聊�
     /管理员/,
   )
 })
+
+test('recall_message 收进高危名单', () => {
+  // 跨群已经堵住了，但本群里还能撤早报、定时告警、重要通知——不该是群友随手能用的
+  assert.ok(DANGEROUS_TOOLS.has('recall_message'))
+  assert.equal(isToolAllowed('recall_message', 'group', '陌生人'), false)
+})

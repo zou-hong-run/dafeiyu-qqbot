@@ -5,6 +5,26 @@ import net from 'node:net'
 // 目标是「内网和云元数据一律访问不了」——一次 SSRF 就能拿到实例角色的临时凭证，
 // 而 download 是群聊里任何人都能触发的工具。
 
+/**
+ * 带错误码的拒绝。
+ *
+ * 调用方要区分「确实指向内网」和「解析不了」——前者必须丢，后者可能是 DNS 临时抽风。
+ * 靠错误文案做正则匹配太脆：文案一改就失效，而且改的人不会想到有人在匹配它。
+ */
+export const NET_ERROR = {
+  INVALID_URL: 'INVALID_URL',
+  BAD_PROTOCOL: 'BAD_PROTOCOL',
+  BLOCKED_ADDRESS: 'BLOCKED_ADDRESS',
+  DNS_FAILED: 'DNS_FAILED',
+  BAD_REDIRECT: 'BAD_REDIRECT',
+}
+
+function netError(code, message) {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
 const BLOCKED_NAMES = ['localhost', 'metadata.google.internal', 'metadata']
 
 function normalizeHost(hostname) {
@@ -121,11 +141,11 @@ function assertHostAllowed(host) {
     host.endsWith('.local') ||
     host.endsWith('.internal')
   ) {
-    throw new Error('不允许访问内网或云元数据地址')
+    throw netError(NET_ERROR.BLOCKED_ADDRESS, '不允许访问内网或云元数据地址')
   }
 
   if (isBlockedIPv4(host) || isBlockedIPv6(host)) {
-    throw new Error('不允许访问内网或云元数据地址')
+    throw netError(NET_ERROR.BLOCKED_ADDRESS, '不允许访问内网或云元数据地址')
   }
 }
 
@@ -144,10 +164,10 @@ export function assertPublicUrl(raw) {
   try {
     url = new URL(String(raw ?? '').trim())
   } catch {
-    throw new Error('网址格式不对，需要完整的 http:// 或 https:// 链接')
+    throw netError(NET_ERROR.INVALID_URL, '网址格式不对，需要完整的 http:// 或 https:// 链接')
   }
 
-  if (!/^https?:$/.test(url.protocol)) throw new Error('只支持 http 和 https 链接')
+  if (!/^https?:$/.test(url.protocol)) throw netError(NET_ERROR.BAD_PROTOCOL, '只支持 http 和 https 链接')
 
   assertHostAllowed(normalizeHost(url.hostname))
   return url
@@ -185,14 +205,14 @@ async function assertResolvesPublic(hostname) {
   try {
     addresses = await dns.lookup(host, { all: true })
   } catch {
-    throw new Error(`域名解析失败：${host}`)
+    throw netError(NET_ERROR.DNS_FAILED, `域名解析失败：${host}`)
   }
 
-  if (addresses.length === 0) throw new Error(`域名没有解析结果：${host}`)
+  if (addresses.length === 0) throw netError(NET_ERROR.DNS_FAILED, `域名没有解析结果：${host}`)
 
   for (const { address } of addresses) {
     if (isBlockedIPv4(normalizeHost(address)) || isBlockedIPv6(normalizeHost(address))) {
-      throw new Error('不允许访问内网或云元数据地址')
+      throw netError(NET_ERROR.BLOCKED_ADDRESS, '不允许访问内网或云元数据地址')
     }
   }
 }

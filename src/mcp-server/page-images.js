@@ -1,7 +1,7 @@
 // 从网页 HTML 里挑可用的配图。
 // 抽成独立模块是为了能单测：index.js 一被 import 就会读 .env、起 MCP 服务，测不了。
 
-import { assertPublicUrl, assertPublicUrlResolved, fetchPublic } from './net-guard.js'
+import { NET_ERROR, assertPublicUrl, assertPublicUrlResolved, fetchPublic } from './net-guard.js'
 
 // 页面里大量 <img> 是二维码、logo、头像、占位图，拿它们当配图等于发垃圾
 const IMAGE_JUNK =
@@ -129,10 +129,10 @@ export async function pageImagesOf(
       try {
         await resolveImpl(image)
       } catch (error) {
-        const reason = String(error?.message ?? error)
         // 只有「确实指向内网/元数据」才丢。单纯的解析失败（DNS 临时抽风、
         // CDN 域名在沙箱里查不到）不该连图一起扔掉——平台那边会做自己的校验。
-        if (/内网|元数据|not allowed|blocked/i.test(reason)) continue
+        // 按错误码判，不匹配文案：文案改了这里不会跟着失效。
+        if (error?.code === NET_ERROR.BLOCKED_ADDRESS) continue
       }
       safe.push(image)
     }

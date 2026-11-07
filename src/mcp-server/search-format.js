@@ -18,7 +18,7 @@ function escapeInline(text) {
   return String(text ?? '')
     .replace(/[\r\n]+/g, ' ')
     // * 和 _ 会变成强调标记，标题里带两个星号就能把后面的行吞掉
-    .replace(/([\\[\]()*_])/g, '\\$1')
+    .replace(/([\\[\]()*_>`])/g, '\\$1')
     .replace(/\s+/g, ' ')
     .trim()
 }
