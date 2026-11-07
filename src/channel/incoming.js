@@ -112,6 +112,7 @@ export function labelInbound(event) {
     .map((item) => {
       const tag = `[${KIND_LABEL[item.type] ?? '附件'}]`
       if (item.asrText) return `${tag} ${item.asrText}`
+      if (item.type === 'voice' || item.type === 'audio') return `${tag} 未转写`
       if (item.type === 'file' && item.name) return `${tag} ${item.name}`
       return tag
     })
@@ -126,6 +127,12 @@ function safeName(item, index) {
 }
 
 async function downloadOne(item, index, dir) {
+  // 语音一律不下载：内容只在平台的 asr_refer_text 里，本机没有识别引擎，
+  // 拉下来也解不出一个字，纯粹白吃带宽和磁盘。群聊、私聊都按这条走。
+  if (item.type === 'voice' || item.type === 'audio') {
+    return { ...item, file: '', skipped: true }
+  }
+
   if (item.size > MAX_BYTES) {
     return { ...item, error: `超过 ${MAX_BYTES / 1048576}MB，没有下载` }
   }
@@ -170,12 +177,12 @@ export async function describeInbound(items, scopeKey = '') {
     const label = KIND_LABEL[item.type] ?? item.type
     const isVoice = item.type === 'voice' || item.type === 'audio'
 
-    // 语音优先用平台识别出来的文字——那才是对方真正说的话；
-    // 有文字就不必把「我听不到」这句话丢给模型
-    if (isVoice && item.asrText) {
+    // 语音只认平台转写：有文字就是对方说的话，没有就是真拿不到，别含糊
+    if (isVoice) {
       lines.push(
-        `[${label}] 平台已转成文字：「${item.asrText}」` +
-          (item.file ? `\n[${label}] 音频文件在 ${item.file}` : ''),
+        item.asrText
+          ? `[${label}] 平台已转成文字：「${item.asrText}」`
+          : `[${label}] 平台没给识别文字，这条内容我拿不到（音频不下载，本机解不出）`,
       )
       continue
     }
@@ -196,8 +203,8 @@ export async function describeInbound(items, scopeKey = '') {
   ).length
   if (deafVoiceCount > 0) {
     lines.push(
-      `注意：这 ${deafVoiceCount} 条语音平台没给识别文字，我听不到内容，只能看到文件。` +
-        '需要的话可以请对方打字说，或者用 send_audio 把这条转发出去。',
+      `注意：这 ${deafVoiceCount} 条语音平台没给识别文字，内容我拿不到。` +
+        '直接说「没听清，你打字说一遍」就行，不要猜内容，也不要说成文件已收到。',
     )
   }
 
