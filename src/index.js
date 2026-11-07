@@ -657,6 +657,7 @@ async function runSelfHeal({ task, error, signature, catchUp = false } = {}) {
     taskPrompt: prompt,
     scope: 'private',
     actor: 'scheduler', // 复用定时任务的授权，能读写源码
+    environment: '当前是私聊（自动排障任务），产出只用于内部判断，不需要发给用户',
     sessionKey: `heal:${task?.id ?? 'unknown'}`,
     tools: toolsForScope('private', 'scheduler'),
     callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),

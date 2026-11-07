@@ -41,6 +41,11 @@ export async function runScheduledTask(task) {
     taskPrompt: task.prompt,
     scope,
     actor: 'scheduler',
+    // 必须显式告诉模型这条任务跑在群里还是私聊，否则它会自己猜，猜错就说「当前是私聊」
+    environment:
+      task.target.type === 'group'
+        ? `当前在 QQ 群聊（群 openid ${task.target.id}），你的回复会用主动消息直接发到这个群，读群记录、往群里发东西都是这个群`
+        : `当前是私聊（用户 openid ${task.target.id}），消息直接发给这个用户`,
     tools: toolsForScope(scope, 'scheduler'),
     callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
     sendImage: imageSenderFor(null, send),

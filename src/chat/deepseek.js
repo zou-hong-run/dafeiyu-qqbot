@@ -1975,6 +1975,7 @@ export async function runTaskAgent({
   actor = '',
   sessionKey = 'worker',
   workdir = '',
+  environment = '',
   tools,
   callTool,
   sendImage,
@@ -1986,6 +1987,7 @@ export async function runTaskAgent({
   groupSender,
   wakeSender,
   broadcastSender,
+  historyReader = null,
   profileReader,
   groupsReader,
   gitSync,
@@ -1998,9 +2000,16 @@ export async function runTaskAgent({
 }) {
   usageKey = sessionKey
 
-  const systemPrompt = workdir
-    ? `${TASK_SYSTEM_PROMPT}\n\n本次工作的目录：${workdir}\n中间产物写在这里，别散落到项目根。`
-    : TASK_SYSTEM_PROMPT
+  const systemPrompt = [
+    TASK_SYSTEM_PROMPT,
+    workdir
+      ? `本次工作的目录：${workdir}\n中间产物写在这里，别散落到项目根。`
+      : '',
+    // 定时任务在群里跑还是私聊跑，必须明确告诉模型：不带这句它会自己猜，猜错就会说「当前是私聊」
+    environment ? `本次运行环境：${environment}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -2082,6 +2091,7 @@ export async function runTaskAgent({
         groupSender,
         wakeSender,
         broadcastSender,
+        historyReader,
         profileReader,
         groupsReader,
         gitSync,
