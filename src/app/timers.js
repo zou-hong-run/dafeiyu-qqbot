@@ -50,7 +50,7 @@ export async function runScheduledTask(task) {
         ? `当前在 QQ 群聊（群 openid ${task.target.id}），你的回复会用主动消息直接发到这个群，读群记录、往群里发东西都是这个群`
         : `当前是私聊（用户 openid ${task.target.id}），消息直接发给这个用户`,
     tools: toolsForScope(scope, 'scheduler'),
-    callTool: (name, args) => callTool(name, args, env.toolTimeoutMs),
+    callTool: (name, args) => callTool(name, args, env.toolTimeoutMs, { sessionKey }),
     sendImage: imageSenderFor(null, send),
     audioSender: audioSenderFor(null, send),
     videoSender: videoSenderFor(null, send),

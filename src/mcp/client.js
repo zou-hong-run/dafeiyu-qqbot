@@ -3,6 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { audit } from '../app/audit.js'
+import { AUDITED_TOOLS } from '../config/policy.js'
 import { assertMcpCommand } from './mcp-guard.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -204,7 +206,15 @@ export function toDeepSeekTools(toolList) {
   }))
 }
 
-export async function callTool(name, args, timeoutMs = 30_000) {
+/**
+ * 调一个 MCP 工具。
+ *
+ * 留痕下沉到这里：原来审计包在对话循环外面，定时任务、子 agent、自愈
+ * 这些直接调 callTool 的路径全都没有记录。放在最底层，谁都绕不过去。
+ *
+ * @param {{ sessionKey?: string }} options 只用于审计归属，不影响调用
+ */
+export async function callTool(name, args, timeoutMs = 30_000, { sessionKey = '' } = {}) {
   const connection = toolOwners.get(name)
   if (!connection) throw new Error(`工具 ${name} 未连接`)
   if (connection.dead) throw new Error(`工具 ${name} 的服务已断开，下一轮会重连`)
@@ -224,6 +234,8 @@ export async function callTool(name, args, timeoutMs = 30_000) {
       .join('\n')
 
     if (result?.isError) throw new Error(text || '工具返回错误')
+
+    if (AUDITED_TOOLS.has(name)) audit(sessionKey || 'unknown', name, args, text)
     return text
   } catch (error) {
     const message = String(error?.message ?? error)

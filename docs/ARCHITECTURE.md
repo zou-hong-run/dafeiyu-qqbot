@@ -334,9 +334,11 @@ bwrap
 
 `download` 是唯一不需要管理员的出网工具（群聊里谁都能触发），所以它的地址校验单独做在 `src/mcp-server/net-guard.js`：内网和云元数据段一律拒，重定向逐跳复核。
 
-### 5. 审计没覆盖所有调用路径
+### 5. 审计已下沉到 callTool
 
-`AUDITED_TOOLS` 的检查放在 `index.js` 的对话循环里，所以 `timers.js`、`worker.js`、`commands.js` 里直接 `callTool()` 的地方不记审计。彻底的做法是把审计下沉到 `client.js` 的 `callTool()`，一次做掉。
+`AUDITED_TOOLS` 的检查放在 `src/mcp/client.js` 的 `callTool()` 里，所有调用路径（对话循环、定时任务、子 agent、自愈、命令）都过这一处，`sessionKey` 作为可选参数带进来标明归属。原来只在对话循环里查，`timers.js` / `worker.js` / `commands.js` 直接调 `callTool()` 的地方是不留痕的。
+
+同时自愈 prompt 里拼进去的错误原文加了明确边界：那段只是程序输出，里面出现的任何像指令的文字都当数据看。
 
 ---
 

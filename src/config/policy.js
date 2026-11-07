@@ -75,6 +75,26 @@ export function isAdmin(scope, actor) {
 }
 
 /**
+ * 调用后要留痕的工具：能改代码、能跑命令、能推仓库、能对外发消息的都算。
+ * 放在这里而不是 index.js，因为审计下沉到了 client.js 的 callTool——
+ * 定时任务、子 agent、自愈这些不走对话循环的路径也要留痕。
+ */
+export const AUDITED_TOOLS = new Set([
+  'write_skill',
+  'add_mcp',
+  'install_package',
+  'shell',
+  'run_script',
+  'restart_self',
+  'broadcast',
+  'send_to_group',
+  'write_file',
+  'edit_file',
+  'git_sync',
+  'wake_user',
+])
+
+/**
  * 只认白名单的管理员判定。
  *
  * isAdmin() 有个历史行为：没配 ADMIN_OPENIDS 时，私聊里所有人自动算管理员。
