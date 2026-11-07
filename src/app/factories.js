@@ -383,7 +383,11 @@ export function choiceSenderFor(event) {
         : { scope: 'c2c', targetId: String(event.user_id), msgId: event.message_id }
 
     try {
-      const text = entry.question || '选一个'
+      // 正文里也把选项列出来：按钮万一没渲染出来，用户至少知道能选什么，
+      // 而且他直接回数字照样算数（resolveChoice 会接住）。
+      const listed = entry.options.map((item, index) => `${index + 1}. ${item}`).join('\n')
+      const text = entry.question ? `${entry.question}\n\n${listed}` : choiceText(entry)
+
       await sendWithKeyboard(target, text, choiceKeyboard(entry))
       return { count: entry.options.length, text, keyboard: true }
     } catch (error) {
