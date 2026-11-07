@@ -420,6 +420,17 @@ async function handleGroupAll(event) {
       text = spoken
       console.log(`[群附件] ${event.group_id?.slice(0, 12)}… 纯语音 ${inbound.length} 个，用识别文字继续处理`)
     } else if (inbound.length > 0) {
+      // 诊断：群里语音一直「只有文件没有文字」，到底是平台没给 asr_text，
+      // 还是我们没读到——把元素类型和 data 的键名打出来（只打键，不打值）。
+      // 日志里看到 voice(url,name,size) 而没有 asr_text，就是平台侧确实没转写。
+      if (inbound.some((item) => item.type === 'voice' || item.type === 'audio')) {
+        const elems = Array.isArray(event.message) ? event.message : []
+        const diag = elems
+          .map((elem) => `${elem?.type ?? '?'}(${Object.keys(elem?.data ?? {}).join(',')})`)
+          .join(' ')
+        console.log(`[群语音诊断] 元素 ${diag}`)
+      }
+
       // 图片/文件：不主动接话（免得刷屏），但文件先落一份到磁盘。
       // 不存的话群里发过的图我永远看不到——平台给的附件地址会过期，事后想补看也补不回来。
       const saved = await describeInbound(inbound, sessionKeyOf(event)).catch(() => null)
