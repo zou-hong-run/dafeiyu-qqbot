@@ -4,8 +4,18 @@ import { fileURLToPath } from 'node:url'
 import { env } from '../config/env.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const dataDir = path.join(projectRoot, 'data')
-const memoryFile = path.join(dataDir, 'memory.json')
+let dataDir = path.join(projectRoot, 'data')
+let memoryFile = path.join(dataDir, 'memory.json')
+
+/**
+ * 测试用：把记忆文件指到临时目录。
+ * 不加这个的话，单测里 appendTurn 会往真实的 data/memory.json 里写测试会话。
+ */
+export function useMemoryDir(dir) {
+  dataDir = dir
+  memoryFile = path.join(dir, 'memory.json')
+  state = { sessions: {} }
+}
 
 const SHORT_TERM_LIMIT = Math.max(env.historyTurns, 1) * 2
 const LONG_TERM_LIMIT = 60
@@ -89,6 +99,36 @@ export function historyTokens(key) {
   return getSession(key).shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0)
 }
 
+/**
+ * 最早的一轮对话永不参与溢出。
+ *
+ * 只留最近 N 轮的话，"一开始要干什么"会被冲掉——用户说了半天需求，
+ * 聊到后面机器人只记得最近的闲聊，忘了正题。留一条 user + 一条 assistant
+ * 当锚点，代价是最近几轮少留一条。
+ */
+const HEAD_KEEP_MESSAGES = 2
+
+/** 从「头部保留区」之后取走最旧的一条 */
+function shiftOverflowable(session) {
+  if (session.shortTerm.length <= HEAD_KEEP_MESSAGES) return null
+  return session.shortTerm.splice(HEAD_KEEP_MESSAGES, 1)[0] ?? null
+}
+
+/**
+ * 把溢出的内容还回去。
+ *
+ * 摘要生成失败时用它回滚——原来那批消息已经被移出短期记忆，
+ * 摘要又没写成，内容就永久丢了，用户只能重说一遍。
+ */
+export function restoreOverflow(key, messages) {
+  const list = Array.isArray(messages) ? messages.filter(Boolean) : []
+  if (list.length === 0) return
+
+  const session = getSession(key)
+  session.shortTerm.splice(HEAD_KEEP_MESSAGES, 0, ...list)
+  scheduleSave()
+}
+
 export function takeOverflow(key, budgetTokens = Number.POSITIVE_INFINITY) {
   const session = getSession(key)
 
@@ -106,16 +146,18 @@ export function takeOverflow(key, budgetTokens = Number.POSITIVE_INFINITY) {
   const target = Math.floor(budgetTokens * 0.7)
   const overflow = []
 
-  // 先按轮数裁：保留最近 SHORT_TERM_LIMIT 条
+  // 先按轮数裁：保留最近 SHORT_TERM_LIMIT 条，但头部那几条锚点不动
   while (session.shortTerm.length > SHORT_TERM_LIMIT) {
-    const message = session.shortTerm.shift()
+    const message = shiftOverflowable(session)
+    if (!message) break
     overflow.push(message)
   }
 
-  // 再按 token 裁：轮数没超但内容太长时继续丢前面的
+  // 再按 token 裁：轮数没超但内容太长时继续丢中间的
   let total = session.shortTerm.reduce((sum, message) => sum + estimateTokens(message.content), 0)
-  while (total > target && session.shortTerm.length > 2) {
-    const message = session.shortTerm.shift()
+  while (total > target && session.shortTerm.length > HEAD_KEEP_MESSAGES + 2) {
+    const message = shiftOverflowable(session)
+    if (!message) break
     total -= estimateTokens(message.content)
     overflow.push(message)
   }

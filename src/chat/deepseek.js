@@ -19,6 +19,7 @@ import {
   addLongTerm,
   recallLongTerm,
   takeOverflow,
+  restoreOverflow,
   setMidTerm,
   midTerm,
   history,
@@ -692,9 +693,6 @@ function buildSystemPrompt(sessionKey, userText, speaker = {}) {
   const skills = skillsPrompt()
   if (skills) parts.push(skills)
 
-  const summary = midTerm(sessionKey)
-  if (summary) parts.push(`【近期对话摘要】\n${summary}`)
-
   const memories = recallLongTerm(sessionKey, userText)
   if (memories.length > 0) {
     parts.push(`【长期记忆】\n${memories.map((item) => `- ${item.text}`).join('\n')}`)
@@ -1271,8 +1269,22 @@ async function runTool(
   }
 }
 
+// 摘要连续失败几次后就不再回滚，免得同一个会话每轮都卡在这里重试
+const SUMMARY_FAILURE_LIMIT = 3
+const summaryFailures = new Map()
+
+/**
+ * 把早期对话压成摘要。
+ *
+ * 关键：失败必须把内容放回短期记忆。原来这批消息已经从 shortTerm 里移出去了，
+ * 摘要又没写成，那一段对话就永久消失——用户只能重说一遍。
+ * 回滚后下一轮会再试一次，连续失败 3 次才放弃。
+ */
 async function summarize(sessionKey, overflow) {
-  if (summarizing.has(sessionKey)) return
+  if (summarizing.has(sessionKey)) {
+    restoreOverflow(sessionKey, overflow)
+    return
+  }
   summarizing.add(sessionKey)
 
   try {
@@ -1309,9 +1321,27 @@ async function summarize(sessionKey, overflow) {
     })
 
     const text = completion.choices?.[0]?.message?.content?.trim()
-    if (text) setMidTerm(sessionKey, text)
+    if (!text) throw new Error('模型返回了空摘要')
+
+    setMidTerm(sessionKey, text)
+    summaryFailures.delete(sessionKey)
   } catch (error) {
-    console.error('[记忆] 摘要生成失败：', error?.message ?? error)
+    const failures = (summaryFailures.get(sessionKey) ?? 0) + 1
+    summaryFailures.set(sessionKey, failures)
+
+    if (failures >= SUMMARY_FAILURE_LIMIT) {
+      console.error(
+        `[记忆] 摘要连续失败 ${failures} 次，这批 ${overflow.length} 条不再重试：`,
+        error?.message ?? error,
+      )
+      summaryFailures.delete(sessionKey)
+    } else {
+      console.warn(
+        `[记忆] 摘要失败（第 ${failures} 次），${overflow.length} 条已放回短期记忆，下轮重试：`,
+        error?.message ?? error,
+      )
+      restoreOverflow(sessionKey, overflow)
+    }
   } finally {
     summarizing.delete(sessionKey)
   }
@@ -1681,11 +1711,24 @@ export async function chat(sessionKey, userText, options = {}) {
     .slice(0, MAX_IMAGES)
 
   const needsAction = looksLikeActionRequest(userText)
-  const userContent = needsAction
+  const baseContent = needsAction
     ? `${userText}
 
 （提醒：这条是要我动手做的事，这一轮就调用工具，别先回「我这就去」等下一轮）`
     : userText
+
+  // 早期对话的摘要贴在当前这条消息前面，而不是塞进系统提示词：
+  // 系统提示词在最前面，模型对它的利用率不如紧邻当前提问的位置。
+  // 它只进这一轮的请求，不进历史——appendTurn 存的是 userText 原文。
+  const summary = midTerm(sessionKey)
+  const userContent = summary
+    ? `<system-reminder>
+【更早的对话摘要】（那部分原文已经不在上下文里，以下是要点）
+${summary}
+</system-reminder>
+
+${baseContent}`
+    : baseContent
 
   const speaker = { scope, actorName, isAdmin: isAdmin(scope, actor) }
 
@@ -1775,11 +1818,22 @@ export async function chat(sessionKey, userText, options = {}) {
 
         summarize(sessionKey, dropped)
 
+        // 压缩之后摘要可能刚更新，重新取一次；组装方式和首轮保持一致
+        const retrySummary = midTerm(sessionKey)
+        const retryContent = retrySummary
+          ? `<system-reminder>
+【更早的对话摘要】（那部分原文已经不在上下文里，以下是要点）
+${retrySummary}
+</system-reminder>
+
+${userText}`
+          : userText
+
         messages.length = 0
         messages.push(
           { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) },
           ...history(sessionKey),
-          { role: 'user', content: userText },
+          { role: 'user', content: retryContent },
         )
 
         completion = await createCompletion(payload)
