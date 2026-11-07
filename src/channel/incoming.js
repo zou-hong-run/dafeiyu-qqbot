@@ -77,12 +77,15 @@ export function extractInbound(event) {
   const items = []
 
   for (const elem of event?.message ?? []) {
-    const url = elem.data?.url
-    if (!url) continue
+    const rawUrl = String(elem.data?.url ?? '')
+    // 平台会把语音识别成文字放在 asr_text：只有文字没有直链的语音也照样收，
+    // 因为内容在文字里，不需要下载音频
+    const asrText = String(elem.data?.asr_text ?? '').trim().slice(0, 500)
+    if (!rawUrl && !asrText) continue
 
     const name = String(elem.data?.name ?? '').slice(0, 80)
-    const fullUrl = String(url).startsWith('http') ? String(url) : `https://${url}`
-    const type = kindOf(elem?.type, name, fullUrl)
+    const fullUrl = rawUrl ? (rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`) : ''
+    const type = kindOf(elem?.type, name, fullUrl) || (asrText ? 'voice' : '')
     if (!type) continue
 
     items.push({
@@ -90,6 +93,7 @@ export function extractInbound(event) {
       url: fullUrl,
       name,
       size: Number(elem.data?.size) || 0,
+      asrText,
     })
 
     if (items.length >= MAX_ITEMS) break
@@ -148,6 +152,17 @@ export async function describeInbound(items, scopeKey = '') {
 
   for (const item of downloaded) {
     const label = KIND_LABEL[item.type] ?? item.type
+    const isVoice = item.type === 'voice' || item.type === 'audio'
+
+    // 语音优先用平台识别出来的文字——那才是对方真正说的话；
+    // 有文字就不必把「我听不到」这句话丢给模型
+    if (isVoice && item.asrText) {
+      lines.push(
+        `[${label}] 平台已转成文字：「${item.asrText}」` +
+          (item.file ? `\n[${label}] 音频文件在 ${item.file}` : ''),
+      )
+      continue
+    }
 
     if (item.file) {
       lines.push(
@@ -160,10 +175,13 @@ export async function describeInbound(items, scopeKey = '') {
   }
 
   const voiceCount = downloaded.filter((item) => item.type === 'voice' || item.type === 'audio').length
-  if (voiceCount > 0) {
+  const deafVoiceCount = downloaded.filter(
+    (item) => (item.type === 'voice' || item.type === 'audio') && !item.asrText,
+  ).length
+  if (deafVoiceCount > 0) {
     lines.push(
-      '注意：语音消息我这边没有转文字服务，听不到内容，只能看到文件。' +
-        '需要的话可以告诉对方「发语音我听不了，打字说」，或者用 send_audio 把这条转发出去。',
+      `注意：这 ${deafVoiceCount} 条语音平台没给识别文字，我听不到内容，只能看到文件。` +
+        '需要的话可以请对方打字说，或者用 send_audio 把这条转发出去。',
     )
   }
 

@@ -511,7 +511,11 @@ function attachmentKind(contentType) {
 function collectAttachments(msg) {
   const list = []
   const push = (arr) => {
-    if (Array.isArray(arr)) for (const att of arr) if (att && att.url) list.push(att)
+    // 有 url 才算附件；但语音偶尔只给 asr_refer_text 不给 url，
+    // 那也是能听懂的内容，一起收下（去重键跟着放宽）
+    if (Array.isArray(arr)) {
+      for (const att of arr) if (att && (att.url || att.asr_refer_text)) list.push(att)
+    }
   }
 
   push(msg?.attachments)
@@ -520,9 +524,9 @@ function collectAttachments(msg) {
 
   const seen = new Set()
   return list.filter((att) => {
-    const url = String(att.url)
-    if (seen.has(url)) return false
-    seen.add(url)
+    const key = String(att.url ?? att.asr_refer_text ?? '')
+    if (!key || seen.has(key)) return false
+    seen.add(key)
     return true
   })
 }
@@ -530,13 +534,16 @@ function collectAttachments(msg) {
 function toMessageElements(attachments) {
   if (!Array.isArray(attachments)) return []
   return attachments
-    .filter((att) => att && att.url)
+    .filter((att) => att && (att.url || att.asr_refer_text))
     .map((att) => ({
       type: attachmentKind(att.content_type),
       data: {
-        url: String(att.url),
+        url: String(att.url ?? ''),
         name: String(att.filename ?? '').slice(0, 120),
         size: Number(att.size) || 0,
+        // 平台自带语音识别结果。有它就不必说「我听不了语音」，
+        // 没它才提示对方打字。
+        asr_text: String(att.asr_refer_text ?? '').slice(0, 500),
       },
     }))
 }
