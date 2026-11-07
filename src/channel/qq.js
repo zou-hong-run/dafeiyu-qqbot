@@ -14,6 +14,8 @@ import { assertPublicUrlResolved, fetchPublic } from '../mcp-server/net-guard.js
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const SESSION_FILE = path.join(projectRoot, 'data', 'qq-session.json')
+// 未识别事件的落盘位置（表情回应等），用来排查平台到底推不推
+const RAW_EVENT_LOG = path.join(projectRoot, 'data', 'raw-events.log')
 
 // 把 sessionId / lastSeq 落盘：进程重启后先试 RESUME，不用重新 IDENTIFY，
 // 也少丢几条消息（QQ 没有历史补拉接口，能续上就是赚）。
@@ -392,8 +394,20 @@ export function onInteraction(handler) {
   })
 }
 
-/** 连接生命周期：接日志和重启播报到这儿 */
-export function onLifecycle({ ready, resumed, disconnected, error } = {}) {
+/**
+ * 兜底原始事件：SDK 只单独发 message / interaction，其余事件（表情回应、
+ * 成员变动、加群申请等）统一从这里吐出来，ctx 是 { eventType, data }。
+ * 目前只用来观察平台到底推不推某些事件。
+ */
+export function onRawEvent(handler) {
+  bot.on('rawEvent', (ctx) => {
+    Promise.resolve(handler(ctx)).catch((error) => {
+      console.error('[qq] 处理原始事件失败：', error?.message ?? error)
+    })
+  })
+}
+
+/** 连接生命周期：接日志和重启播报到这儿 */export function onLifecycle({ ready, resumed, disconnected, error } = {}) {
   if (ready) bot.on('ready', (data) => ready(data))
   if (resumed) bot.on('resumed', (data) => resumed(data))
   if (disconnected) bot.on('disconnected', (info) => disconnected(info))
@@ -505,6 +519,19 @@ async function loadSelfOpenid() {
 
 export async function start() {
   await loadSelfOpenid()
+  // 观察用：把平台推过来的非消息事件记一行，确认表情回应这类事件到底推不推
+  bot.on('rawEvent', (ctx) => {
+    const type = String(ctx?.eventType ?? 'unknown')
+    let brief = ''
+    if (/REACTION|POKE|STAMP|NUDGE/i.test(type)) {
+      try {
+        brief = ' ' + JSON.stringify(ctx?.data ?? '').slice(0, 300)
+      } catch {
+        brief = ' ' + String(ctx?.data)
+      }
+    }
+    console.log(`[qq][rawEvent] ${type}${brief}`)
+  })
   await bot.start()
 }
 
