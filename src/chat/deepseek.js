@@ -21,6 +21,7 @@ import {
   takeOverflow,
   restoreOverflow,
   historyTokens,
+  elisionInfo,
   setMidTerm,
   midTerm,
   history,
@@ -1306,17 +1307,19 @@ async function summarize(sessionKey, overflow) {
           role: 'system',
           content:
             '你要写一份交接摘要：写完之后，这段对话的早期内容会被清掉，接手的只有最近几轮原文和这份摘要。\n' +
+            '写清楚，别写成流水账——后面的人只能靠这份摘要知道之前发生了什么。\n' +
             '要求：\n' +
-            '1. 用对话本来使用的语言写，不要套固定小标题，顺着事情本身的脉络写\n' +
+            '1. 用对话本来使用的语言写\n' +
             '2. 自包含：没看过前面内容的人也能看懂在做什么、做到哪了\n' +
             '3. 保留具体事实，别只给概括：命令、文件路径、参数、返回值、错误原文、关键数字。' +
             '宁可多一行细节，也别写成「已处理若干问题」\n' +
-            '4. 已经定下来的决定单独说清（选了什么、为什么），和还没解决的问题分开，' +
-            '别把没定的写成定了\n' +
-            '5. 没做完的事写清下一步该干什么，以及已经知道会踩的坑\n' +
-            '6. 拿不准或没验证的，明确写「未验证」，不要写成已经完成\n' +
-            '7. 去掉寒暄、客套和重复内容\n' +
-            '只输出摘要正文，不超过 500 字。',
+            '4. 拿不准或没验证的，明确写「未验证」，不要写成已经完成\n' +
+            '5. 去掉寒暄、客套和重复内容\n\n' +
+            '按这三段输出，每段用短标题开头：\n' +
+            '【已定】已经确定下来的决定和事实（选了什么、为什么、结果如何）\n' +
+            '【未定】还在讨论、没有结论的事，写清卡在哪\n' +
+            '【下一步】没做完的事该干什么，以及已经知道会踩的坑\n' +
+            '不超过 700 字。',
         },
         {
           role: 'user',
@@ -1738,13 +1741,38 @@ ${baseContent}`
 
   const speaker = { scope, actorName, isAdmin: isAdmin(scope, actor) }
 
-  const buildMessages = () => [
-    { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) },
-    ...history(sessionKey),
-    imageParts.length > 0
-      ? { role: 'user', content: [{ type: 'text', text: userContent }, ...imageParts] }
-      : { role: 'user', content: userContent },
-  ]
+  const buildMessages = () => {
+    const hist = history(sessionKey)
+    const elision = elisionInfo(sessionKey)
+
+    // 压缩后历史是「开头锚点 + 最近若干轮」，中间断了一截。
+    // 不告诉模型的话，它会以为这就是全部对话，重复问已经聊过的，
+    // 或者把摘要里的结论当成刚说过的话。省略提示插在断点位置上。
+    const gap = elision
+      ? [
+          {
+            role: 'user',
+            content:
+              `<system-reminder>\n【上下文缺口】这段对话中间省略了约 ${elision.rounds} 轮、` +
+              `${elision.tokens} tokens（早期内容已压成摘要，附在本条消息前面）。` +
+              `省略的部分没有原文可查，需要细节就重新问，别猜。\n</system-reminder>`,
+          },
+        ]
+      : []
+
+    const head = hist.slice(0, 2)
+    const tail = hist.slice(2)
+
+    return [
+      { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) },
+      ...head,
+      ...gap,
+      ...tail,
+      imageParts.length > 0
+        ? { role: 'user', content: [{ type: 'text', text: userContent }, ...imageParts] }
+        : { role: 'user', content: userContent },
+    ]
+  }
 
   const messages = buildMessages()
 
@@ -2037,7 +2065,7 @@ ${userText}`
     answer = (await finalize(sessionKey)) || fallbackFromTool(lastToolSnapshot)
   }
 
-  appendTurn(sessionKey, userText, answer)
+  appendTurn(sessionKey, userText, answer, { name: speaker.actorName })
 
   const overflow = takeOverflow(sessionKey, budget)
   if (overflow) summarize(sessionKey, overflow)

@@ -44,6 +44,38 @@ function cleanContent(text) {
   return raw.slice(0, cut).trim()
 }
 
+/**
+ * 溢出内容留档。
+ *
+ * 压缩是就地改历史：那批原文压进摘要之后，除了这里就没有第二份了。
+ * 摘要写歪了（漏事实、把没定的写成定了）的时候，这是唯一能翻回去核对的地方。
+ * 只写不读——需要时人工去看，不给模型开读取口子。
+ */
+function archiveOverflow(key, messages) {
+  try {
+    // 跟着 dataDir 走：测试把记忆指到临时目录时，归档也跟着过去
+    const archiveDir = path.join(dataDir, 'memory-archive')
+    fs.mkdirSync(archiveDir, { recursive: true })
+    const safeKey = String(key).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const file = path.join(archiveDir, `${stamp}-${safeKey}.jsonl`)
+    const lines = messages.map((message) =>
+      JSON.stringify({ at: Date.now(), key, role: message.role, name: message.name ?? '', content: message.content }),
+    )
+    fs.appendFileSync(file, `${lines.join('\n')}\n`)
+  } catch (error) {
+    console.error('[记忆] 溢出留档失败：', error?.message ?? error)
+  }
+}
+
+/** 这段历史之外，还有多少轮已经被压进摘要了 */
+export function elisionInfo(key) {
+  const entry = getSession(key)
+  const rounds = Number(entry.elidedRounds) || 0
+  const tokens = Number(entry.elidedTokens) || 0
+  return rounds > 0 ? { rounds, tokens } : null
+}
+
 function persist() {
   try {
     fs.mkdirSync(dataDir, { recursive: true })
@@ -74,15 +106,22 @@ function getSession(key) {
   return session
 }
 
-export function appendTurn(key, userText, assistantText) {
+/**
+ * 追加一轮对话。
+ *
+ * name 是说话人昵称：群里所有人共用一个 sessionKey，不记名字的话
+ * 历史里就是一串分不清是谁的「用户：……」，翻两轮之后就认不出人了。
+ */
+export function appendTurn(key, userText, assistantText, { name = '' } = {}) {
   const session = getSession(key)
   const answer = cleanContent(assistantText)
   if (!answer) return
 
-  session.shortTerm.push(
-    { role: 'user', content: String(userText ?? '').trim() },
-    { role: 'assistant', content: answer },
-  )
+  const who = String(name ?? '').trim().slice(0, 20)
+  const userMessage = { role: 'user', content: String(userText ?? '').trim() }
+  if (who) userMessage.name = who
+
+  session.shortTerm.push(userMessage, { role: 'assistant', content: answer })
   session.updatedAt = Date.now()
   scheduleSave()
 }
@@ -164,6 +203,11 @@ export function takeOverflow(key, budgetTokens = Number.POSITIVE_INFINITY) {
 
   if (overflow.length === 0) return null
 
+  const elidedTokens = overflow.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  session.elidedRounds = (Number(session.elidedRounds) || 0) + Math.ceil(overflow.length / 2)
+  session.elidedTokens = (Number(session.elidedTokens) || 0) + elidedTokens
+
+  archiveOverflow(key, overflow)
   scheduleSave()
   return overflow
 }
@@ -229,6 +273,7 @@ export function recallLongTerm(key, query, limit = 6) {
 }
 export function history(key) {
   const list = getSession(key).shortTerm
+  const inGroup = String(key).startsWith('group:')
   const result = []
 
   for (let i = 0; i + 1 < list.length; i += 2) {
@@ -236,7 +281,11 @@ export function history(key) {
     const assistant = list[i + 1]
     if (!user || !assistant) break
     if (TOOL_MARKUP.test(user.content ?? '') || TOOL_MARKUP.test(assistant.content ?? '')) continue
-    result.push(user, assistant)
+
+    // 群聊历史前面带上昵称，翻回去也知道那句是谁说的；私聊不加，纯噪音
+    const named =
+      inGroup && user.name ? { role: 'user', content: `${user.name}：${user.content}` } : user
+    result.push(named, assistant)
   }
 
   return result

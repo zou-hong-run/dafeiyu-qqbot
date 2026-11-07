@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   appendTurn,
+  elisionInfo,
   history,
   restoreOverflow,
   takeOverflow,
@@ -78,4 +79,38 @@ test('两次 takeOverflow 不会重复吐出同一条', () => {
 
   assert.ok(first.length > 0)
   assert.equal(second, null, '已经在上限内了，不该再溢出')
+})
+
+test('群聊历史带上说话人昵称，私聊不带', () => {
+  appendTurn('group:test-name', '这个怎么配', '这样配', { name: '张三' })
+  appendTurn('group:test-name', '我也问一个', '好', { name: '李四' })
+
+  const groupHistory = history('group:test-name')
+  assert.match(groupHistory[0].content, /^张三：/)
+  assert.match(groupHistory[2].content, /^李四：/)
+
+  appendTurn('user:test-name', '私聊说一句', '嗯', { name: '张三' })
+  assert.equal(history('user:test-name')[0].content, '私聊说一句', '私聊不加前缀')
+})
+
+test('溢出后记录省略了多少，并留档原文', () => {
+  const key = 'test:elision'
+  appendTurn(key, '锚点', '好')
+  for (let i = 0; i < 12; i += 1) appendTurn(key, `滚动 ${i}`, `答 ${i}`)
+
+  assert.equal(elisionInfo(key), null, '还没溢出时没有缺口')
+
+  const overflow = takeOverflow(key)
+  assert.ok(overflow.length > 0)
+
+  const info = elisionInfo(key)
+  assert.ok(info.rounds > 0)
+  assert.ok(info.tokens > 0)
+
+  // 归档：压缩之后就剩这一份原文了
+  const dir = path.join(tmpDir, 'memory-archive')
+  const files = fs.readdirSync(dir)
+  assert.ok(files.length > 0, '应该写出归档文件')
+  const content = fs.readFileSync(path.join(dir, files[0]), 'utf8')
+  assert.match(content, /滚动 0/, '溢出内容要在归档里')
 })
