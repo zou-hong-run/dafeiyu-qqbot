@@ -6,7 +6,7 @@ import { chat, summarizeGroup, runTaskAgent } from './chat/deepseek.js'
 import { startTask as launchTask, killTask, submitInput, takeInterruptedTasks } from './tasks/task-runner.js'
 import { initScheduler, cronMatches } from './tasks/scheduler.js'
 import { startMcp, getTools, syncRegistry, callTool, stopMcp } from './mcp/client.js'
-import { isAdmin, describePolicy, describeAdminPolicy } from './config/policy.js'
+import { isAdmin, isConfiguredAdmin, describePolicy, describeAdminPolicy } from './config/policy.js'
 import { ensureSkillsDir } from './skills/skills.js'
 import { evictIdleSessions, recentSessions, flush } from './memory/memory.js'
 import { flushTickets } from './tasks/ticket.js'
@@ -245,14 +245,20 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
       cardSender: cardSenderFor(event),
       speakSender: speakSenderFor(event),
       choiceSender: choiceSenderFor(event),
-      historyReader: historyReaderFor(event, { isAdmin: isAdmin(scope, String(event?.user_id ?? '')) }),
+      historyReader: historyReaderFor(event, { isAdmin: isConfiguredAdmin(String(event?.user_id ?? '')) }),
       profileReader: profileReaderFor(event),
       groupSender: groupSenderFor(event),
       wakeSender: wakeSenderFor(event),
       groupsReader: groupsReaderFor(),
       gitSync: gitSyncFor(),
       scheduler: schedulerFor(event),
-      recallMessages: (options) => recallMessages({ event, ...(options ?? {}) }),
+      recallMessages: (options) =>
+        recallMessages({
+          event,
+          ...(options ?? {}),
+          // 跨会话撤回只给白名单里的人，不能用 isAdmin 的私聊 fallback
+          allowCross: isConfiguredAdmin(String(event?.user_id ?? '')),
+        }),
       broadcastSender: broadcastSenderFor(event),
 
       onStep: progressReporter(event),

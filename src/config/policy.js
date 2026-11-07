@@ -71,6 +71,21 @@ export function isAdmin(scope, actor) {
   return scope === 'private'
 }
 
+/**
+ * 只认白名单的管理员判定。
+ *
+ * isAdmin() 有个历史行为：没配 ADMIN_OPENIDS 时，私聊里所有人自动算管理员。
+ * 那个默认值只适合「一个人自用」的场景，绝不能拿来决定跨会话能力——
+ * 否则私聊里随便来个人就能读别的群的记录、看所有定时任务、撤别的群的消息。
+ *
+ * 凡是「跨越当前会话」的操作，一律用这个。
+ */
+export function isConfiguredAdmin(actor = '') {
+  const id = String(actor ?? '').trim()
+  if (!id) return false
+  return env.adminOpenIds.includes(id)
+}
+
 function dangerAllowed(scope, actor) {
   // 定时任务到点执行，视为建任务的人已授权
   if (actor === 'scheduler') return true

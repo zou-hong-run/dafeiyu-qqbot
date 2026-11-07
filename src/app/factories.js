@@ -8,7 +8,7 @@ import { audit, auditKeyOf } from './audit.js'
 import { chunkText } from '../channel/sender.js'
 import { formatProfile } from '../memory/profiles.js'
 import { commitAndPush, describeStatus, pullLatest } from '../ops/sync.js'
-import { filterTools, isAdmin, resolveHistoryTarget } from '../config/policy.js'
+import { filterTools, isConfiguredAdmin, resolveHistoryTarget } from '../config/policy.js'
 import { getTools, toDeepSeekTools } from '../mcp/client.js'
 import { addSchedule, listSchedules, removeSchedule, updateSchedule } from '../tasks/scheduler.js'
 import { putChoice, choiceKeyboard, choiceText } from '../chat/choices.js'
@@ -416,8 +416,9 @@ export function schedulerFor(event) {
   }
 
   const actor = String(event.user_id ?? '')
-  // isAdmin 的签名是 (scope, actor)：只传 actor 会当成 scope，actor 变 undefined，永远 false
-  const admin = isAdmin(isGroup ? 'group' : 'private', actor)
+  // 跨会话能力（看所有任务、改删别人的任务）只认白名单，
+  // 不能用 isAdmin——它没配白名单时把私聊里所有人都当成管理员
+  const admin = isConfiguredAdmin(actor)
 
   return {
     add: ({ cron, prompt }) => addSchedule({ sessionKey, target, cron, prompt, createdBy: actor }),

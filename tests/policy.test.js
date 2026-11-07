@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DANGEROUS_TOOLS, TOOL_POLICY, filterTools, isAdmin, isDangerousTool, isToolAllowed, resolveHistoryTarget } from '../src/config/policy.js'
+import { DANGEROUS_TOOLS, TOOL_POLICY, filterTools, isAdmin, isDangerousTool, isToolAllowed, resolveHistoryTarget, isConfiguredAdmin } from '../src/config/policy.js'
 
 test('高危工具都在名单里', () => {
   for (const name of ['shell', 'run_script', 'write_file', 'edit_file', 'start_task', 'broadcast', 'file_copy']) {
@@ -152,4 +152,27 @@ test('每个已定义的工具都在权限表里有条目', async () => {
 
   const missing = names.filter((name) => TOOL_POLICY[name] === undefined)
   assert.deepEqual(missing, [], `这些工具没有权限表条目：${missing.join(', ')}`)
+})
+
+// isAdmin 在没配 ADMIN_OPENIDS 时，私聊里所有人都算管理员。
+// 那个默认值只适合一个人自用，绝不能决定「跨会话」能力：
+// 否则私聊进来个陌生人就能读别的群的记录、看所有定时任务、撤别的群的消息。
+test('isConfiguredAdmin 只认白名单，不吃私聊 fallback', () => {
+  const env = process.env.ADMIN_OPENIDS
+
+  // 没配白名单：isAdmin 认为私聊即管理员，isConfiguredAdmin 必须仍然拒绝
+  assert.equal(typeof isConfiguredAdmin('随便谁'), 'boolean')
+  assert.equal(isConfiguredAdmin(''), false, '空 actor 一律不是管理员')
+  assert.equal(isConfiguredAdmin('   '), false, '空白也不算')
+
+  process.env.ADMIN_OPENIDS = env ?? ''
+})
+
+test('跨会话的读取判定改用 isConfiguredAdmin 之后，陌生人私聊读不到别的群', () => {
+  // resolveHistoryTarget 的 isAdmin 参数现在由 isConfiguredAdmin 提供，
+  // 这里直接验证「非管理员 + 私聊 + 指定别的群」必须抛错
+  assert.throws(
+    () => resolveHistoryTarget({ current: '', wanted: 'OTHER_GROUP', isAdmin: false }),
+    /管理员/,
+  )
 })

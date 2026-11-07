@@ -106,26 +106,40 @@ function describe(item) {
 
 // 不传 messageId 就撤最近的 count 条（默认撤最后一条）
 // groupId 用来撤「我主动发到别的群」的那条：当前会话不是那个群时也能定位
-export async function recallMessages({ event, messageId = '', count = 1, groupId = '' } = {}) {
+export async function recallMessages({
+  event,
+  messageId = '',
+  count = 1,
+  groupId = '',
+  allowCross = false,
+} = {}) {
   ensureLoaded()
 
   const queue = []
   const wanted = String(messageId ?? '').trim()
-  const { isGroup, target } = endpointOf(event, groupId)
+  const current = endpointOfEvent(event)
+  const requested = String(groupId ?? '').trim()
+
+  // 跨会话撤回只有管理员能做：否则群里任何人传一个群 openid，
+  // 就能把机器人发在别的群的消息撤掉，而且能从报错里探出「我在那个群发过话没有」。
+  if (requested && requested !== current.target && !allowCross) {
+    return '只能撤回当前会话里我发过的消息。要撤别的群的，得管理员来。'
+  }
+
+  const { isGroup, target } = requested ? { isGroup: true, target: requested } : current
+  const wantKind = isGroup ? 'group' : 'user'
 
   if (wanted) {
-    const hit = entries.find((item) => item.messageId === wanted)
-    queue.push(
-      hit ?? {
-        t: Date.now(),
-        kind: isGroup ? 'group' : 'user',
-        target,
-        messageId: wanted,
-        media: 'text',
-        preview: '',
-        recalled: false,
-      },
+    // 必须能在台账里找到、而且确实属于这个会话。找不到就直接拒，
+    // 不要拿它去发请求——那样等于让调用方随便指定 id 往任意群发撤回。
+    const hit = entries.find(
+      (item) => item.messageId === wanted && item.kind === wantKind && item.target === target,
     )
+    if (!hit) {
+      return `台账里没有这条记录（${wanted}）${target ? ` 在 ${target}` : ''}：可能不是我发的，或者已经超出保留的 200 条。不撤。`
+    }
+    if (hit.recalled) return '这条已经撤过了。'
+    queue.push(hit)
   } else {
     if (!target) {
       return '没拿到要撤的会话或群 id，撤不了。如果是在别的群发的，把 group_id 一起给我。'

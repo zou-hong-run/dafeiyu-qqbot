@@ -128,10 +128,13 @@ export async function pageImagesOf(
     for (const image of candidates) {
       try {
         await resolveImpl(image)
-        safe.push(image)
-      } catch {
-        // 解析不了或指向内网的图直接丢掉，不因为一张图毁掉整条正文
+      } catch (error) {
+        const reason = String(error?.message ?? error)
+        // 只有「确实指向内网/元数据」才丢。单纯的解析失败（DNS 临时抽风、
+        // CDN 域名在沙箱里查不到）不该连图一起扔掉——平台那边会做自己的校验。
+        if (/内网|元数据|not allowed|blocked/i.test(reason)) continue
       }
+      safe.push(image)
     }
     return safe
   } catch {
