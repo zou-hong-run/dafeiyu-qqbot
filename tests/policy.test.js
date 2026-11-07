@@ -182,3 +182,24 @@ test('recall_message 收进高危名单', () => {
   assert.ok(DANGEROUS_TOOLS.has('recall_message'))
   assert.equal(isToolAllowed('recall_message', 'group', '陌生人'), false)
 })
+
+// 数字对不上过一次：实际 18 个，文档写 16，后来改成 17 还是错。
+// 加高危工具时这条会红，逼着三级文档一起改。
+test('高危工具总数与文档一致（18）', async () => {
+  assert.equal(DANGEROUS_TOOLS.size, 18, '加/删高危工具时同步 README 和 docs/CAPABILITIES.md')
+
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+  for (const file of ['README.md', 'docs/CAPABILITIES.md']) {
+    const text = fs.readFileSync(path.join(root, file), 'utf8')
+    const listed = [...DANGEROUS_TOOLS].filter((name) => text.includes(`\`${name}\``))
+    assert.equal(
+      listed.length,
+      DANGEROUS_TOOLS.size,
+      `${file} 里漏了这些高危工具：${[...DANGEROUS_TOOLS].filter((n) => !listed.includes(n)).join(', ')}`,
+    )
+  }
+})

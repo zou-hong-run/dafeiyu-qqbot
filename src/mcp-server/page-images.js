@@ -128,13 +128,14 @@ export async function pageImagesOf(
     for (const image of candidates) {
       try {
         await resolveImpl(image)
+        safe.push(image)
       } catch (error) {
-        // 只有「确实指向内网/元数据」才丢。单纯的解析失败（DNS 临时抽风、
-        // CDN 域名在沙箱里查不到）不该连图一起扔掉——平台那边会做自己的校验。
-        // 按错误码判，不匹配文案：文案改了这里不会跟着失效。
-        if (error?.code === NET_ERROR.BLOCKED_ADDRESS) continue
+        // fail-closed：只有「明确是 DNS 解析不出来」才保留。
+        // 其余（指向内网、未知错误码、普通 Error、将来新加的错误类型）一律丢掉。
+        // 反过来的写法默认放行，一旦新增一种错误类型就自动成了漏网口子；
+        // 这里的代价最多是少一张配图，不是放行一个可疑地址。
+        if (error?.code === NET_ERROR.DNS_FAILED) safe.push(image)
       }
-      safe.push(image)
     }
     return safe
   } catch {

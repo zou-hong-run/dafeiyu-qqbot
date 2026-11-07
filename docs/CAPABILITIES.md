@@ -133,14 +133,14 @@
 | 开工前算账 | 按命令引用的文件类型乘系数估峰值内存，超「可用 × 75%」直接拒绝 |
 | 命令校验 | 归一化（全角/引号/反斜杠）后再匹配黑名单，敏感路径 + 外传工具组合拦截 |
 | OS 级沙箱 | Linux bwrap：只读根、工作目录可写、默认断网、密钥目录挂空、`CAP_DAC_OVERRIDE` 外全部丢弃 |
-| 权限隔离 | 17 个高危工具走 `ADMIN_OPENIDS` 白名单；模型连工具列表都看不见 |
+| 权限隔离 | 18 个高危工具走 `ADMIN_OPENIDS` 白名单；模型连工具列表都看不见 |
 | 密钥隔离 | 存项目外（Linux `/etc/dafeiyu/env`，600 root），子进程不继承，沙箱内遮蔽 |
 | 审计 | 所有高危调用写 `data/audit.log`（tab 分隔） |
 | 备份 | `data/` 每日快照到 `backups/`，`/config` 能看到最近几份 |
 | 代码自同步 | 每 30 分钟 + 退出时 `git commit` + `push`，提交前扫密钥和黑名单路径 |
 | 自愈 | 看门狗 30 秒巡检工单，卡住的回收，失败写 `data/heals.json` |
 
-**17 个高危工具**（必须白名单）：`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync` `note_lesson` `clear_memory` `wake_user` `recall_message`
+**18 个高危工具**（必须白名单）：`shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync` `note_lesson` `clear_memory` `wake_user` `file_copy` `recall_message`
 
 ---
 
@@ -149,7 +149,7 @@
 | 场景 | 可用工具数 | 原因 |
 |---|---|---|
 | 私聊，你是管理员 | 全部（54 + 外部 MCP） | 权限全开 |
-| 私聊，你不在白名单 | 39 | 17 个高危工具被过滤 |
+| 私聊，你不在白名单 | 39 | 18 个高危工具被过滤 |
 | 群聊，你是管理员 | 54 | 群聊没额外限制 |
 | 群聊，你不在白名单 | 39 | 同上，且 `send_to_group` / `broadcast` 也用不了 |
 

@@ -133,7 +133,7 @@ function isBlockedIPv6(host) {
 }
 
 function assertHostAllowed(host) {
-  if (!host) throw new Error('网址里没有主机名')
+  if (!host) throw netError(NET_ERROR.INVALID_URL, '网址里没有主机名')
 
   if (
     BLOCKED_NAMES.includes(host) ||
@@ -246,7 +246,7 @@ export async function fetchPublic(rawUrl, init = {}, { maxRedirects = DEFAULT_MA
     try {
       next = new URL(location, current)
     } catch {
-      throw new Error(`重定向地址不合法：${location}`)
+      throw netError(NET_ERROR.BAD_REDIRECT, `重定向地址不合法：${location}`)
     }
 
     current = assertPublicUrl(next.toString())
@@ -254,9 +254,9 @@ export async function fetchPublic(rawUrl, init = {}, { maxRedirects = DEFAULT_MA
 
     // 转圈重定向直接掐掉
     if (visited.filter((item) => item === current.toString()).length > 1) {
-      throw new Error('重定向成了环，停止')
+      throw netError(NET_ERROR.BAD_REDIRECT, '重定向成了环，停止')
     }
   }
 
-  throw new Error(`重定向超过 ${maxRedirects} 次，停止`)
+  throw netError(NET_ERROR.BAD_REDIRECT, `重定向超过 ${maxRedirects} 次，停止`)
 }

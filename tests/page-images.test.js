@@ -157,9 +157,32 @@ test('DNS 解析失败不丢图，只有指向内网才丢', async () => {
       error.code = NET_ERROR.BLOCKED_ADDRESS
       throw error
     }
-    if (String(raw).includes('cdn-a')) throw new Error('域名解析失败：cdn-a.example')
+    if (String(raw).includes('cdn-a')) {
+      const error = new Error('域名解析失败：cdn-a.example')
+      error.code = NET_ERROR.DNS_FAILED
+      throw error
+    }
   }
 
   const images = await pageImagesOf(BASE, { fetchImpl, resolveImpl })
   assert.deepEqual(images, ['https://cdn-a.example/x.jpg'], '解析失败的保留，指向内网的丢掉')
+})
+
+test('未知错误码也一律丢掉（fail-closed，不是 fail-open）', async () => {
+  const fetchImpl = async () =>
+    new Response(
+      ['<img src="https://ok.example/a.jpg">', '<img src="https://weird.example/b.jpg">'].join('\n'),
+    )
+
+  // weird 抛一个将来才会有的错误码：默认放行的写法会把它放过，fail-closed 不会
+  const resolveImpl = async (raw) => {
+    if (String(raw).includes('weird')) {
+      const error = new Error('something new')
+      error.code = 'SOME_FUTURE_CODE'
+      throw error
+    }
+  }
+
+  const images = await pageImagesOf(BASE, { fetchImpl, resolveImpl })
+  assert.deepEqual(images, ['https://ok.example/a.jpg'], '只有明确 DNS 失败才保留，未知错误一律丢')
 })

@@ -21,7 +21,7 @@
 
 | 层 | 职责 |
 |---|---|
-| **权限表** | 17 个高危工具只对白名单开放，不在名单里的人连工具名都看不见 |
+| **权限表** | 18 个高危工具只对白名单开放，不在名单里的人连工具名都看不见 |
 | **bwrap 沙箱** | 只读根、只有 `tmp/` 可写、恒定断网、密钥目录挂空、自检不过就拒绝执行 |
 | **出网校验** | 内网和云元数据段一律拒，重定向逐跳复核，域名解析结果也过一遍 |
 
@@ -186,7 +186,7 @@ sequenceDiagram
 
 ### 权限边界
 
-57 个工具里有 17 个是高危的，只对 `ADMIN_OPENIDS` 白名单开放（私聊群聊都算）：
+57 个工具里有 18 个是高危的，只对 `ADMIN_OPENIDS` 白名单开放（私聊群聊都算）：
 
 `shell` `run_script` `write_file` `edit_file` `write_skill` `install_package` `add_mcp` `start_task` `schedule_task` `restart_self` `send_to_group` `broadcast` `git_sync` `note_lesson` `clear_memory` `wake_user`
 
@@ -615,7 +615,7 @@ iptables -A OUTPUT -d 100.100.100.200 -j REJECT
 
 这个项目默认把能力开到很大（尤其是群聊里），**上生产前务必按需收紧**：
 
-- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`edit_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`、`restart_self`、`send_to_group`、`broadcast`、`git_sync` 这 17 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
+- **高危工具走白名单**：`shell`、`run_script`、`write_file`、`edit_file`、`write_skill`、`install_package`、`add_mcp`、`start_task`、`schedule_task`、`restart_self`、`send_to_group`、`broadcast`、`git_sync`、`note_lesson`、`clear_memory`、`wake_user`、`file_copy`、`recall_message` 这 18 个只对 `ADMIN_OPENIDS` 里的人开放（私聊、群聊都算）。
   没配白名单时：群里一律禁用，私聊放开。**一定要配**——否则任何 QQ 用户私聊机器人都能执行命令。
   机器人里发 `/id` 就能拿到自己的 openid。
 - `start_task` / `schedule_task` / `restart_self` 也算高危：前两个能间接调起子 agent 和定时任务去执行命令，后一个能重启服务，不挡住白名单就是摆设
