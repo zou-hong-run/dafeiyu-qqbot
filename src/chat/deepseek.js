@@ -1741,6 +1741,9 @@ ${baseContent}`
 
   const speaker = { scope, actorName, isAdmin: isAdmin(scope, actor) }
 
+  // 上下文预算：预压缩和工具循环都要用，必须在使用之前声明
+  const budget = Math.floor(env.contextWindowTokens * env.contextBudgetRatio)
+
   const buildMessages = () => {
     const hist = history(sessionKey)
     const elision = elisionInfo(sessionKey)
@@ -1830,8 +1833,6 @@ ${baseContent}`
   const callHistory = []
   // 模型收尾失败时，别让工具查到的内容跟着丢掉——直接把最后一条真实结果交给用户
   let lastToolSnapshot = null
-  const budget = Math.floor(env.contextWindowTokens * env.contextBudgetRatio)
-
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
     messages[0] = { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) }
 
