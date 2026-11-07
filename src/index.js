@@ -20,7 +20,7 @@ import { flushKnowledge, rebuildAll } from './memory/knowledge.js'
 import { flushSituations } from './memory/situations.js'
 import { runBackup } from './ops/backup.js'
 import { flushTodos } from './chat/todos.js'
-import { cleanupIncoming, describeInbound, extractInbound } from './channel/incoming.js'
+import { cleanupIncoming, describeInbound, extractInbound, labelInbound } from './channel/incoming.js'
 import { resolveChoice, resolveChoiceById } from './chat/choices.js'
 import { mergeMessage } from './chat/merge.js'
 import { recentGroupContext } from './channel/group-context.js'
@@ -368,7 +368,30 @@ async function warnIfAd(event, text) {
 }
 
 async function handleGroupAll(event) {
-  const text = (event.content ?? '').trim()
+  const rawText = (event.content ?? '').trim()
+
+  // 纯附件（图/语音/文件）以前在这里被直接扔掉：图片既不保存也进不了识图通道，
+  // 语音连平台给的识别文字都白给了。现在先解析一遍——
+  // 语音用识别文字当正文继续往下走（能被听见、也能触发名字/自动接话），
+  // 图片文件仍然不主动接话（免得刷屏），但记录里能看出到底发了什么。
+  let text = rawText
+  if (!text) {
+    const inbound = extractInbound(event)
+    const spoken = inbound
+      .map((item) => item.asrText)
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+
+    if (spoken) {
+      text = spoken
+      console.log(`[群附件] ${event.group_id?.slice(0, 12)}… 纯语音 ${inbound.length} 个，用识别文字继续处理`)
+    } else if (inbound.length > 0) {
+      recordGroupMessage(event, labelInbound(event))
+      return
+    }
+  }
+
   recordGroupMessage(event, text || '[附件]')
   if (!text) return
 
@@ -442,7 +465,7 @@ async function handleGroupAll(event) {
 async function handleGroupAt(event, overrideText = '') {
   const raw = (event.content ?? '').trim()
   const text = (overrideText || raw).trim()
-  recordGroupMessage(event, raw || '[附件]')
+  recordGroupMessage(event, raw || labelInbound(event) || '[附件]')
 
   if (await handleQuietCommand(event, text)) return
 
@@ -521,7 +544,7 @@ onMessage((event) => {
 
         for (const item of fresh) {
           markReplied(item.message_id)
-          recordGroupMessage(item, (item.content ?? '').trim() || '[附件]')
+          recordGroupMessage(item, (item.content ?? '').trim() || labelInbound(item) || '[附件]')
         }
 
         const last = fresh[fresh.length - 1]

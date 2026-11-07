@@ -102,6 +102,22 @@ export function extractInbound(event) {
   return items
 }
 
+// 群聊记录用的短描述：不下载、不占带宽，只把「发了什么」写清楚，
+// 免得群记录里全是笼统的 [附件]——语音的识别文字在这里也顺手留下。
+export function labelInbound(event) {
+  const items = extractInbound(event)
+  if (items.length === 0) return ''
+
+  return items
+    .map((item) => {
+      const tag = `[${KIND_LABEL[item.type] ?? '附件'}]`
+      if (item.asrText) return `${tag} ${item.asrText}`
+      if (item.type === 'file' && item.name) return `${tag} ${item.name}`
+      return tag
+    })
+    .join(' ')
+}
+
 function safeName(item, index) {
   const raw = item.name || ''
   const ext = path.extname(raw).toLowerCase().slice(0, 6)
