@@ -506,6 +506,27 @@ function attachmentKind(contentType) {
   return 'file'
 }
 
+// 群聊里附件不一定只出现在顶层 attachments：引用消息时挂在 msg_elements[].attachments 上，
+// 平台不同版本也可能只给 raw。三处都翻一遍，按 url 去重，缺一处就少一张图。
+function collectAttachments(msg) {
+  const list = []
+  const push = (arr) => {
+    if (Array.isArray(arr)) for (const att of arr) if (att && att.url) list.push(att)
+  }
+
+  push(msg?.attachments)
+  push(msg?.raw?.attachments)
+  for (const el of msg?.raw?.msg_elements ?? []) push(el?.attachments)
+
+  const seen = new Set()
+  return list.filter((att) => {
+    const url = String(att.url)
+    if (seen.has(url)) return false
+    seen.add(url)
+    return true
+  })
+}
+
 function toMessageElements(attachments) {
   if (!Array.isArray(attachments)) return []
   return attachments
@@ -528,6 +549,23 @@ export function toLegacyEvent(msg) {
   const target = msg.replyTarget
   if (!target) return null
 
+  const inboundAttachments = collectAttachments(msg)
+  if (inboundAttachments.length > 0) {
+    console.log(
+      `[入站] ${isGroup ? '群' : '私聊'} 附件 ${inboundAttachments.length} 个：${inboundAttachments
+        .map((att) => att.content_type)
+        .join(',')}`,
+    )
+  } else {
+    // 附件 0 个也要留一行：正文空或只有占位符时，光看「没下载到」分不清是平台没推
+    // 还是我这边丢了。把正文和 raw 的键打出来，下次直接能判断。
+    console.warn(
+      `[入站] ${isGroup ? '群' : '私聊'} 附件 0 个，正文「${String(msg.content ?? '').slice(0, 20)}」，raw 键：${Object.keys(
+        msg.raw ?? {},
+      ).join('/')}`,
+    )
+  }
+
   const event = {
     message_type: isGroup ? 'group' : 'private',
     message_id: msg.messageId,
@@ -538,8 +576,8 @@ export function toLegacyEvent(msg) {
     msg_idx: msg.msgIdx,
     ref_msg_idx: msg.refMsgIdx,
     // 业务层 extractInbound 读的是这个数组；attachments 保留原始报文，排查用
-    message: toMessageElements(msg.attachments),
-    attachments: msg.attachments ?? [],
+    message: toMessageElements(inboundAttachments),
+    attachments: inboundAttachments,
     sender: {
       user_name: msg.senderName ?? '',
       card: msg.senderName ?? '',
