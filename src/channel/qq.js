@@ -495,6 +495,31 @@ export function openPrivateStream(userId, msgId) {
  * 把官方入站消息翻译成业务层用的 event 形状。
  * 返回 null 表示这条不处理（频道、频道私信、机器人自己的消息）。
  */
+// SDK 给的是 attachments 数组（content_type + url + filename），业务层的入站逻辑读的是
+// event.message 里的 [{ type, data: { url, name, size } }]。这层翻译以前漏了，
+// 结果 extractInbound 永远拿到空数组：群里发的图、语音、文件全丢，只剩下正文。
+function attachmentKind(contentType) {
+  const ct = String(contentType ?? '').toLowerCase()
+  if (ct.startsWith('image')) return 'image'
+  if (ct.startsWith('video')) return 'video'
+  if (ct.startsWith('audio') || ct === 'voice') return 'voice'
+  return 'file'
+}
+
+function toMessageElements(attachments) {
+  if (!Array.isArray(attachments)) return []
+  return attachments
+    .filter((att) => att && att.url)
+    .map((att) => ({
+      type: attachmentKind(att.content_type),
+      data: {
+        url: String(att.url),
+        name: String(att.filename ?? '').slice(0, 120),
+        size: Number(att.size) || 0,
+      },
+    }))
+}
+
 export function toLegacyEvent(msg) {
   if (!msg || (msg.kind !== 'group' && msg.kind !== 'c2c')) return null
   if (msg.senderIsBot) return null
@@ -512,6 +537,8 @@ export function toLegacyEvent(msg) {
     message_scene: msg.messageScene,
     msg_idx: msg.msgIdx,
     ref_msg_idx: msg.refMsgIdx,
+    // 业务层 extractInbound 读的是这个数组；attachments 保留原始报文，排查用
+    message: toMessageElements(msg.attachments),
     attachments: msg.attachments ?? [],
     sender: {
       user_name: msg.senderName ?? '',
