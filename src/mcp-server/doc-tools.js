@@ -64,7 +64,7 @@ async function loadLib(name) {
     optionalLibs.set(name, lib)
     return lib
   } catch {
-    optionalLibs.set(name, null)
+    // 失败不要缓存：以前存了 null，装上包也得重启才能用，白折腾一轮
     return null
   }
 }
