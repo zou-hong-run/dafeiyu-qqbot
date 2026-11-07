@@ -54,10 +54,21 @@ test('媒体段单独收集，不进 content', () => {
   assert.equal(result.media[0].type, 'image')
 })
 
-test('markdown 图片：公网地址和已有引用不动', async () => {
+test('markdown 图片：外链补默认宽度，已上传的引用不动', async () => {
   const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
   const text = '![图](https://a.com/x.png) 和 ![图2](qqbot-media://image/v1/abc)'
   // 单测不真做 DNS
+  const checkUrl = async () => {}
+  // 平台按原图尺寸渲染会糊满屏，外链图统一补 #320px；qqbot-media 已经是发出去的引用，不再动
+  assert.equal(
+    await rewriteMarkdownImages(text, undefined, { checkUrl }),
+    '![图 #320px](https://a.com/x.png) 和 ![图2](qqbot-media://image/v1/abc)',
+  )
+})
+
+test('markdown 图片：自己写了宽度就尊重它', async () => {
+  const { rewriteMarkdownImages } = await import('../src/channel/qq.js')
+  const text = '![图 #500px](https://a.com/x.png)'
   const checkUrl = async () => {}
   assert.equal(await rewriteMarkdownImages(text, undefined, { checkUrl }), text)
 })

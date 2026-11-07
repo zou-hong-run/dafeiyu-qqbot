@@ -53,6 +53,8 @@ function rememberSent(event, result, payload) {
 
 export function clip(text) {
   if (text.length <= env.replyMaxChars) return text
+  // 走到这里说明分段环节漏了：正常情况下 sendLongReply 传进来的每段都该在上限内
+  console.warn(`[发送] 单条 ${text.length} 字超过上限 ${env.replyMaxChars}，被截断`)
   return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
 }
 

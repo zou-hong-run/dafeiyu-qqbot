@@ -137,6 +137,16 @@ const IMAGE_MIME = {
 }
 const MAX_MATERIAL_BYTES = 10 * 1024 * 1024
 const MD_IMAGE = /!\[([^\]]*)\]\(([^)\s]+)\)/g
+// platform 支持 ![alt #宽px #高px](url)。不指定的话按原图尺寸渲染，
+// 一张 1200px 宽的图在手机上会糊满整屏，正文全被挤走。
+const DEFAULT_IMAGE_WIDTH = 320
+
+/** alt 里已经写了 #320px 就尊重它，没写才补默认宽度 */
+function withSize(alt) {
+  const text = String(alt ?? '').trim()
+  if (/#\d+px/i.test(text)) return text
+  return text ? `${text} #${DEFAULT_IMAGE_WIDTH}px` : `#${DEFAULT_IMAGE_WIDTH}px`
+}
 
 async function uploadImageAsset(absPath) {
   // 这条路径也可能是模型从用户原文里抄来的，黑名单必须在这里再判一次：
@@ -210,7 +220,10 @@ export async function rewriteMarkdownImages(
       } catch {
         console.warn(`[qq] markdown 里这张外链图地址不可用，已去掉：${src.slice(0, 60)}`)
         result = result.replace(full, '')
+        continue
       }
+      // 地址没问题：补上宽度再发出去
+      result = result.replace(full, `![${withSize(alt)}](${src})`)
       continue
     }
 
@@ -220,7 +233,7 @@ export async function rewriteMarkdownImages(
 
     try {
       const url = await uploadImageAsset(abs)
-      result = result.replace(full, `![${alt}](${url})`)
+      result = result.replace(full, `![${withSize(alt)}](${url})`)
     } catch (error) {
       console.warn(`[qq] markdown 图片上传失败，已去掉这张：${String(error?.message ?? error).slice(0, 80)}`)
       result = result.replace(full, '')
