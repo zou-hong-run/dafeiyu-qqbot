@@ -59,6 +59,28 @@ function buildInfo() {
     return 'v?'
   }
 }
+// 群里发的图：不 @ 我时只存不喂模型（免得每条群图都烧一次额度），
+// 但人常常是「先发图、下一句才 @ 我问这是什么」——所以时间窗内的群图先留着，
+// 真被叫到时再补进视觉通道，不然永远只能回一句「我看不到」。
+const GROUP_IMAGE_TTL_MS = 10 * 60 * 1000
+const recentGroupImages = new Map()
+
+function rememberGroupImages(groupId, files) {
+  if (!groupId || !Array.isArray(files) || files.length === 0) return
+  recentGroupImages.set(groupId, { files: files.slice(0, 4), ts: Date.now() })
+}
+
+function recentGroupImagesOf(groupId) {
+  if (!groupId) return []
+  const hit = recentGroupImages.get(groupId)
+  if (!hit) return []
+  if (Date.now() - hit.ts > GROUP_IMAGE_TTL_MS) {
+    recentGroupImages.delete(groupId)
+    return []
+  }
+  return hit.files
+}
+
 const dataDir = path.join(projectRoot, 'data')
 const auditFile = path.join(dataDir, 'audit.log')
 
@@ -210,6 +232,17 @@ async function handleMessage(event, trigger = 'at', overrideText = '') {
         input = `${input}
 
 （对方发了 ${inbound.length} 个附件，但下载失败了：${error?.message ?? error}）`
+      }
+    }
+
+    // 这条消息自己没带图，但群里刚发过图（不 @ 我时只存了、没喂模型）：
+    // 时间窗内被叫到就把那张图一起送进视觉通道，
+    // 否则「这图里是什么」这种追问永远只能答「我看不到」
+    if (images.length === 0 && scope === 'group') {
+      const recent = recentGroupImagesOf(event.group_id)
+      if (recent.length > 0) {
+        images = recent
+        input = `${input}\n\n（对方前几条消息在群里发了 ${recent.length} 张图，图片已附上，可以直接看）`
       }
     }
 
@@ -391,6 +424,7 @@ async function handleGroupAll(event) {
       // 不存的话群里发过的图我永远看不到——平台给的附件地址会过期，事后想补看也补不回来。
       const saved = await describeInbound(inbound, sessionKeyOf(event)).catch(() => null)
       const files = saved?.images ?? []
+      rememberGroupImages(event.group_id, files)
       recordGroupMessage(
         event,
         `${labelInbound(event)}${files.length > 0 ? `（已存 ${files.join(' ')}）` : ''}`,
