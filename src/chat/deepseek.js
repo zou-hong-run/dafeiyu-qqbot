@@ -20,6 +20,7 @@ import {
   recallLongTerm,
   takeOverflow,
   restoreOverflow,
+  historyTokens,
   setMidTerm,
   midTerm,
   history,
@@ -169,10 +170,15 @@ const LOCAL_TOOLS = [
     function: {
       name: 'todo_write',
       description:
-        '维护当前任务清单。三步以上的活先拆成清单再动手，每做完一项就更新状态。' +
-        '每次要传完整清单（覆盖旧的），不是只传改动的那一项。' +
-        'status 只有三种：pending（还没做）、in_progress（正在做，同一时间最多一项）、done（做完）。' +
-        '清单会挂在每一轮的提示词里，你自己也会看到进度，所以别让它和实际对不上。全部做完传空数组清空。',
+        '维护当前任务清单，多步的活靠它防止跑偏。' +
+        '**什么时候用**：三步以上、要跨多轮工具调用、或接到一段有多个要求的新指令时。' +
+        '**什么时候别用**：一两步就能答完的、纯闲聊、记录也不增加任何清晰度的，别建清单——建了又不管比不建更糟。' +
+        '**怎么用**：每次传完整清单（覆盖旧的），不是只传改动的那一项；不传 items 表示只查看当前清单、不做修改；传空数组清空。' +
+        'status 只有三种：pending / in_progress / done。开工时把**恰好一项**标成 in_progress，做完立刻标 done，别攒到最后一起改。' +
+        '**不许假完成**：测试还红着、实现只做了一半、有没解决的报错、要读的文件没找到——这些情况都不能标 done。' +
+        '卡住了就把那一项留在 in_progress，或者加一条 pending 写清「必须先解决什么」。' +
+        '**别为了更新而更新**：没有实质进展就别再调一次，清单没变就不用动。' +
+        '清单会挂在每一轮的提示词里，你自己看得到进度，别让它和实际对不上。全部做完传空数组清空。',
       parameters: {
         type: 'object',
         properties: {
@@ -1732,13 +1738,29 @@ ${baseContent}`
 
   const speaker = { scope, actorName, isAdmin: isAdmin(scope, actor) }
 
-  const messages = [
+  const buildMessages = () => [
     { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) },
     ...history(sessionKey),
     imageParts.length > 0
       ? { role: 'user', content: [{ type: 'text', text: userContent }, ...imageParts] }
       : { role: 'user', content: userContent },
   ]
+
+  const messages = buildMessages()
+
+  // 发请求前先看预算：超了先把早期对话压成摘要，而不是等接口回 context length 错误再补救——
+  // 那次失败请求要白等十几秒，群里看到的就是「卡住不动」。
+  const preBudget = Math.floor(budget * 0.85)
+  if (historyTokens(sessionKey) > preBudget) {
+    const dropped = takeOverflow(sessionKey, Math.floor(budget / 3))
+    if (dropped && dropped.length > 0) {
+      console.log(`[上下文] 接近上限，先压缩 ${dropped.length} 条再请求`)
+      await summarize(sessionKey, dropped)
+      // 压缩后重新组装：摘要内容可能变了，历史也短了
+      messages.length = 0
+      messages.push(...buildMessages())
+    }
+  }
 
   // 本地工具也要过权限：start_task / schedule_task 这类高危的，不配白名单就别让模型看见
   const localTools = LOCAL_TOOLS.filter(
