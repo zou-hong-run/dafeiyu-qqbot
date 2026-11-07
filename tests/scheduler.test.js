@@ -219,3 +219,17 @@ test('改完时间不会立刻补发一条', () => {
   assert.ok(updated.lastRunAt > (before ?? 0), 'lastRunAt 要挪到现在，补跑逻辑才不会用新 cron 立刻补一条')
   removeSchedule(task.id, 'group:gX', { actor: 'user-a', isAdmin: true })
 })
+
+test('定时任务要把 sessionKey 传给 agent（否则群工具全部报「只能在群里用」）', () => {
+  // 工具层靠 sessionKey 是否以 group: 开头决定注入 group_id；
+  // timers.js 不传时 runTaskAgent 里是默认的 'worker'，读群记录、抽签全废。
+  const source = fs.readFileSync(
+    path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '../src/app/timers.js'),
+    'utf8',
+  )
+  const start = source.indexOf('return runTaskAgent({')
+  assert.ok(start > 0, 'timers.js 里应该有 runTaskAgent 调用')
+
+  const body = source.slice(start, start + 900)
+  assert.match(body, /^\s+sessionKey,\s*$/m, 'runTaskAgent 的参数里要有 sessionKey')
+})

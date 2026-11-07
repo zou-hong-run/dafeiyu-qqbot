@@ -41,6 +41,9 @@ export async function runScheduledTask(task) {
     taskPrompt: task.prompt,
     scope,
     actor: 'scheduler',
+    // 这个必须传：工具层靠「sessionKey 以 group: 开头」决定要不要自动注入 group_id。
+    // 不传的话它默认是 'worker'，所有读群记录的工具都会报「只能在群里用」。
+    sessionKey,
     // 必须显式告诉模型这条任务跑在群里还是私聊，否则它会自己猜，猜错就说「当前是私聊」
     environment:
       task.target.type === 'group'
