@@ -740,7 +740,7 @@ async function shutdown(signal) {
       if (synced.skipped) {
         console.log(`[同步] 跳过：${synced.reason}`)
       } else if (synced.pushed) {
-        console.log(`[同步] 已提交并推送 ${synced.files} 个文件（${synced.branch}）`)
+        console.log(`[同步] 已提交并推送 ${synced.files} 个文件到 ${synced.branch}（备份分支，main 不受影响；要进 main 就说「提交并推送」）`)
       } else {
         console.warn(`[同步] 已本地提交 ${synced.files} 个文件，但推送失败：${synced.reason}`)
       }
@@ -1049,7 +1049,7 @@ try {
           return
         }
         if (result.pushed) {
-          console.log(`[同步] 定时提交并推送 ${result.files} 个文件`)
+          console.log(`[同步] 定时提交并推送 ${result.files} 个文件到 ${result.branch}（备份分支）`)
           return
         }
         console.warn(`[同步] 定时提交 ${result.files} 个文件，推送失败：${result.reason}`)

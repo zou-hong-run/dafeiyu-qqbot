@@ -106,7 +106,21 @@ async function assertSafeStaged() {
   return files
 }
 
-export async function commitAndPush(reason = 'auto sync') {
+/**
+ * 自动同步推到哪个分支。
+ *
+ * 以前是直接推 main：模型改了 src/*.js → 30 分钟后自动进 main → CI 冒烟会执行它。
+ * 现在自动同步只推这个备份分支，main 只有人主动 push 才会动。
+ * 备份照旧（GitHub 上有完整快照），只是不再自动落到生产分支上。
+ */
+const BACKUP_BRANCH = 'auto-backup'
+
+/**
+ * 提交并推送。
+ * @param {string} reason 提交信息前缀
+ * @param {{ toMain?: boolean }} options toMain=true 才推当前分支（人工触发）；默认推备份分支
+ */
+export async function commitAndPush(reason = 'auto sync', { toMain = false } = {}) {
   if (!(await isRepo())) {
     return { ok: true, skipped: true, reason: '服务器上不是 git 仓库，改动只留在本机' }
   }
@@ -142,9 +156,29 @@ export async function commitAndPush(reason = 'auto sync') {
 
   await git(['commit', '-m', `${subject}\n\n${body}`])
 
-  const pushed = await git(['push', 'origin', 'HEAD'], { allowFail: true })
+  // 自动同步走备份分支：用 force-with-lease 覆盖，它只是一份快照，
+  // 保留历史没有意义；人工 push 走当前分支，和平时手敲 git push 一样。
+  const pushArgs = toMain
+    ? ['push', 'origin', 'HEAD']
+    : ['push', 'origin', `HEAD:refs/heads/${BACKUP_BRANCH}`, '--force-with-lease']
+  const target = toMain ? status.branch : BACKUP_BRANCH
+
+  const pushed = await git(pushArgs, { allowFail: true })
   if (pushed.ok) {
-    return { ok: true, committed: true, pushed: true, files: files.length, branch: status.branch }
+    return { ok: true, committed: true, pushed: true, files: files.length, branch: target, toMain }
+  }
+
+  // 推 main 被拒（远端有新提交）：拉一把再试一次。备份分支不适用这套——
+  // 它本来就靠 force 覆盖，失败多半是网络或权限问题，重试也一样。
+  if (!toMain) {
+    return {
+      ok: false,
+      committed: true,
+      pushed: false,
+      files: files.length,
+      branch: target,
+      reason: `已本地提交，推备份分支失败：${pushed.out.slice(0, 200)}`,
+    }
   }
 
   // 推送被拒（远端有新提交）：拉一把再试一次，冲突就放手，别把本地改动搞乱
@@ -166,6 +200,7 @@ export async function commitAndPush(reason = 'auto sync') {
     pushed: retry.ok,
     files: files.length,
     branch: status.branch,
+    toMain: true,
     reason: retry.ok ? '' : `已本地提交，推送仍失败：${retry.out.slice(0, 200)}`,
   }
 }

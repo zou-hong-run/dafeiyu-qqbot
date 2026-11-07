@@ -45,11 +45,13 @@ export function gitSyncFor() {
     if (action === 'status') return describeStatus()
 
     if (action === 'push') {
+      // 这是人主动要求的推送：直接进当前分支（main），和手敲 git push 一样
       const result = await commitAndPush(
-        reason ? `auto sync: ${String(reason).slice(0, 60)}` : 'auto sync: 手动推送',
+        reason ? `manual sync: ${String(reason).slice(0, 60)}` : 'manual sync: 手动推送',
+        { toMain: true },
       )
       if (result.skipped) return `没有需要同步的改动（${result.reason}）`
-      if (result.pushed) return `已提交并推送 ${result.files} 个文件到 ${result.branch}`
+      if (result.pushed) return `已提交并推送 ${result.files} 个文件到 ${result.branch}（main 会触发 CI）`
       return `已本地提交 ${result.files} 个文件，但推送失败：${result.reason}`
     }
 
