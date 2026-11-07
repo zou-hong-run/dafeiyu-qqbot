@@ -8,6 +8,7 @@ import {
   pruneToolOutput,
   stripToolMarkup,
   fallbackFromTool,
+  looksLikeInlineOptions,
 } from '../src/chat/text-utils.js'
 
 // 纯文本处理，不依赖 env 和网络，CI 上可直接跑
@@ -130,4 +131,31 @@ test('超长结果截断，不把上下文撑爆', () => {
 test('完全没工具输出时退回通用话术', () => {
   assert.match(fallbackFromTool(null), /换个问法/)
   assert.match(fallbackFromTool({ name: 'x', text: '   ' }), /换个问法/)
+})
+
+// 诊断用：模型有时在正文里列「1. 2. 3.」让人选，而不是调 ask_choice。
+// 只记日志不改输出，所以这个判定必须保守——误判成选项会去翻一堆正常回答。
+test('认出「正文里列选项」的形态', () => {
+  assert.equal(looksLikeInlineOptions('选哪个？\n1. 继续\n2. 停下'), true)
+  assert.equal(looksLikeInlineOptions('1. 甲\n2. 乙'), true)
+  assert.equal(
+    looksLikeInlineOptions('第 5 题：CSS 的 position 相对于什么？\n1. 已定位祖先\n2. 窗口\n3. 父元素\n4. body'),
+    true,
+  )
+})
+
+test('步骤、问题清单、长回答都不算选项', () => {
+  assert.equal(
+    looksLikeInlineOptions('改完了，步骤是：\n1. 先备份\n2. 再改文件\n3. 最后重启\n\n需要我继续吗'),
+    false,
+    '带「步骤」的是流程',
+  )
+  assert.equal(
+    looksLikeInlineOptions('这段代码有几个问题：\n1. 变量没声明\n2. 循环没退出条件\n3. 异常没捕获\n\n我先改前两个。'),
+    false,
+    '带「问题」的是清单',
+  )
+  assert.equal(looksLikeInlineOptions('今天天气不错，出门记得带伞。'), false)
+  assert.equal(looksLikeInlineOptions(''), false)
+  assert.equal(looksLikeInlineOptions(null), false)
 })

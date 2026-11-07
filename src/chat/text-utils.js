@@ -124,3 +124,27 @@ export function fallbackFromTool(snapshot) {
 
 ${clipped}`
 }
+
+/**
+ * 回复看起来像「1. 选项甲 / 2. 选项乙」这种待选清单。
+ *
+ * 用来诊断「该用 ask_choice 却只写了文字」的情况。只判形态，不猜语义：
+ * 编号行占了大半、又没有后续段落，才认为是选项。
+ */
+export function looksLikeInlineOptions(text) {
+  const raw = String(text ?? '')
+  const lines = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length < 2 || lines.length > 12) return false
+
+  // 带这些词的编号列表是步骤、流程、问题清单，不是在让人选
+  if (/步骤|流程|做法|计划|顺序|操作方法|问题|原因|注意/.test(raw)) return false
+
+  const numbered = lines.filter((line) => /^[1-5][.、)）]\s*\S/.test(line))
+  if (numbered.length < 2 || numbered.length > 5) return false
+
+  // 编号行之外最多一两行（题干或收尾），否则就是正常的长回答里带了个列表
+  return lines.length - numbered.length <= 2
+}

@@ -8,7 +8,7 @@ import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
-import { SPILL_HEAD, SPILL_LIMIT, fallbackFromTool, finalizeReply, looksLikeActionRequest, pruneToolOutput } from './text-utils.js'
+import { SPILL_HEAD, SPILL_LIMIT, fallbackFromTool, finalizeReply, looksLikeActionRequest, looksLikeInlineOptions, pruneToolOutput } from './text-utils.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { resetSession } from './session-reset.js'
 import { readSkill, skillsPrompt } from '../skills/skills.js'
@@ -1833,6 +1833,7 @@ ${baseContent}`
   const callHistory = []
   // 模型收尾失败时，别让工具查到的内容跟着丢掉——直接把最后一条真实结果交给用户
   let lastToolSnapshot = null
+  let usedChoiceTool = false
   outer: for (let round = 0; round < env.maxToolRounds; round += 1) {
     messages[0] = { role: 'system', content: buildSystemPrompt(sessionKey, userText, speaker) }
 
@@ -2032,6 +2033,7 @@ ${userText}`
       }
 
       lastToolSnapshot = { name: toolName, text: String(result ?? '').trim() }
+      if (toolName === 'ask_choice') usedChoiceTool = true
 
       messages.push({ role: 'tool', tool_call_id: call.id, content: result })
 
@@ -2064,6 +2066,13 @@ ${userText}`
 
   if (!answer) {
     answer = (await finalize(sessionKey)) || fallbackFromTool(lastToolSnapshot)
+  }
+
+  // 只记日志、不改输出：模型有时会在正文里列「1. 2. 3.」让人选，
+  // 而不是调 ask_choice。改输出要猜它是不是真的在问选项，风险大；
+  // 先把这个频率量出来，再决定要不要硬拦。
+  if (looksLikeInlineOptions(answer) && !usedChoiceTool) {
+    console.warn(`[选择题] ${sessionKey} 回复里有编号选项但没调 ask_choice：${answer.slice(0, 60)}`)
   }
 
   appendTurn(sessionKey, userText, answer, { name: speaker.actorName })
