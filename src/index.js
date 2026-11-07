@@ -417,7 +417,10 @@ async function handleGroupAll(event) {
       .trim()
 
     if (spoken) {
-      text = spoken
+      // 必须标上 [语音]：不标的话，进去的记录和上下文跟打字一模一样，
+      // 模型会把用户语音说的话当成他自己敲的字，然后反问「听不到语音」。
+      text = `[语音] ${spoken}`
+      event.content = text
       console.log(`[群附件] ${event.group_id?.slice(0, 12)}… 纯语音 ${inbound.length} 个，用识别文字继续处理`)
     } else if (inbound.length > 0) {
       // 诊断：群里语音一直「只有文件没有文字」，到底是平台没给 asr_text，

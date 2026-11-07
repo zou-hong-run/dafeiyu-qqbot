@@ -351,3 +351,4 @@ QQ 机器人。接的是 **QQ 官方开放平台 Bot API**，不经过任何第�
 - 想给机器人加「戳一戳」或「贴表情」触发 → QQ 官方 Bot API 不推 poke；SDK 的 GatewayEvent 里只有 message 和 interaction 单独抛出，其余全进 rawEvent，实测日志 0 条 → 别再查了——官方 Bot API 这条路收不到 poke，贴表情功能也已下架；能收戳一戳的只有 NapCat/Lagrange 那类第三方协议端，不适合换架构
 - 群里/私聊发图、语音、文件，业务层一律报「收件目录没有」，附件全丢，只剩正文 → SDK 把附件放在 msg.attachments（content_type/url/filename/size），而 extractInbound 读的是 event.message，toLegacyEvent 从来没给它赋过值 → 在 src/channel/qq.js 的 toLegacyEvent 里加 message: toMessageElements(msg.attachments) 做翻译层；语音的 asr_refer_text 要一起带下去，有识别文字就别再说「听不到语音」
 - 群里连发多张图，好几轮都只拿到「[附件]」占位，识图通道里没有画面，但日志显示附件已收到、文件也落到了 downloads/incoming/ → 附件保存到磁盘和送进模型视觉通道是两条独立链路；只有当提示词里把该图片作为图片附件真正附上时才看得见，纯文字路径写成「已存 downloads/...」的占位时模型看不到内容 → 先确认这轮提示词里图片是否真的以图片形式附上；只有文字路径就是没进视觉通道，直接说「看不到画面」并请对方私聊重发或口述，别反复让对方在群里重试，也别把原因编成文件过大或格式不支持
+- 群里语音是我说「平台没转文字、听不到内容」，但用户实际语音已带上转写文字 → 没查日志就凭印象下结论：日志里「[群附件] … 纯语音 N 个，用识别文字继续处理」出现即说明 asr_text 非空 → 被问「语音听不听得到」先 grep logs 的「纯语音」和 data/groups/*.jsonl 末几条，看到文字就是拿到了，别凭感觉答
