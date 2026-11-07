@@ -9,10 +9,11 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D20.12-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
+![群里玩问答游戏：出题带按钮，选项一行一个](image-1.png)
 ![选择题发成按钮，一行一个，文字完整可读](image-6.png)
 ![像素画、语音朗读、视频片段、联网搜索，全是现场跑出来的](image-7.png)
 ![搜热点新闻，配图直接嵌在正文里](image-8.png)
-![alt text](image.png)
+![发 /config 看当前配置：模型、记忆、工具数、群聊行为、内存与备份](image.png)
 
 > 动手能力（跑命令、发媒体、定时任务、自我扩展）看下面的[能力一览](#能力一览)。
 
