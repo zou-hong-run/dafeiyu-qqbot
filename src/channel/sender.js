@@ -248,7 +248,10 @@ export async function postMessage(event, body, { reference = true } = {}) {
     body.markdown.content = sanitizeText(body.markdown.content)
     // 正文里的本地图片（![说明](downloads/x.png)）要先传成素材才能被平台渲染。
     // 不在这层做的话，模型照 persona 写的图会原样显示成一行路径。
-    body.markdown.content = await rewriteMarkdownImages(body.markdown.content)
+    body.markdown.content = await rewriteMarkdownImages(body.markdown.content, undefined, {
+      // 群里平台不抓外链图，只能自己下回来转存成素材；私聊保持外链，省一次下载
+      uploadRemote: Boolean(event.group_id),
+    })
   }
 
   // 引用只能挂在被动回复上：主动消息没有可引用的会话上下文

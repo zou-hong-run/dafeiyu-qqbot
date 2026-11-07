@@ -161,9 +161,12 @@ async function uploadImageAsset(absPath) {
   const contentType = IMAGE_MIME[ext]
   if (!contentType) throw new Error(`markdown 图片只支持 png/jpeg/gif/webp：${path.basename(absPath)}`)
 
-  const buffer = fs.readFileSync(absPath)
+  return uploadImageBuffer(fs.readFileSync(absPath), path.basename(absPath), contentType)
+}
+
+async function uploadImageBuffer(buffer, fileName, contentType) {
   if (buffer.length > MAX_MATERIAL_BYTES) {
-    throw new Error(`图片超过 10MB：${path.basename(absPath)}`)
+    throw new Error(`图片超过 10MB：${fileName}`)
   }
 
   const md5 = crypto.createHash('md5').update(buffer).digest('hex')
@@ -171,7 +174,7 @@ async function uploadImageAsset(absPath) {
   const token = await bot.tokenManager.getAccessToken(env.appId, env.appSecret)
 
   const prepared = await bot.apiClient.request(token, 'POST', '/v2/media-images/prepare', {
-    file_name: path.basename(absPath),
+    file_name: fileName,
     file_size: buffer.length,
     content_type: contentType,
     md5,
@@ -196,6 +199,36 @@ async function uploadImageAsset(absPath) {
   return done.url
 }
 
+/** 外链图没有可靠的扩展名，按文件头判类型，别拿错的 content-type 去准备素材 */
+function sniffImageType(buffer) {
+  const head = buffer.slice(0, 12)
+  if (head[0] === 0x89 && head[1] === 0x50) return 'image/png'
+  if (head[0] === 0xff && head[1] === 0xd8) return 'image/jpeg'
+  if (head.slice(0, 3).toString() === 'GIF') return 'image/gif'
+  if (head.slice(8, 12).toString() === 'WEBP') return 'image/webp'
+  return ''
+}
+
+/**
+ * 外链图：私聊里平台会自己去抓，群聊不抓——群聊的 markdown 图片只认 qqbot-media:// 引用，
+ * 写个 https 地址过去文字照发，图就是空的（不报错，所以很难发现）。
+ * 这里把图下回本地再按素材上传；下不动就抛出，调用方退回外链，让私聊那条还能显示。
+ */
+async function uploadRemoteImage(url) {
+  const res = await fetchPublic(url, { method: 'GET', signal: AbortSignal.timeout?.(20000) })
+  if (!res.ok) throw new Error(`下载图片失败 HTTP ${res.status}`)
+
+  const declared = Number(res.headers.get('content-length') ?? 0)
+  if (declared > MAX_MATERIAL_BYTES) throw new Error('图片超过 10MB')
+
+  const buffer = Buffer.from(await res.arrayBuffer())
+  const contentType = sniffImageType(buffer)
+  if (!contentType) throw new Error('下载回来的不是 png/jpeg/gif/webp')
+
+  const ext = Object.keys(IMAGE_MIME).find((key) => IMAGE_MIME[key] === contentType) ?? '.jpg'
+  return uploadImageBuffer(buffer, `remote-${Date.now()}${ext}`, contentType)
+}
+
 /**
  * 把 markdown 里的本地图片路径换成 qqbot-media:// 引用。
  * 已经是 http / qqbot-media 的原样保留；读不到或上传失败就把那一张去掉，
@@ -204,7 +237,7 @@ async function uploadImageAsset(absPath) {
 export async function rewriteMarkdownImages(
   text,
   baseDir = projectRoot,
-  { checkUrl = assertPublicUrlResolved } = {},
+  { checkUrl = assertPublicUrlResolved, uploadRemote = false } = {},
 ) {
   const source = String(text ?? '')
   if (!source.includes('![')) return source
@@ -224,8 +257,21 @@ export async function rewriteMarkdownImages(
         result = result.replace(full, '')
         continue
       }
-      // 地址没问题：补上宽度再发出去
-      result = result.replace(full, `![${withSize(alt)}](${src})`)
+      // 地址没问题。群聊必须转存成素材才有图（平台群里不抓外链），
+      // 私聊平台自己会抓，就不用多花时间下载上传了。
+      if (!uploadRemote) {
+        result = result.replace(full, () => `![${withSize(alt)}](${src})`)
+        continue
+      }
+
+      try {
+        const url = await uploadRemoteImage(src)
+        result = result.replace(full, () => `![${withSize(alt)}](${url})`)
+      } catch (error) {
+        // 转存失败别把图删了：留外链，私聊还能显示，群里那张空着但正文不受影响
+        console.warn(`[qq] 外链图转存失败，保留原地址：${String(error?.message ?? error).slice(0, 80)}`)
+        result = result.replace(full, () => `![${withSize(alt)}](${src})`)
+      }
       continue
     }
 
@@ -272,8 +318,11 @@ async function dispatch(target, payload, msgId, { markdown = false } = {}) {
 
     if (needsMarkdown || markdown) {
       try {
-        // 本地图片先传成素材，换成 qqbot-media:// 引用——平台只认公网 URL 或这个引用
-        const body = await rewriteMarkdownImages(text)
+        // 本地图片先传成素材，换成 qqbot-media:// 引用——平台只认公网 URL 或这个引用；
+        // 群聊里外链也要转存，平台不会自己去抓
+        const body = await rewriteMarkdownImages(text, projectRoot, {
+          uploadRemote: target.scope === 'group',
+        })
         return await bot.sendMarkdown({ ...target, msgId }, body)
       } catch (error) {
         // 没开通 markdown 或发送失败：把标签摘掉退回纯文本，别把标签露给用户看
@@ -363,7 +412,9 @@ export function sendMarkdown(target, content, opts = {}) {
  * sanitizeText + 本地图片上传，别把 <qqbot-at-everyone /> 原样送给平台。
  */
 export async function sendWithKeyboard(target, content, keyboard) {
-  const safe = await rewriteMarkdownImages(sanitizeText(content))
+  const safe = await rewriteMarkdownImages(sanitizeText(content), projectRoot, {
+    uploadRemote: target.scope === 'group',
+  })
   return bot.sendMarkdown({ ...target }, safe, { keyboard })
 }
 
