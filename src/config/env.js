@@ -103,7 +103,15 @@ export const env = {
   contextWindowTokens: Math.floor(positiveNumber('CONTEXT_WINDOW_TOKENS', 128000)),
   contextBudgetRatio: positiveNumber('CONTEXT_BUDGET_RATIO', 0.6),
   maxInputChars: Math.floor(positiveNumber('MAX_INPUT_CHARS', 1000)),
+  // 分段目标：超长回复按这个长度切开，正常情况每段都在这以内
   replyMaxChars: Math.floor(positiveNumber('REPLY_MAX_CHARS', 900)),
+  // 硬上限：极少数段因为链接跨了切点没法安全切，允许它超到这儿再发。
+  // 只有超过这个长度才真的截断——整段发出去比截掉大半条强。
+  replyHardMax: (() => {
+    const target = Math.floor(positiveNumber('REPLY_MAX_CHARS', 900))
+    const hard = Math.floor(positiveNumber('REPLY_HARD_MAX', 1500))
+    return Math.max(hard, target + 100)
+  })(),
   // 群聊和单聊的自定义 markdown 自 2026-04-23 起全量开放，默认开着。
   // 想退回纯文本就设 MARKDOWN_REPLY=false
   markdownReply: process.env.MARKDOWN_REPLY !== 'false',

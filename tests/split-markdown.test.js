@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chunkText, looksSliced, splitMarkdown } from '../src/channel/sender.js'
+import { chunkText, clip, looksSliced, splitMarkdown } from '../src/channel/sender.js'
 
 // 定时任务的日报分段：markdown 不能按句子切，否则列表和引用会被劈开
 
@@ -118,4 +118,21 @@ test('切点正好落在 ! 和 [ 之间时往前挪一位', () => {
   const text = `${'a'.repeat(19)}![图](https://x.com/a.png)`
   const parts = chunkText(text, 20)
   assert.ok(parts.every((part) => !/!\s*$/.test(part)), '不能把 ! 留在段尾')
+})
+
+// 分段目标是 900，但有些段因为链接跨了切点切不开，会略超。
+// 硬上限之内整段发出去，超过才截断——切坏链接和丢掉大半条回复，后者严重得多。
+test('略超分段目标不截断，超过硬上限才截', async () => {
+  const env = (await import('../src/config/env.js')).env
+
+  // 超过分段目标但没到硬上限：原样返回
+  const over = 'A'.repeat(env.replyMaxChars + 100)
+  assert.ok(over.length > env.replyMaxChars && over.length <= env.replyHardMax, '前提成立')
+  assert.equal(clip(over), over, '这种段要整段发出去，不能截')
+
+  // 超过硬上限：才截，并且带说明
+  const huge = 'B'.repeat(env.replyHardMax + 200)
+  const clipped = clip(huge)
+  assert.match(clipped, /内容过长，已截断/)
+  assert.ok(clipped.length < huge.length)
 })

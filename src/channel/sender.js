@@ -53,9 +53,18 @@ function rememberSent(event, result, payload) {
 
 export function clip(text) {
   if (text.length <= env.replyMaxChars) return text
-  // 走到这里说明分段环节漏了：正常情况下 sendLongReply 传进来的每段都该在上限内
-  console.warn(`[发送] 单条 ${text.length} 字超过上限 ${env.replyMaxChars}，被截断`)
-  return `${text.slice(0, env.replyMaxChars - 16)}……\n\n（内容过长，已截断）`
+
+  // 超过分段目标、但还没到硬上限：多半是某一段里有链接跨了切点，切不开。
+  // 这种情况整段发出去，别截——切坏链接和丢掉大半条回复，后者严重得多。
+  if (text.length <= env.replyHardMax) {
+    console.warn(
+      `[发送] 单条 ${text.length} 字超过分段目标 ${env.replyMaxChars}（未到硬上限 ${env.replyHardMax}），整段发送`,
+    )
+    return text
+  }
+
+  console.warn(`[发送] 单条 ${text.length} 字超过硬上限 ${env.replyHardMax}，被截断`)
+  return `${text.slice(0, env.replyHardMax - 16)}……\n\n（内容过长，已截断）`
 }
 
 /**

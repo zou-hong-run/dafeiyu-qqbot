@@ -398,6 +398,7 @@ node --check src/index.js
 | `ADMIN_OPENIDS` | 高危工具白名单（逗号分隔 openid）。机器人里发 `/id` 查自己的 openid |
 | `SHELL_GROUP_ENABLED` | 没配白名单时，`true` 才允许群里用高危工具（默认关闭） |
 | `AUTO_SYNC_INTERVAL_MINUTES` | 代码自动提交间隔（30 分钟），`0` = 只靠退出时提交 |
+| `REPLY_HARD_MAX` | 单条硬上限（默认 1500）。超长回复按 `REPLY_MAX_CHARS` 分段，个别段因为有链接跨切点切不开会略超，到这个硬上限之内整段发、超过才截断 |
 | `AUTO_SYNC_ON_EXIT` | 设 `false` 关掉「退出前自动提交」 |
 | `MEDIA_TTL_HOURS` | `downloads/incoming/` 附件保留时长（24 小时） |
 | `MAX_SEND_FILE_MB` | `send_file` 单文件上限（50MB，要整个读进内存才能上传） |
