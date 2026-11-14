@@ -150,3 +150,38 @@ test('没有工具调用时不给空数组（调用方靠它判空）', () => {
   const shaped = toChatShape({ output_text: '好的', output: [], usage: {} })
   assert.equal(shaped.choices[0].message.tool_calls, undefined)
 })
+
+test('孤立代理对和控制字符会被清掉（服务端 400 的来源）', () => {
+  const broken = '正常文字\uD800半截emoji\u0000控制字符'
+  const body = toResponsesRequest({
+    messages: [
+      { role: 'user', content: 'x' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', function: { name: 'shell', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: broken },
+    ],
+  })
+
+  const output = body.input.find((item) => item.type === 'function_call_output').output
+  assert.equal(output.includes('\uD800'), false, '孤立高位代理必须去掉')
+  assert.equal(output.includes('\u0000'), false, '空字符必须去掉')
+  assert.match(output, /正常文字/)
+})
+
+test('成对的代理对（正常 emoji）要保留', () => {
+  const body = toResponsesRequest({
+    messages: [{ role: 'user', content: '这条消息带 emoji 😀 和 🎉' }],
+  })
+  assert.match(String(body.input[0].content), /😀/)
+})
+
+test('reasoning 能透传', () => {
+  const body = toResponsesRequest({
+    messages: [{ role: 'user', content: 'x' }],
+    reasoning: { effort: 'none' },
+  })
+  assert.deepEqual(body.reasoning, { effort: 'none' })
+})

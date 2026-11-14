@@ -97,6 +97,11 @@ export const env = {
   progressInterval: positiveNumber('PROGRESS_INTERVAL', 25) * 1000,
   progressMax: Math.floor(positiveNumber('PROGRESS_MAX', 3)),
   toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 60) * 1000,
+  // 走 Responses API（false 退回 Chat Completions，出问题能一键回退）
+  useResponses: process.env.USE_RESPONSES !== 'false',
+  // 思考强度：none 关掉思考。思考 token 也算进 max_output_tokens，
+  // 小额度请求（摘要、收尾）不关掉会被思考吃光，结果是空回复
+  reasoningEffort: (process.env.REASONING_EFFORT ?? 'none').trim(),
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),
   // DeepSeek 的上下文窗口是 128K，默认按它算预算；换模型时改这里

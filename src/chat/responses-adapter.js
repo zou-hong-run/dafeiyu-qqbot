@@ -4,6 +4,27 @@
 // 主循环、工具循环、16 处 createCompletion 调用点都不用动。
 // 抽成独立模块是为了能单测：这部分出错的后果是工具调用静默失效，跑起来很难发现。
 
+/**
+ * 清理要发出去的字符串。
+ *
+ * 服务端会 400「Failed to parse the request body as JSON: unexpected end of hex escape」——
+ * 原因是字符串里有孤立代理对（UTF-16 半个 emoji）或者不可打印控制字符，
+ * 序列化出来不是合法 JSON。工具输出是外部内容（网页、命令结果），什么都可能有。
+ *
+ * 顺序是先截断再清洗：反过来截断可能又切出一个孤立代理。
+ */
+function sanitizeText(text, limit = 20_000) {
+  let out = String(text ?? '')
+  if (out.length > limit) out = out.slice(0, limit)
+
+  // 孤立的高位/低位代理。合规的成对代理要保留，emoji 才不乱码
+  out = out.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
+  out = out.replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
+  // C0 控制字符，保留 \n \t \r
+  out = out.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+  return out
+}
+
 /** 取一段 content 里的纯文本（字符串或内容块数组都接受） */
 function textOf(content) {
   if (typeof content === 'string') return content
@@ -78,7 +99,8 @@ function toResponsesToolChoice(choice) {
  * - role: 'tool' 的结果变成 function_call_output，靠 call_id 配对
  */
 export function toResponsesRequest(payload = {}) {
-  const { model, messages, tools, tool_choice, max_tokens, temperature, response_format } = payload
+  const { model, messages, tools, tool_choice, max_tokens, temperature, response_format, reasoning } =
+    payload
 
   const instructions = []
   const input = []
@@ -96,7 +118,7 @@ export function toResponsesRequest(payload = {}) {
       input.push({
         type: 'function_call_output',
         call_id: String(message.tool_call_id ?? ''),
-        output: textOf(message.content),
+        output: sanitizeText(textOf(message.content)),
       })
       continue
     }
@@ -106,14 +128,14 @@ export function toResponsesRequest(payload = {}) {
       const calls = Array.isArray(message.tool_calls) ? message.tool_calls : []
 
       // 有文字就留一条 assistant 消息；没有文字但有工具调用时不用空消息占位
-      if (text || calls.length === 0) input.push({ role: 'assistant', content: text })
+      if (text || calls.length === 0) input.push({ role: 'assistant', content: sanitizeText(text) })
 
       for (const call of calls) {
         input.push({
           type: 'function_call',
           call_id: String(call?.id ?? ''),
           name: String(call?.function?.name ?? ''),
-          arguments: String(call?.function?.arguments ?? '{}'),
+          arguments: sanitizeText(call?.function?.arguments ?? '{}', 8000),
         })
       }
       continue
@@ -132,6 +154,7 @@ export function toResponsesRequest(payload = {}) {
   if (temperature !== undefined) body.temperature = temperature
   // Chat: response_format；Responses: text.format
   if (response_format) body.text = { format: response_format }
+  if (reasoning) body.reasoning = reasoning
 
   return body
 }
