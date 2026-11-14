@@ -8,6 +8,7 @@ import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
+import { toChatShape, toResponsesRequest } from './responses-adapter.js'
 import { SPILL_HEAD, SPILL_LIMIT, fallbackFromTool, finalizeReply, looksLikeActionRequest, looksLikeInlineOptions, pruneToolOutput } from './text-utils.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { resetSession } from './session-reset.js'
@@ -40,10 +41,18 @@ const client = new OpenAI({
 let usageKey = 'unknown'
 
 // 所有模型调用统一走这里：原样返回结果，顺手记一笔用量
+/**
+ * 调模型。底层走 Responses API，但请求和响应都在 responses-adapter 里转回
+ * 内部一直用的 Chat 形状——工具循环、摘要、收尾这些都不需要知道 API 换了。
+ *
+ * 换 API 只影响这一处：以后要换回去，改这里两行就行。
+ */
 async function createCompletion(payload) {
-  const completion = await client.chat.completions.create(payload)
+  const response = await client.responses.create(toResponsesRequest(payload))
+  const completion = toChatShape(response)
+
   const usage = completion?.usage
-  if (usage) {
+  if (usage?.prompt_tokens || usage?.completion_tokens) {
     recordUsage({
       sessionKey: usageKey,
       promptTokens: usage.prompt_tokens,

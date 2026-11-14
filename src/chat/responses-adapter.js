@@ -1,0 +1,185 @@
+// Chat Completions ↔ Responses API 的双向转换。
+//
+// 只在这一层做形状转换，内部所有代码继续用 messages / choices 那套结构——
+// 主循环、工具循环、16 处 createCompletion 调用点都不用动。
+// 抽成独立模块是为了能单测：这部分出错的后果是工具调用静默失效，跑起来很难发现。
+
+/** 取一段 content 里的纯文本（字符串或内容块数组都接受） */
+function textOf(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return String(content ?? '')
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part
+      if (part?.type === 'text') return String(part.text ?? '')
+      return ''
+    })
+    .join('')
+}
+
+/**
+ * 用户消息的 content：字符串保持字符串，多模态转成 responses 的内容块。
+ * image_url（Chat 形状）→ input_image（Responses 形状），两边的字段名不一样。
+ */
+function userContentOf(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return String(content ?? '')
+
+  const parts = []
+  for (const part of content) {
+    if (typeof part === 'string') {
+      parts.push({ type: 'input_text', text: part })
+      continue
+    }
+    if (part?.type === 'image_url') {
+      const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url
+      if (url) parts.push({ type: 'input_image', image_url: String(url) })
+      continue
+    }
+    parts.push({ type: 'input_text', text: String(part?.text ?? '') })
+  }
+  return parts
+}
+
+/** Chat 的 tools 是 { type, function: {...} }，Responses 是扁平的 { type, name, ... } */
+export function toResponsesTools(tools) {
+  if (!Array.isArray(tools)) return undefined
+
+  const list = tools
+    .map((tool) => {
+      const fn = tool?.function ?? tool
+      if (!fn?.name) return null
+      return {
+        type: 'function',
+        name: fn.name,
+        description: fn.description ?? '',
+        parameters: fn.parameters ?? { type: 'object', properties: {} },
+      }
+    })
+    .filter(Boolean)
+
+  return list.length > 0 ? list : undefined
+}
+
+/** tool_choice 指定具体工具时，两边形状也不同 */
+function toResponsesToolChoice(choice) {
+  if (typeof choice === 'string') return choice
+  if (choice?.function?.name) return { type: 'function', name: choice.function.name }
+  if (choice?.name) return { type: 'function', name: choice.name }
+  return 'auto'
+}
+
+/**
+ * 把 Chat 形状的请求体转成 Responses 形状。
+ *
+ * - 所有 system / developer 消息合并成 instructions（Responses 里它单独一个参数）
+ * - assistant 的 tool_calls 展开成独立的 function_call item
+ * - role: 'tool' 的结果变成 function_call_output，靠 call_id 配对
+ */
+export function toResponsesRequest(payload = {}) {
+  const { model, messages, tools, tool_choice, max_tokens, temperature, response_format } = payload
+
+  const instructions = []
+  const input = []
+
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const role = String(message?.role ?? 'user')
+
+    if (role === 'system' || role === 'developer') {
+      const text = textOf(message.content)
+      if (text) instructions.push(text)
+      continue
+    }
+
+    if (role === 'tool') {
+      input.push({
+        type: 'function_call_output',
+        call_id: String(message.tool_call_id ?? ''),
+        output: textOf(message.content),
+      })
+      continue
+    }
+
+    if (role === 'assistant') {
+      const text = textOf(message.content)
+      const calls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+
+      // 有文字就留一条 assistant 消息；没有文字但有工具调用时不用空消息占位
+      if (text || calls.length === 0) input.push({ role: 'assistant', content: text })
+
+      for (const call of calls) {
+        input.push({
+          type: 'function_call',
+          call_id: String(call?.id ?? ''),
+          name: String(call?.function?.name ?? ''),
+          arguments: String(call?.function?.arguments ?? '{}'),
+        })
+      }
+      continue
+    }
+
+    input.push({ role: 'user', content: userContentOf(message.content) })
+  }
+
+  const body = { model, input }
+
+  if (instructions.length > 0) body.instructions = instructions.join('\n\n')
+  const responsesTools = toResponsesTools(tools)
+  if (responsesTools) body.tools = responsesTools
+  if (tool_choice !== undefined) body.tool_choice = toResponsesToolChoice(tool_choice)
+  if (max_tokens) body.max_output_tokens = max_tokens
+  if (temperature !== undefined) body.temperature = temperature
+  // Chat: response_format；Responses: text.format
+  if (response_format) body.text = { format: response_format }
+
+  return body
+}
+
+/** 从 output 里拼文本：优先用 SDK 的 output_text，没有就自己扫 message item */
+function collectText(response) {
+  if (typeof response?.output_text === 'string' && response.output_text.length > 0) {
+    return response.output_text
+  }
+
+  let text = ''
+  for (const item of response?.output ?? []) {
+    if (item?.type !== 'message') continue
+    for (const part of item.content ?? []) {
+      if (part?.type === 'output_text') text += String(part.text ?? '')
+    }
+  }
+  return text
+}
+
+export function toChatShape(response) {
+  const text = collectText(response)
+
+  const toolCalls = (response?.output ?? [])
+    .filter((item) => item?.type === 'function_call')
+    .map((item, index) => ({
+      id: String(item.call_id ?? item.id ?? `call_${index}`),
+      type: 'function',
+      function: {
+        name: String(item.name ?? ''),
+        arguments: String(item.arguments ?? '{}'),
+      },
+    }))
+
+  const message = { role: 'assistant', content: text }
+  if (toolCalls.length > 0) message.tool_calls = toolCalls
+
+  return {
+    choices: [
+      {
+        message,
+        // 有的调用方靠 finish_reason === 'length' 判断输出被截断
+        finish_reason: response?.status === 'incomplete' ? 'length' : 'stop',
+      },
+    ],
+    usage: {
+      prompt_tokens: Number(response?.usage?.input_tokens) || 0,
+      completion_tokens: Number(response?.usage?.output_tokens) || 0,
+    },
+  }
+}

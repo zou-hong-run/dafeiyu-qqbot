@@ -131,6 +131,15 @@ tools = 本地工具 + MCP 工具（先过权限过滤，见下一节）
 - 溢出原文**归档**到 `data/memory-archive/`（只写不读，保留最近 200 个文件）
 - 摘要按【已定】【未定】【下一步】三段写，避免多次压缩后把「还在讨论」写成「已经定了」
 
+### 调模型的方式
+
+底层走 **Responses API**（`client.responses.create`），但在 `src/chat/responses-adapter.js` 里双向转成 Chat Completions 的形状：
+
+- 请求：system 合成 `instructions`、`tool_calls` 展开成 `function_call` item、`max_tokens`→`max_output_tokens`、`response_format`→`text.format`、`image_url`→`input_image`
+- 响应：`output` 里的 `function_call` 折回 `message.tool_calls`、`usage.input_tokens`→`prompt_tokens`、`status: incomplete`→`finish_reason: length`
+
+为什么包一层：工具循环、摘要、收尾这些有十几处调用点，都依赖 `choices[0].message` 这个形状。适配层把 API 差异关在一个文件里，换 API 只改 `createCompletion` 两行。
+
 ### 阶段 5：工具循环
 
 `MAX_TOOL_ROUNDS`（默认 12）轮，每轮：
