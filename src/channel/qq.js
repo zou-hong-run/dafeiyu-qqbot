@@ -445,20 +445,8 @@ export function onInteraction(handler) {
   })
 }
 
-/**
- * 兜底原始事件：SDK 只单独发 message / interaction，其余事件（表情回应、
- * 成员变动、加群申请等）统一从这里吐出来，ctx 是 { eventType, data }。
- * 目前只用来观察平台到底推不推某些事件。
- */
-export function onRawEvent(handler) {
-  bot.on('rawEvent', (ctx) => {
-    Promise.resolve(handler(ctx)).catch((error) => {
-      console.error('[qq] 处理原始事件失败：', error?.message ?? error)
-    })
-  })
-}
-
-/** 连接生命周期：接日志和重启播报到这儿 */export function onLifecycle({ ready, resumed, disconnected, error } = {}) {
+/** 连接生命周期：接日志和重启播报到这儿 */
+export function onLifecycle({ ready, resumed, disconnected, error } = {}) {
   if (ready) bot.on('ready', (data) => ready(data))
   if (resumed) bot.on('resumed', (data) => resumed(data))
   if (disconnected) bot.on('disconnected', (info) => disconnected(info))
