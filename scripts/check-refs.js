@@ -100,6 +100,12 @@ function collectParams(source, into) {
   }
   for (const matched of source.matchAll(/([A-Za-z_$][\w$]*)\s*=>/g)) into.add(matched[1])
   for (const matched of source.matchAll(/catch\s*\(([^)]*)\)/g)) addNamesFromList(matched[1], into)
+  // 对象方法简写：transform(chunk, enc, callback) { ... }
+  // 方法名会被 collectDefinitions 认到，但参数不在任何一条规则里——
+  // 结果是把合法的形参报成「调用了未定义的函数」。
+  for (const matched of source.matchAll(/(?:^|[{,]\s*)[A-Za-z_$][\w$]*\s*\(([^)]*)\)\s*\{/gm)) {
+    addNamesFromList(matched[1], into)
+  }
 }
 
 function collectDefinitions(source, into) {
