@@ -66,13 +66,13 @@ function textOf(content) {
  * image_url（Chat 形状）→ input_image（Responses 形状），两边的字段名不一样。
  */
 function userContentOf(content) {
-  if (typeof content === 'string') return content
+  if (typeof content === 'string') return sanitizeText(content)
   if (!Array.isArray(content)) return String(content ?? '')
 
   const parts = []
   for (const part of content) {
     if (typeof part === 'string') {
-      parts.push({ type: 'input_text', text: part })
+      parts.push({ type: 'input_text', text: sanitizeText(part) })
       continue
     }
     if (part?.type === 'image_url') {
@@ -80,7 +80,7 @@ function userContentOf(content) {
       if (url) parts.push({ type: 'input_image', image_url: String(url) })
       continue
     }
-    parts.push({ type: 'input_text', text: String(part?.text ?? '') })
+    parts.push({ type: 'input_text', text: sanitizeText(part?.text ?? '') })
   }
   return parts
 }
@@ -132,7 +132,7 @@ export function toResponsesRequest(payload = {}) {
 
     if (role === 'system' || role === 'developer') {
       const text = textOf(message.content)
-      if (text) instructions.push(text)
+      if (text) instructions.push(sanitizeText(text))
       continue
     }
 

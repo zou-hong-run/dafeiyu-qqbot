@@ -1552,9 +1552,11 @@ async function runToolTracked(call, context) {
     }
   }
 
-  // 本地工具也要留痕。MCP 那侧已经在 client.js 的 callTool 里记了，
-  // 但 write_file / shell / git_sync 这些是本地实现的，原来一条都不记。
-  const shouldAudit = AUDITED_TOOLS.has(toolName) || isDangerousTool(toolName)
+  // 本地工具也要留痕。但只在本地工具这里记：
+  // MCP 工具（shell / write_file / read_file 那些）已经在 client.js 的 callTool 里记过一次，
+  // 这里不加 LOCAL_TOOL_NAMES 判断就会一个调用留两条审计。
+  const shouldAudit =
+    LOCAL_TOOL_NAMES.has(toolName) && (AUDITED_TOOLS.has(toolName) || isDangerousTool(toolName))
 
   try {
     const result = await runTool(call, context)

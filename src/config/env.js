@@ -100,7 +100,9 @@ export const env = {
   // 思考强度：低额度请求（摘要、收尾、各类解析，max_tokens 小的那些）
   // 由 createCompletion 自动降成 none，这里管的是主对话。
   // 关掉思考会让推理类问题明显变笨，所以默认开着。
-  reasoningEffort: (process.env.REASONING_EFFORT ?? 'medium').trim(),
+  // 取值：none / low / high / max。DeepSeek 文档只写了「effort 支持」，
+  // 具体档位以官方为准；medium 未在 Codex 的配置示例里出现，默认用 high。
+  reasoningEffort: (process.env.REASONING_EFFORT ?? 'high').trim(),
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),
   // DeepSeek 的上下文窗口是 128K，默认按它算预算；换模型时改这里

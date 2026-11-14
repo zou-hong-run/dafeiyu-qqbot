@@ -220,3 +220,18 @@ test('调用方能显式覆盖', () => {
   assert.equal(resolveEffort({ maxTokens: 8192, override: 'none' }), 'none')
   assert.equal(resolveEffort({ maxTokens: 300, override: 'high' }), 'high')
 })
+
+test('用户消息和 instructions 里的畸形字符也要清', () => {
+  // 用户消息来自 QQ，什么字节都可能；不清一样会撞 400
+  const body = toResponsesRequest({
+    messages: [
+      { role: 'system', content: '指令\uD800带半个 emoji' },
+      { role: 'user', content: '用户说\uDC00了什么' },
+      { role: 'user', content: [{ type: 'text', text: '多模态\uD800文本' }] },
+    ],
+  })
+
+  assert.equal(body.instructions.includes('\uD800'), false, 'instructions 要清')
+  assert.equal(String(body.input[0].content).includes('\uDC00'), false, 'user 纯文本要清')
+  assert.equal(String(body.input[1].content[0].text).includes('\uD800'), false, '内容块也要清')
+})

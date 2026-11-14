@@ -213,7 +213,13 @@ async function synthesizeSpeech(text, voice = TTS_VOICE) {
   // 首选 DeepSeek 官方语音合成：POST /v1/tools/tts，音频流式返回（wav/pcm）。
   // 任何一步出问题都往下走 edge-tts，别把 speak 弄坏
   try {
-    const res = await fetch(`${env.baseURL.replace(/\/+$/, '')}/v1/tools/tts`, {
+    // baseURL 是配置项，理论上可能是内网地址；出网统一过一遍校验，不留例外
+    const ttsUrl = `${env.baseURL.replace(/\/+$/, '')}/v1/tools/tts`
+    await assertPublicUrlResolved(ttsUrl).catch(() => {
+      throw new Error('TTS 地址校验没通过（可能指向内网）')
+    })
+
+    const res = await fetch(ttsUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -180,7 +180,8 @@ export async function readLimitedBody(response, limit) {
       total += chunk.length
     }
   } finally {
-    reader.cancel().catch(() => {})
+    // await：不等待的话连接可能还挂着，连续下载会攒出一堆未关闭的流
+    await reader.cancel().catch(() => {})
   }
 
   if (total > limit) throw new Error(`响应超过 ${(limit / 1048576).toFixed(1)}MB 上限，已中断`)
