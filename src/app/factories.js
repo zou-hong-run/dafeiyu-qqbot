@@ -51,6 +51,9 @@ export function gitSyncFor() {
         { toMain: true },
       )
       if (result.skipped) return `没有需要同步的改动（${result.reason}）`
+      if (result.pushed && !result.committed) {
+        return `工作区没有新改动，把本地积压的 ${result.ahead} 个提交推到了 ${result.branch}`
+      }
       if (result.pushed) return `已提交并推送 ${result.files} 个文件到 ${result.branch}（main 会触发 CI）`
       return `已本地提交 ${result.files} 个文件，但推送失败：${result.reason}`
     }

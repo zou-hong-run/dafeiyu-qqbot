@@ -126,7 +126,41 @@ export async function commitAndPush(reason = 'auto sync', { toMain = false } = {
   }
 
   const status = await repoStatus()
-  if (status.changes.length === 0) return { ok: true, skipped: true, reason: '没有改动' }
+
+  // 没有新改动时不能直接返回：本地可能已经有提交还没推上去（上次推送失败、
+  // 退出前自动提交后就重启了……）。只看改动数会让这些提交永远卡在本机。
+  if (status.changes.length === 0) {
+    if (!status.hasUpstream || status.ahead === 0) {
+      return { ok: true, skipped: true, reason: '没有改动' }
+    }
+
+    const pendingArgs = toMain
+      ? ['push', 'origin', 'HEAD']
+      : ['push', 'origin', `HEAD:refs/heads/${BACKUP_BRANCH}`, '--force-with-lease']
+    const pendingTarget = toMain ? status.branch : BACKUP_BRANCH
+
+    const pendingPush = await git(pendingArgs, { allowFail: true })
+    if (pendingPush.ok) {
+      return {
+        ok: true,
+        committed: false,
+        pushed: true,
+        files: 0,
+        ahead: status.ahead,
+        branch: pendingTarget,
+        toMain,
+      }
+    }
+    return {
+      ok: false,
+      committed: false,
+      pushed: false,
+      files: 0,
+      ahead: status.ahead,
+      branch: pendingTarget,
+      reason: `没有新改动，但本地 ${status.ahead} 个提交推不上去：${pendingPush.out.slice(0, 200)}`,
+    }
+  }
 
   await git(['add', '-A'])
 
