@@ -156,6 +156,38 @@ export function isBlockedAddress(ip) {
 }
 
 /**
+ * 流式读取响应体，超过上限就停。
+ *
+ * 不能直接 await response.arrayBuffer()：那是「先全读进内存再检查大小」，
+ * 一个不配合的服务器（或者伪造 Content-Length 的）能直接把进程撑爆。
+ * content-length 也不可信——它只是声明值。
+ *
+ * @throws 超过上限时抛出，调用方自己决定怎么处理
+ */
+export async function readLimitedBody(response, limit) {
+  if (!response?.body) return Buffer.alloc(0)
+
+  const reader = response.body.getReader()
+  const chunks = []
+  let total = 0
+
+  try {
+    while (total <= limit) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = Buffer.from(value)
+      chunks.push(chunk)
+      total += chunk.length
+    }
+  } finally {
+    reader.cancel().catch(() => {})
+  }
+
+  if (total > limit) throw new Error(`响应超过 ${(limit / 1048576).toFixed(1)}MB 上限，已中断`)
+  return Buffer.concat(chunks)
+}
+
+/**
  * 校验一个地址能不能出网。返回 URL 对象，调用方可以直接用。
  * @throws {Error} 格式不对或指向内网时
  */

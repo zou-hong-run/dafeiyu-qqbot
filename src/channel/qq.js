@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { QQBot } from '@tencent-connect/qqbot-nodejs'
 import { env } from '../config/env.js'
 import { sensitiveReason } from '../ops/file-policy.js'
-import { assertPublicUrlResolved, fetchPublic } from '../mcp-server/net-guard.js'
+import { assertPublicUrlResolved, fetchPublic, readLimitedBody } from '../mcp-server/net-guard.js'
 
 // 官方 SDK 的适配层。
 //
@@ -14,8 +14,6 @@ import { assertPublicUrlResolved, fetchPublic } from '../mcp-server/net-guard.js
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const SESSION_FILE = path.join(projectRoot, 'data', 'qq-session.json')
-// 未识别事件的落盘位置（表情回应等），用来排查平台到底推不推
-const RAW_EVENT_LOG = path.join(projectRoot, 'data', 'raw-events.log')
 
 // 把 sessionId / lastSeq 落盘：进程重启后先试 RESUME，不用重新 IDENTIFY，
 // 也少丢几条消息（QQ 没有历史补拉接口，能续上就是赚）。
@@ -218,10 +216,11 @@ async function uploadRemoteImage(url) {
   const res = await fetchPublic(url, { method: 'GET', signal: AbortSignal.timeout?.(20000) })
   if (!res.ok) throw new Error(`下载图片失败 HTTP ${res.status}`)
 
+  // content-length 只是声明值，真正的上限要在读的时候卡住
   const declared = Number(res.headers.get('content-length') ?? 0)
   if (declared > MAX_MATERIAL_BYTES) throw new Error('图片超过 10MB')
 
-  const buffer = Buffer.from(await res.arrayBuffer())
+  const buffer = await readLimitedBody(res, MAX_MATERIAL_BYTES)
   const contentType = sniffImageType(buffer)
   if (!contentType) throw new Error('下载回来的不是 png/jpeg/gif/webp')
 

@@ -3,7 +3,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { env } from '../config/env.js'
 import { budgetFor } from '../ops/budget.js'
@@ -15,6 +15,8 @@ import { deliver, postMessage } from './sender.js'
 // 媒体发送器：每个工厂函数绑一个事件，返回「给模型调用的发送函数」
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const run = promisify(execFile)
+// TTS 返回的音频上限：服务端异常时别把磁盘写满
+const MAX_TTS_BYTES = 8 * 1024 * 1024
 
 
 function mediaMissingHint(downloadDir, resolved) {
@@ -230,7 +232,19 @@ async function synthesizeSpeech(text, voice = TTS_VOICE) {
     }
 
     const raw = path.join(tmpDir, `dtts-${stamp}.wav`)
-    await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(raw))
+    // 边写边数字节：服务端要是吐个几百 MB 过来，不能在磁盘写满之后才发现
+    let written = 0
+    const guard = new Transform({
+      transform(chunk, _enc, callback) {
+        written += chunk.length
+        if (written > MAX_TTS_BYTES) {
+          callback(new Error(`TTS 返回超过 ${MAX_TTS_BYTES / 1048576}MB，已中断`))
+          return
+        }
+        callback(null, chunk)
+      },
+    })
+    await pipeline(Readable.fromWeb(res.body), guard, fs.createWriteStream(raw))
     if (!usable(raw)) throw new Error('返回的音频太小，疑似空响应')
 
     // wav 体积偏大，能压成 mp3 就压，压不动就发 wav（QQ 语音也认）

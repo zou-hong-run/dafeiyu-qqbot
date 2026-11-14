@@ -3,11 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import OpenAI from 'openai'
 import { env } from '../config/env.js'
-import { denyReason, isToolAllowed, isDangerousTool, isAdmin, SCOPE_LABEL } from '../config/policy.js'
+import { denyReason, isToolAllowed, isDangerousTool, isAdmin, SCOPE_LABEL, AUDITED_TOOLS } from '../config/policy.js'
 import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
+import { audit } from '../app/audit.js'
 import { resolveEffort, toChatShape, toResponsesRequest } from './responses-adapter.js'
 import { SPILL_HEAD, SPILL_LIMIT, fallbackFromTool, finalizeReply, looksLikeActionRequest, looksLikeInlineOptions, pruneToolOutput } from './text-utils.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
@@ -1551,14 +1552,20 @@ async function runToolTracked(call, context) {
     }
   }
 
+  // 本地工具也要留痕。MCP 那侧已经在 client.js 的 callTool 里记了，
+  // 但 write_file / shell / git_sync 这些是本地实现的，原来一条都不记。
+  const shouldAudit = AUDITED_TOOLS.has(toolName) || isDangerousTool(toolName)
+
   try {
     const result = await runTool(call, context)
     noteToolResult(toolName, result)
     if (DEDUPE_TOOLS.has(toolName)) dedupeStore(toolName, argsText, result)
+    if (shouldAudit) audit(context?.sessionKey || 'unknown', toolName, argsText, result)
     return result
   } catch (error) {
     const message = `调用失败：${error?.message ?? error}`
     noteToolResult(toolName, message)
+    if (shouldAudit) audit(context?.sessionKey || 'unknown', toolName, argsText, message)
     return `工具 ${toolName} ${message}`
   }
 }

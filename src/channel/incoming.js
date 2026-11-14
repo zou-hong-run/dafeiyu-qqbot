@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fetchPublic } from '../mcp-server/net-guard.js'
+import { fetchPublic, readLimitedBody } from '../mcp-server/net-guard.js'
 
 // 入站附件：SDK 会把 attachments 解析成 event.message 里的 image / voice / video / file 元素
 // 我们之前完全忽略它们，用户发语音、发图，机器人等于什么都收不到
@@ -145,8 +145,13 @@ async function downloadOne(item, index, dir) {
     const response = await fetchPublic(item.url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
     if (!response.ok) return { ...item, error: `下载失败 HTTP ${response.status}` }
 
-    const buffer = Buffer.from(await response.arrayBuffer())
-    if (buffer.length > MAX_BYTES) return { ...item, error: '下载后超过大小上限' }
+    // 流式读：声明的大小可以伪造，超限要当场中断而不是先读进来再说
+    let buffer
+    try {
+      buffer = await readLimitedBody(response, MAX_BYTES)
+    } catch {
+      return { ...item, error: '下载后超过大小上限' }
+    }
 
     // 扩展名和文件头都不像图片却声明成 image：说明对方发的是别的东西，别硬喂给模型
     let type = item.type
