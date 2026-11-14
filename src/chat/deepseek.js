@@ -1900,9 +1900,13 @@ ${baseContent}`
       completion = await createCompletion(payload)
     } catch (error) {
       const reason = String(error?.message ?? error)
-      const contextIssue = /context length|too many tokens|maximum context|token limit|exceed/i.test(
-        reason,
-      )
+      // 覆盖三套文案：Chat Completions 的「maximum context length」、
+      // Responses 的「input is too long / context window」、以及通用的 exceed / too many。
+      // 匹配不上的话压缩重试直接失效，用户只会看到一条裸 400。
+      const contextIssue =
+        /context length|context window|too many tokens|maximum context|token limit|exceed|too long|input.{0,20}long/i.test(
+          reason,
+        )
 
       if (contextIssue && round === 0) {
         console.warn(`[上下文] 超限，压缩历史后重试：${reason.slice(0, 120)}`)

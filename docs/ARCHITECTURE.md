@@ -140,6 +140,8 @@ tools = 本地工具 + MCP 工具（先过权限过滤，见下一节）
 
 为什么包一层：工具循环、摘要、收尾这些有十几处调用点，都依赖 `choices[0].message` 这个形状。适配层把 API 差异关在一个文件里，只有 `createCompletion` 一处直接碰 SDK。
 
+**DeepSeek 的 Responses 是无状态子集**：形状对齐了，但 `previous_response_id` / `conversation` / `store` 都不支持，多轮历史仍然由客户端拼。所以迁过来拿到的是「新形状」，不是「服务端状态」——想享受状态红利得等官方实现。另外 `truncation` 也不支持，超上下文直接 400，裁剪必须自己保证。
+
 两个必须注意的点：
 
 - **思考 token 也算进 `max_output_tokens`**。摘要只要 900 额度，一思考就全花在 reasoning 上、返回空文本。主对话额度 8192，开思考（`REASONING_EFFORT`，默认 `medium`）；摘要、收尾这类只给几百 token 的请求由 `resolveEffort()` 自动降成 `none`，否则正文会是空的。
