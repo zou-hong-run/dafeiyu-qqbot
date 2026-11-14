@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { toChatShape, toResponsesRequest, toResponsesTools } from '../src/chat/responses-adapter.js'
+import { resolveEffort, toChatShape, toResponsesRequest, toResponsesTools } from '../src/chat/responses-adapter.js'
 
 // 这层转错的后果是「工具调用静默失效」——跑起来只会看到模型一直回文字、不做事，
 // 不会有任何报错。所以每一处形状差异都钉一条断言。
@@ -199,4 +199,24 @@ test('工具调用字段名宽容：tool_name / input 这类别名也能取到',
   assert.equal(call.id, 'x1')
   assert.equal(call.function.name, 'calc')
   assert.equal(call.function.arguments, '{"a":1}')
+})
+
+// 思考 token 也算进 max_output_tokens。主对话额度大、要开思考（关掉会变笨）；
+// 摘要收尾只给几百 token，开了就全花在 reasoning 上、正文是空的。
+test('主对话开思考，小额度请求自动关', () => {
+  assert.equal(resolveEffort({ maxTokens: 8192 }), 'medium', '主对话用默认强度')
+  assert.equal(resolveEffort({ maxTokens: 8192, fallback: 'high' }), 'high', '跟随配置')
+  assert.equal(resolveEffort({ maxTokens: 900 }), 'none', '摘要额度太小，不能思考')
+  assert.equal(resolveEffort({ maxTokens: 800 }), 'none', '收尾同理')
+  assert.equal(resolveEffort({ maxTokens: 200 }), 'none')
+})
+
+test('阈值边界：正好 1200 仍然开思考', () => {
+  assert.equal(resolveEffort({ maxTokens: 1200 }), 'medium')
+  assert.equal(resolveEffort({ maxTokens: 1199 }), 'none')
+})
+
+test('调用方能显式覆盖', () => {
+  assert.equal(resolveEffort({ maxTokens: 8192, override: 'none' }), 'none')
+  assert.equal(resolveEffort({ maxTokens: 300, override: 'high' }), 'high')
 })

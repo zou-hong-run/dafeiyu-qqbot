@@ -8,7 +8,7 @@ import { recordUsage } from '../ops/usage.js'
 import { noteToolResult } from '../ops/pitfalls.js'
 import { knowledgePrompt } from '../memory/knowledge.js'
 import { noteSituation, resolveSituation, situationPrompt } from '../memory/situations.js'
-import { toChatShape, toResponsesRequest } from './responses-adapter.js'
+import { resolveEffort, toChatShape, toResponsesRequest } from './responses-adapter.js'
 import { SPILL_HEAD, SPILL_LIMIT, fallbackFromTool, finalizeReply, looksLikeActionRequest, looksLikeInlineOptions, pruneToolOutput } from './text-utils.js'
 import { noteTodoStep, todoPrompt, writeTodos } from './todos.js'
 import { resetSession } from './session-reset.js'
@@ -50,10 +50,16 @@ let usageKey = 'unknown'
 async function createCompletion(payload) {
   const body = toResponsesRequest(payload)
 
-  // 思考 token 也算进 max_output_tokens：摘要只要 900 的额度，
-  // 一思考就被吃光、返回空文本。默认关掉，需要思考再设 REASONING_EFFORT。
-  if (env.reasoningEffort && env.reasoningEffort !== 'off') {
-    body.reasoning = { effort: env.reasoningEffort }
+  // 主对话开着思考（关掉会变笨），小额度请求自动降成 none——
+  // 思考 token 也算进 max_output_tokens，几百的额度经不起思考。
+  const effort = resolveEffort({
+    maxTokens: payload.max_tokens,
+    override: payload.reasoning?.effort,
+    fallback: env.reasoningEffort,
+  })
+
+  if (effort && effort !== 'off') {
+    body.reasoning = { effort }
   }
 
   const response = await client.responses.create(body)

@@ -97,9 +97,10 @@ export const env = {
   progressInterval: positiveNumber('PROGRESS_INTERVAL', 25) * 1000,
   progressMax: Math.floor(positiveNumber('PROGRESS_MAX', 3)),
   toolTimeoutMs: positiveNumber('TOOL_TIMEOUT_SECONDS', 60) * 1000,
-  // 思考强度：none 关掉思考。思考 token 也算进 max_output_tokens，
-  // 小额度请求（摘要、收尾）不关掉会被思考吃光，结果是空回复
-  reasoningEffort: (process.env.REASONING_EFFORT ?? 'none').trim(),
+  // 思考强度：低额度请求（摘要、收尾、各类解析，max_tokens 小的那些）
+  // 由 createCompletion 自动降成 none，这里管的是主对话。
+  // 关掉思考会让推理类问题明显变笨，所以默认开着。
+  reasoningEffort: (process.env.REASONING_EFFORT ?? 'medium').trim(),
 
   historyTurns: Math.floor(positiveNumber('HISTORY_TURNS', 8)),
   // DeepSeek 的上下文窗口是 128K，默认按它算预算；换模型时改这里

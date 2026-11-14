@@ -25,6 +25,28 @@ function sanitizeText(text, limit = 20_000) {
   return out
 }
 
+// 输出额度低于这个数就不开思考：思考 token 也算进同一个额度，小额度会被吃光
+export const THINKING_MIN_BUDGET = 1200
+
+/**
+ * 这次请求要不要开思考。
+ *
+ * 主对话额度大（8192），开着——关掉会让推理类问题明显变笨。
+ * 摘要、收尾、各类解析只给几百 token，开了就全花在 reasoning 上，正文是空的。
+ *
+ * @param {{ maxTokens?: number, override?: string, fallback?: string }} input
+ * @returns {string} 'none' | 'low' | 'medium' | 'high' | 'off'
+ */
+export function resolveEffort({ maxTokens, override, fallback = 'medium' } = {}) {
+  const asked = String(override ?? '').trim()
+  if (asked) return asked
+
+  const budget = Number(maxTokens)
+  if (Number.isFinite(budget) && budget > 0 && budget < THINKING_MIN_BUDGET) return 'none'
+
+  return String(fallback ?? 'medium').trim() || 'medium'
+}
+
 /** 取一段 content 里的纯文本（字符串或内容块数组都接受） */
 function textOf(content) {
   if (typeof content === 'string') return content

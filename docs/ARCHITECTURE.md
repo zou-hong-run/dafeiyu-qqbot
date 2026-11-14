@@ -142,7 +142,7 @@ tools = 本地工具 + MCP 工具（先过权限过滤，见下一节）
 
 两个必须注意的点：
 
-- **思考 token 也算进 `max_output_tokens`**。摘要只要 900 额度，一思考就全花在 reasoning 上、返回空文本。默认 `REASONING_EFFORT=none` 关掉思考；要开就调高额度。
+- **思考 token 也算进 `max_output_tokens`**。摘要只要 900 额度，一思考就全花在 reasoning 上、返回空文本。主对话额度 8192，开思考（`REASONING_EFFORT`，默认 `medium`）；摘要、收尾这类只给几百 token 的请求由 `resolveEffort()` 自动降成 `none`，否则正文会是空的。
 - **发出去的内容要清洗**。工具输出是外部数据，可能带孤立代理对（半个 emoji）或控制字符，序列化后服务端直接 400（`unexpected end of hex escape`）。`toResponsesRequest` 里对 output / arguments / 文本统一过一遍 `sanitizeText`。
 
 ### 阶段 5：工具循环
