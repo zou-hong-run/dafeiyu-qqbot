@@ -181,11 +181,16 @@ export function toChatShape(response) {
   const toolCalls = (response?.output ?? [])
     .filter((item) => item?.type === 'function_call')
     .map((item, index) => ({
-      id: String(item.call_id ?? item.id ?? `call_${index}`),
+      // 字段名按 OpenAI 标准取，同时兼容几种常见别名——
+      // 取不到 name 的话上层会当成「模型没调工具」，表现是它一直回文字不做事，
+      // 而且不会有任何报错，所以这里宁可宽容一点。
+      id: String(item.call_id ?? item.id ?? item.tool_call_id ?? `call_${index}`),
       type: 'function',
       function: {
-        name: String(item.name ?? ''),
-        arguments: String(item.arguments ?? '{}'),
+        name: String(item.name ?? item.tool_name ?? item.function?.name ?? ''),
+        arguments: String(
+          item.arguments ?? item.input ?? item.function?.arguments ?? '{}',
+        ),
       },
     }))
 

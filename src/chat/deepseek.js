@@ -48,34 +48,27 @@ let usageKey = 'unknown'
  * 换 API 只影响这一处：以后要换回去，改这里两行就行。
  */
 async function createCompletion(payload) {
-  let completion
+  const body = toResponsesRequest(payload)
 
-  if (env.useResponses) {
-    const body = toResponsesRequest(payload)
-
-    // 思考 token 也算进 max_output_tokens：摘要只要 900 的额度，
-    // 一思考就被吃光、返回空文本。默认关掉，需要思考再设 REASONING_EFFORT。
-    if (env.reasoningEffort && env.reasoningEffort !== 'off') {
-      body.reasoning = { effort: env.reasoningEffort }
-    }
-
-    const response = await client.responses.create(body)
-
-    if (env.toolDebug) {
-      // 形状不对时靠这行定位：output 里 item 的 type 和字段名
-      const shapes = (response?.output ?? [])
-        .map((item) => `${item?.type ?? '?'}(${Object.keys(item ?? {}).join(',')})`)
-        .join(' ')
-      console.log(
-        `[响应形状] status=${response?.status ?? '?'} 文本长度=${(response?.output_text ?? '').length} items=${shapes}`,
-      )
-    }
-
-    completion = toChatShape(response)
-  } else {
-    // 回退：USE_RESPONSES=false 时走原来的 Chat Completions
-    completion = await client.chat.completions.create(payload)
+  // 思考 token 也算进 max_output_tokens：摘要只要 900 的额度，
+  // 一思考就被吃光、返回空文本。默认关掉，需要思考再设 REASONING_EFFORT。
+  if (env.reasoningEffort && env.reasoningEffort !== 'off') {
+    body.reasoning = { effort: env.reasoningEffort }
   }
+
+  const response = await client.responses.create(body)
+
+  if (env.toolDebug) {
+    // 形状不对时靠这行定位：output 里 item 的 type 和字段名
+    const shapes = (response?.output ?? [])
+      .map((item) => `${item?.type ?? '?'}(${Object.keys(item ?? {}).join(',')})`)
+      .join(' ')
+    console.log(
+      `[响应形状] status=${response?.status ?? '?'} 文本长度=${(response?.output_text ?? '').length} items=${shapes}`,
+    )
+  }
+
+  const completion = toChatShape(response)
 
   const usage = completion?.usage
   if (usage?.prompt_tokens || usage?.completion_tokens) {

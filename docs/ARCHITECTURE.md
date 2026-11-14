@@ -138,7 +138,12 @@ tools = 本地工具 + MCP 工具（先过权限过滤，见下一节）
 - 请求：system 合成 `instructions`、`tool_calls` 展开成 `function_call` item、`max_tokens`→`max_output_tokens`、`response_format`→`text.format`、`image_url`→`input_image`
 - 响应：`output` 里的 `function_call` 折回 `message.tool_calls`、`usage.input_tokens`→`prompt_tokens`、`status: incomplete`→`finish_reason: length`
 
-为什么包一层：工具循环、摘要、收尾这些有十几处调用点，都依赖 `choices[0].message` 这个形状。适配层把 API 差异关在一个文件里，换 API 只改 `createCompletion` 两行。
+为什么包一层：工具循环、摘要、收尾这些有十几处调用点，都依赖 `choices[0].message` 这个形状。适配层把 API 差异关在一个文件里，只有 `createCompletion` 一处直接碰 SDK。
+
+两个必须注意的点：
+
+- **思考 token 也算进 `max_output_tokens`**。摘要只要 900 额度，一思考就全花在 reasoning 上、返回空文本。默认 `REASONING_EFFORT=none` 关掉思考；要开就调高额度。
+- **发出去的内容要清洗**。工具输出是外部数据，可能带孤立代理对（半个 emoji）或控制字符，序列化后服务端直接 400（`unexpected end of hex escape`）。`toResponsesRequest` 里对 output / arguments / 文本统一过一遍 `sanitizeText`。
 
 ### 阶段 5：工具循环
 

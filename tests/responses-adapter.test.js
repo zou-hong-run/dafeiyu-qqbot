@@ -185,3 +185,18 @@ test('reasoning 能透传', () => {
   })
   assert.deepEqual(body.reasoning, { effort: 'none' })
 })
+
+test('工具调用字段名宽容：tool_name / input 这类别名也能取到', () => {
+  // 取不到 name 的话上层会当成「模型没调工具」，表现是一直回文字、不做事，且不报错
+  const shaped = toChatShape({
+    output: [
+      { type: 'function_call', tool_call_id: 'x1', tool_name: 'calc', input: '{"a":1}' },
+    ],
+    usage: {},
+  })
+
+  const call = shaped.choices[0].message.tool_calls[0]
+  assert.equal(call.id, 'x1')
+  assert.equal(call.function.name, 'calc')
+  assert.equal(call.function.arguments, '{"a":1}')
+})
