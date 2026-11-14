@@ -26,7 +26,7 @@ function sanitizeText(text, limit = 20_000) {
 }
 
 // 输出额度低于这个数就不开思考：思考 token 也算进同一个额度，小额度会被吃光
-export const THINKING_MIN_BUDGET = 1200
+const THINKING_MIN_BUDGET = 1200
 
 /**
  * 这次请求要不要开思考。
