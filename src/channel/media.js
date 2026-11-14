@@ -3,6 +3,8 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { env } from '../config/env.js'
 import { budgetFor } from '../ops/budget.js'
 import { sensitiveReason } from '../ops/file-policy.js'
@@ -178,6 +180,12 @@ function resolveVoice(input) {
   return voice
 }
 
+// DeepSeek 官方语音合成只有 stella（女声）和 tide（男声）两个音色，
+// edge 那套音色名在这里按男女声折一下；语种由 DeepSeek 自己按文本判断
+function deepseekVoiceFor(voice) {
+  return /Yunjian|Yunxi|Yunyang|Yunye|Yunfeng|Yunhao/i.test(voice) ? 'tide' : 'stella'
+}
+
 function firstLineOf(error) {
   return String(error?.stderr || error?.message || error)
     .split('\n')
@@ -199,6 +207,50 @@ async function synthesizeSpeech(text, voice = TTS_VOICE) {
   const attempts = []
 
   const usable = (file) => fs.existsSync(file) && fs.statSync(file).size > 1024
+
+  // 首选 DeepSeek 官方语音合成：POST /v1/tools/tts，音频流式返回（wav/pcm）。
+  // 任何一步出问题都往下走 edge-tts，别把 speak 弄坏
+  try {
+    const res = await fetch(`${env.baseURL.replace(/\/+$/, '')}/v1/tools/tts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.apiKey}`,
+      },
+      body: JSON.stringify({
+        text,
+        voice_id: deepseekVoiceFor(voice),
+        format: 'wav',
+      }),
+      signal: AbortSignal.timeout(110_000),
+    })
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).slice(0, 200)
+      throw new Error(`HTTP ${res.status}${detail ? ` ${detail}` : ''}`)
+    }
+
+    const raw = path.join(tmpDir, `dtts-${stamp}.wav`)
+    await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(raw))
+    if (!usable(raw)) throw new Error('返回的音频太小，疑似空响应')
+
+    // wav 体积偏大，能压成 mp3 就压，压不动就发 wav（QQ 语音也认）
+    try {
+      await run(
+        'ffmpeg',
+        ['-y', '-v', 'error', '-threads', '1', '-i', raw, '-ar', '24000', '-b:a', '48k', mp3],
+        { timeout: 60_000, env: childEnv, maxBuffer: 4 * 1024 * 1024 },
+      )
+      if (usable(mp3)) {
+        fs.rm(raw, { force: true }, () => {})
+        return { file: mp3, backend: 'deepseek-tts' }
+      }
+    } catch {
+      // 转码失败不致命，直接发 wav
+    }
+    return { file: raw, backend: 'deepseek-tts (wav)' }
+  } catch (error) {
+    attempts.push(`deepseek-tts: ${firstLineOf(error)}`)
+  }
 
   try {
     await run(
