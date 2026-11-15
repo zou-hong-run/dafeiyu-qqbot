@@ -22,8 +22,30 @@ import {
   toolsForScope,
 } from './factories.js'
 
+import { isConfiguredAdmin, SCHEDULER_ACTORS } from '../config/policy.js'
+
+/**
+ * 定时任务到点执行时用什么身份。
+ *
+ * 群友现在能自己建定时任务了，所以执行身份必须分两种：
+ * 管理员 / 老任务 → scheduler（全套高危工具）
+ * 群友建的 → scheduler-lite（只能查东西、发消息，碰不到 shell、write_file、send_to_group）
+ *
+ * 没配 ADMIN_OPENIDS 的机器按 full 处理：那种场景是单机自用，没有「管理员」这个概念，
+ * 降权只会把自己以前建的任务莫名搞瘫。
+ */
+export function actorForTask(task) {
+  if (env.adminOpenIds.length === 0) return SCHEDULER_ACTORS.full
+
+  const createdBy = String(task.createdBy ?? '').trim()
+  if (!createdBy) return SCHEDULER_ACTORS.full // 这一版之前建的老任务，没记创建者
+  return isConfiguredAdmin(createdBy) ? SCHEDULER_ACTORS.full : SCHEDULER_ACTORS.lite
+}
+
 export async function runScheduledTask(task) {
   const scope = task.target.type === 'group' ? 'group' : 'private'
+  const actor = actorForTask(task)
+  const lite = actor === SCHEDULER_ACTORS.lite
 
   try {
     await syncRegistry()
@@ -40,7 +62,7 @@ export async function runScheduledTask(task) {
   return runTaskAgent({
     taskPrompt: task.prompt,
     scope,
-    actor: 'scheduler',
+    actor,
     // 这个必须传：工具层靠「sessionKey 以 group: 开头」决定要不要自动注入 group_id。
     // 不传的话它默认是 'worker'，所有读群记录的工具都会报「只能在群里用」。
     sessionKey,
@@ -49,19 +71,20 @@ export async function runScheduledTask(task) {
       task.target.type === 'group'
         ? `当前在 QQ 群聊（群 openid ${task.target.id}），你的回复会用主动消息直接发到这个群，读群记录、往群里发东西都是这个群`
         : `当前是私聊（用户 openid ${task.target.id}），消息直接发给这个用户`,
-    tools: toolsForScope(scope, 'scheduler'),
+    tools: toolsForScope(scope, actor),
     callTool: (name, args) => callTool(name, args, env.toolTimeoutMs, { sessionKey }),
     sendImage: imageSenderFor(null, send),
     audioSender: audioSenderFor(null, send),
     videoSender: videoSenderFor(null, send),
     speakSender: speakSenderFor(null, send),
-    scheduler: schedulerForTarget(sessionKey, task.target),
+    // 群友建的任务不能再往下建任务：否则一个任务里套一个任务，没人看得住
+    scheduler: lite ? undefined : schedulerForTarget(sessionKey, task.target),
     historyReader: historyReaderForGroup(task.target.type === 'group' ? task.target.id : ''),
     profileReader: profileReaderFor({ target: task.target }),
-    groupSender: groupSenderFor(currentEvent),
-    broadcastSender: broadcastSenderFor(currentEvent),
+    groupSender: lite ? undefined : groupSenderFor(currentEvent),
+    broadcastSender: lite ? undefined : broadcastSenderFor(currentEvent),
     groupsReader: groupsReaderFor(),
-    gitSync: gitSyncFor(),
+    gitSync: lite ? undefined : gitSyncFor(),
   })
 }
 

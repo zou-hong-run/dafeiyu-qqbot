@@ -6,7 +6,11 @@ const PRIVATE_ONLY = { scopes: ['private'], readOnly: false }
 const GROUP_ONLY = { scopes: ['group'], readOnly: true }
 
 // 高危工具：能执行命令、改文件、装包、挂 MCP、写技能（会影响后续提示词）的一律走白名单
-// 另外 start_task / schedule_task 也在这里：否则群友能借子 agent 或定时任务绕过限制
+// 另外 start_task 也在这里：否则群友能借子 agent 绕过限制
+//
+// schedule_task 不在这里了（群友可以建定时任务），但风险没消失，只是换了地方堵：
+// 定时任务到点执行用的是「调度身份」，群友建的任务只能拿到 SCHEDULER_SAFE_TOOLS 里的东西，
+// 碰不到 shell / write_file / send_to_group 这些。见 timers.js 的 actor 选择。
 export const DANGEROUS_TOOLS = new Set([
   'shell',
   'run_script',
@@ -16,7 +20,6 @@ export const DANGEROUS_TOOLS = new Set([
   'install_package',
   'add_mcp',
   'start_task',
-  'schedule_task',
   'restart_self',
   'send_to_group',
   'broadcast',
@@ -109,9 +112,24 @@ export function isConfiguredAdmin(actor = '') {
   return env.adminOpenIds.includes(id)
 }
 
+/**
+ * 定时任务的两种执行身份。
+ *
+ * scheduler：管理员建的任务，或者这一版之前的老任务（没有 createdBy），视为建任务的人已授权
+ * scheduler-lite：群友建的任务。它到点跑的时候不能碰任何高危工具——
+ *   否则群友写一句「把服务器上的 .env 念一遍」当任务描述，就等于借定时任务绕过所有封锁。
+ *
+ * 注意 actor 只是「身份标签」，真正生效的是 isToolAllowed 里对这两个字符串的判断。
+ */
+export const SCHEDULER_ACTORS = {
+  full: 'scheduler',
+  lite: 'scheduler-lite',
+}
+
 function dangerAllowed(scope, actor) {
-  // 定时任务到点执行，视为建任务的人已授权
-  if (actor === 'scheduler') return true
+  // 定时任务到点执行：管理员授权的拿全部，群友建的拿不到高危工具
+  if (actor === SCHEDULER_ACTORS.full) return true
+  if (actor === SCHEDULER_ACTORS.lite) return false
 
   const admins = env.adminOpenIds
   if (admins.length > 0) return Boolean(actor) && admins.includes(String(actor))
