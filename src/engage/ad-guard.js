@@ -33,10 +33,76 @@ const PROMO_WORDS = [
   '推广',
   '招商',
   '内部渠道',
+  '价格美丽',
+  '量大从优',
+  '量大优惠',
+  '厂家直供',
+  '源头厂家',
+  '实力厂家',
+  '专业解决',
+  '专业办理',
+  '稳定供应',
+  '渠道价',
+  '长期有效',
+  '诚招',
+  '包过',
+  '接单',
+  '代办',
+  '代开',
+  '一手资源',
 ]
 
-// 拉人加好友这一类，本身就带「离开这个群」的意图，命中即可判定
-const PULL_WORDS = ['扫码进', '拉你进', '进群领取', '戳我头像', '私聊我', '主页有联系方式']
+// 拉人加好友这一类，本身就带「离开这个群」的意图，命中即可判定。
+// 「加好友备用」这种是上门推销的标准收尾话术，正常群友不会这么说话。
+const PULL_WORDS = [
+  '扫码进',
+  '拉你进',
+  '进群领取',
+  '戳我头像',
+  '私聊我',
+  '主页有联系方式',
+  '加好友备用',
+  '加好友咨询',
+  '加好友详聊',
+  '加好友了解',
+  '加好友聊',
+  '详情加好友',
+  '有需要加好友',
+  '需要加好友',
+  '私信我',
+  '私聊详聊',
+  '私聊咨询',
+  '私聊报价',
+  '老板私聊',
+  '有意私聊',
+  '找我咨询',
+  '咨询加我',
+]
+
+// 行业服务类词汇。上门推销技术/代办服务的广告常常既没有链接也没有号码，
+// 只写一行业务再让你「加好友备用」，所以这类要和拉人动作一起看。
+const SERVICE_WORDS = [
+  'ddos',
+  'cc防护',
+  '高防',
+  '抗攻击',
+  '被攻击',
+  '防攻击',
+  '防火墙',
+  '代运营',
+  '引流',
+  '权重',
+  '解封',
+  '过户',
+  '资质',
+  '开户',
+  '记账',
+  '报税',
+  '外包',
+  '代跑',
+  '刷量',
+  '涨粉',
+]
 
 // 链接 / 联系方式：只靠广告词容易误伤，必须同时出现其一
 const LINK_PATTERN = /https?:\/\/|www\.|[a-z0-9-]+\.(?:com|cn|net|org|top|xyz|vip)\b/i
@@ -46,7 +112,7 @@ const QQ_PATTERN = /(?:qq|扣扣|企鹅)[\s号:：]*[1-9]\d{4,10}/i
 
 // 「加我 / 联系我 / 私聊」这类动作词。单有号码不算，配上它才算在拉人。
 // 注意别把「找我」收进来——「我的 qq 是 xxx，有事找我」是正常留联系方式。
-const CONTACT_INTENT = /(加我|联系我|私聊我|扣我|戳我|加一下|扫码)/
+const CONTACT_INTENT = /(加我|联系我|私聊我|扣我|戳我|加一下|扫码|加好友|加个好友|加下好友|加微信|加vx|加qq|咨询|详聊|报价)/i
 
 // 太短的不判（「优惠」两个字单独发不算广告）
 const MIN_LENGTH = 8
@@ -71,6 +137,12 @@ export function isLikelyAd(text) {
 
   const hasPromo = PROMO_WORDS.some((word) => raw.includes(word))
   const hasContact = LINK_PATTERN.test(raw) || PHONE_PATTERN.test(raw) || QQ_PATTERN.test(raw)
+
+  // 行业服务广告：业务词 + 拉人动作，有没有链接号码都算。
+  // 这类是「解决 XX 问题，加好友备用」的固定写法，正常聊天不会凑齐这两样。
+  const hasService = SERVICE_WORDS.some((word) => raw.includes(word))
+  if (hasService && raw.length >= 12 && (hasPromo || CONTACT_INTENT.test(raw))) return true
+
   if (!hasContact) return false
 
   return hasPromo || CONTACT_INTENT.test(raw)
