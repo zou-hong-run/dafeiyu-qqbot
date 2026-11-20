@@ -3,43 +3,63 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+// 两层：
+//   SELF.md              跟着代码走，能力说明 + 默认踩坑，多人共用一个仓库时这是共享基线
+//   data/self-learned.md 本机攒的经验，data/ 不进仓库，各部署互不影响
+// 分开的原因：所有人都读同一份 SELF.md，谁 push 一次就改了所有人的「自我认知」。
 const docFile = path.join(projectRoot, 'SELF.md')
+let learnedFile = path.join(projectRoot, 'data', 'self-learned.md')
 
 // 原来只注入 4000 字，而文件早就一万多字了——后写的经验全被截掉，
-// 表现就是「说了它也记不住」。提到 12000，并保留截断提示。
-const MAX_CHARS = 12_000
+// 表现就是「说了它也记不住」。分开给额度：基线占大头，本机经验不被挤掉。
+const BASE_MAX_CHARS = 10_000
+const LEARNED_MAX_CHARS = 2_000
 
-// 踩坑记录段：机器人自己往里追加，不用手工 edit 整个文件
-const LESSON_HEADING = '## 踩坑记录（自己总结的，别删）'
+const LEARNED_HEADING = '## 本机积累的经验（只在这台机器上有）'
 const MAX_LESSONS = 40
 
-let cache = { mtime: -1, text: '' }
-export function selfDoc() {
-  try {
-    const stat = fs.statSync(docFile)
-    if (stat.mtimeMs === cache.mtime) return cache.text
+/** 测试用：把本机经验文件指到临时目录 */
+export function useLearnedFile(target) {
+  learnedFile = target
+  cache = { key: '', text: '' }
+}
 
-    const raw = fs.readFileSync(docFile, 'utf8').trim()
-    cache = {
-      mtime: stat.mtimeMs,
-      text: raw.length > MAX_CHARS ? `${raw.slice(0, MAX_CHARS)}\n…（已截断）` : raw,
-    }
-    return cache.text
+let cache = { key: '', text: '' }
+
+function readIfExists(target) {
+  try {
+    return fs.readFileSync(target, 'utf8').trim()
   } catch {
-    return cache.text
+    return ''
   }
 }
 
-function lessonLines(section) {
-  return section
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('- '))
+function clip(text, limit) {
+  return text.length > limit ? `${text.slice(0, limit)}\n…（已截断）` : text
+}
+
+export function selfDoc() {
+  const base = readIfExists(docFile)
+  const learned = readIfExists(learnedFile)
+  if (!base && !learned) return cache.text
+
+  const key = `${base.length}:${learned.length}:${base.slice(-40)}:${learned.slice(-40)}`
+  if (key === cache.key) return cache.text
+
+  const parts = []
+  if (base) parts.push(clip(base, BASE_MAX_CHARS))
+  if (learned) parts.push(`${LEARNED_HEADING}\n\n${clip(learned, LEARNED_MAX_CHARS)}`)
+
+  cache = { key, text: parts.join('\n\n') }
+  return cache.text
 }
 
 /**
- * 把一条踩坑经验追加到 SELF.md 的踩坑记录段。
- * 只写「症状 → 原因 → 做法」一行，不记过程；同一条不重复记。
+ * 把一条踩坑经验追加到**本机**的经验文件（data/self-learned.md）。
+ *
+ * 不写 SELF.md：那是跟着代码走的共享基线，多人部署同一个仓库时，
+ * 谁 push 一次就改了所有机器人的认知。本机学到的东西只该留在这台机器上。
  */
 export function appendLesson({ symptom = '', cause = '', fix = '' } = {}) {
   const brief = String(symptom ?? '').replace(/\s+/g, ' ').trim().slice(0, 80)
@@ -51,33 +71,23 @@ export function appendLesson({ symptom = '', cause = '', fix = '' } = {}) {
 
   const line = `- ${brief}${reason ? ` → ${reason}` : ''} → ${action}`
 
-  let raw = ''
+  const raw = readIfExists(learnedFile)
+  const existing = raw
+    .split('\n')
+    .map((item) => item.trim())
+    .filter((item) => item.startsWith('- '))
+
+  if (existing.some((item) => item.includes(brief))) return { duplicated: true, line }
+
+  const lessons = [...existing, line].slice(-MAX_LESSONS)
+
   try {
-    raw = fs.readFileSync(docFile, 'utf8')
-  } catch {
-    raw = `# 万能大肥鱼 · 自身能力说明\n\n${LESSON_HEADING}\n\n`
+    fs.mkdirSync(path.dirname(learnedFile), { recursive: true })
+    fs.writeFileSync(learnedFile, `${lessons.join('\n')}\n`, 'utf8')
+    cache = { key: '', text: '' }
+  } catch (error) {
+    throw new Error(`写本机经验失败：${error?.message ?? error}`)
   }
 
-  const headingIndex = raw.indexOf(LESSON_HEADING)
-  if (headingIndex >= 0) {
-    const before = raw.slice(0, headingIndex + LESSON_HEADING.length)
-    const rest = raw.slice(headingIndex + LESSON_HEADING.length)
-    const nextHeading = rest.search(/\n##\s/)
-    const section = nextHeading >= 0 ? rest.slice(0, nextHeading) : rest
-    const tail = nextHeading >= 0 ? rest.slice(nextHeading) : ''
-
-    if (section.includes(brief)) return { duplicated: true, line }
-
-    const lessons = [...lessonLines(section), line].slice(-MAX_LESSONS)
-    const rebuilt = `\n\n${lessons.join('\n')}\n`
-    const updated = `${before}${rebuilt}${tail}`
-    fs.writeFileSync(docFile, updated, 'utf8')
-    cache.mtime = -1
-    return { duplicated: false, line, total: lessons.length }
-  }
-
-  const updated = `${raw.trimEnd()}\n\n${LESSON_HEADING}\n\n${line}\n`
-  fs.writeFileSync(docFile, updated, 'utf8')
-  cache.mtime = -1
-  return { duplicated: false, line, total: 1 }
+  return { duplicated: false, line, total: lessons.length }
 }

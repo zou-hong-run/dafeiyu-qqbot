@@ -300,6 +300,7 @@ bwrap
 | 文件 | 内容 | 谁写 |
 |---|---|---|
 | `memory.json` | 长期事实 + 中期摘要 | `remember` 工具、摘要压缩 |
+| `self-learned.md` | 机器人自己攒的踩坑经验，**不进仓库**（`data/` 已忽略） | `note_lesson` 工具 |
 | `knowledge.json` | 群知识沉淀 | 洞察定时器 |
 | `situations.json` | 未了结的事（回访用） | `note_situation` 工具 |
 | `goals.json` | 会话目标 | 工单系统 |
