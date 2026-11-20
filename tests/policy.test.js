@@ -185,8 +185,10 @@ test('recall_message 收进高危名单', () => {
 
 // 数字对不上过一次：实际 18 个，文档写 16，后来改成 17 还是错。
 // 加高危工具时这条会红，逼着三级文档一起改。
-test('高危工具总数与文档一致（18）', async () => {
-  assert.equal(DANGEROUS_TOOLS.size, 18, '加/删高危工具时同步 README 和 docs/CAPABILITIES.md')
+// schedule_task 已移出：群友能建定时任务，但到点执行会降成 scheduler-lite 身份，
+// 拿不到任何高危工具。风险挪到了 timers.js 的 actorForTask。
+test('高危工具总数与文档一致（17）', async () => {
+  assert.equal(DANGEROUS_TOOLS.size, 17, '加/删高危工具时同步 README 和 docs/CAPABILITIES.md')
 
   const fs = await import('node:fs')
   const path = await import('node:path')
