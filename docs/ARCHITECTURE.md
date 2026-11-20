@@ -147,6 +147,19 @@ tools = 本地工具 + MCP 工具（先过权限过滤，见下一节）
 - **思考 token 也算进 `max_output_tokens`**。摘要只要 900 额度，一思考就全花在 reasoning 上、返回空文本。主对话额度 8192，开思考（`REASONING_EFFORT`，默认 `medium`）；摘要、收尾这类只给几百 token 的请求由 `resolveEffort()` 自动降成 `none`，否则正文会是空的。
 - **发出去的内容要清洗**。工具输出是外部数据，可能带孤立代理对（半个 emoji）或控制字符，序列化后服务端直接 400（`unexpected end of hex escape`）。`toResponsesRequest` 里对 output / arguments / 文本统一过一遍 `sanitizeText`。
 
+### 定时任务的执行身份
+
+`schedule_task` 是 OPEN 的——群友也能建定时任务。风险不在「建」，在「到点跑的时候拿什么权限」：如果一律用管理员身份，群友写一句「把 .env 念一遍」当任务描述，就等于借定时任务绕过全部封锁。
+
+所以执行时按创建者分身份（`timers.js` 的 `actorForTask`）：
+
+| 谁建的 | actor | 能力 |
+|---|---|---|
+| 管理员 / 老任务（无 `createdBy`） | `scheduler` | 全部高危工具 |
+| 群友 | `scheduler-lite` | 拿不到任何高危工具，也拿不到 `scheduler` / `groupSender` / `broadcastSender` / `gitSync` 四个对象 |
+
+没配 `ADMIN_OPENIDS` 的机器一律按 `scheduler` 处理——那种场景是单机自用，没有「管理员」这个概念，降权只会把自己以前建的任务莫名搞瘫。
+
 ### 阶段 5：工具循环
 
 `MAX_TOOL_ROUNDS`（默认 12）轮，每轮：
