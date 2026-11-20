@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isLikelyAd, pickAdReply, resetAdGuard, takeWarnSlot } from '../src/engage/ad-guard.js'
+import { canCheckImageAd, isLikelyAd, pickAdReply, resetAdGuard, takeWarnSlot } from '../src/engage/ad-guard.js'
 
 // 广告检测：误伤一个正常群友，比放过十条广告更糟。
 // 所以判定要求「联系方式 + 广告词/拉人动作」，宁可漏，不可冤。
@@ -70,4 +70,30 @@ test('同一个群一小时最多三次，不同人不同群互不影响', () =>
 
   // 一小时窗口过后重新开放
   assert.equal(takeWarnSlot('g2', 'e', now + 61 * 60_000), true)
+})
+
+// 图片广告要调视觉模型，比文本判定贵得多，所以单独收一层限频。
+// 不设的话，群里刷屏发图就能把额度烧光。
+test('图片判定：同一个人一天只判一张', () => {
+  resetAdGuard()
+  const now = Date.now()
+  assert.equal(canCheckImageAd('g1', 'u1', now), true)
+  assert.equal(canCheckImageAd('g1', 'u1', now + 60_000), false, '同一个人重复发图不再判')
+  assert.equal(canCheckImageAd('g1', 'u1', now + 25 * 3600_000), true, '过了 24 小时可以再判')
+})
+
+test('图片判定：同一个群一小时有总上限', () => {
+  resetAdGuard()
+  const now = Date.now()
+  let allowed = 0
+  for (let i = 0; i < 12; i += 1) {
+    if (canCheckImageAd('g2', `user-${i}`, now)) allowed += 1
+  }
+  assert.equal(allowed, 8, '每群每小时最多判 8 张')
+
+  // 换一个群不受影响
+  assert.equal(canCheckImageAd('g3', 'user-new', now), true)
+
+  // 一小时窗口过后重新放开
+  assert.equal(canCheckImageAd('g2', 'user-new-2', now + 61 * 60_000), true)
 })

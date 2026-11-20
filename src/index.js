@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { env } from './config/env.js'
-import { chat, summarizeGroup, runTaskAgent } from './chat/deepseek.js'
+import { chat, judgeImageAd, summarizeGroup, runTaskAgent } from './chat/deepseek.js'
 import { startTask as launchTask, killTask, submitInput, takeInterruptedTasks } from './tasks/task-runner.js'
 import { initScheduler, cronMatches } from './tasks/scheduler.js'
 import { startMcp, getTools, syncRegistry, callTool, stopMcp } from './mcp/client.js'
@@ -29,7 +29,7 @@ import { runCommand } from './app/commands.js'
 import { progressReporter, runFollowUps, runHotTake, runProactiveScan, runScheduledTask } from './app/timers.js'
 import { atMe, broadcastSenderFor, choiceSenderFor, gitSyncFor, groupSenderFor, groupsReaderFor, notifierFor, historyReaderFor, profileReaderFor, referencedContext, schedulerFor, toolsForScope, sessionKeyOf, wakeSenderFor } from './app/factories.js'
 import { QUIET_MS, flushQuiet, isMuted, isUnmuteCommand, muteGroup, oncePer, parseMuteCommand, unmuteGroup } from './engage/quiet.js'
-import { isLikelyAd, pickAdReply, takeWarnSlot } from './engage/ad-guard.js'
+import { canCheckImageAd, isLikelyAd, pickAdReply, takeWarnSlot } from './engage/ad-guard.js'
 import { acknowledgeInteraction, onInteraction, onLifecycle, onMessage, segment, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendMarkdownTo, sendReply, splitMarkdown } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
@@ -375,15 +375,10 @@ async function handleQuietCommand(event, text) {
 // 群里有明显广告时，@ 对方一句软提醒，然后这条不再走后续判断。
 // 判定是纯规则（广告词 + 链接/联系方式），限频在 ad-guard 里：
 // 同一个人 24 小时只提一次，同一个群一小时最多 3 次。
-async function warnIfAd(event, text) {
-  if (!env.adGuard) return false
-  if (!event.group_id || !event.user_id) return false
-  if (env.adminOpenIds.includes(String(event.user_id))) return false
-  if (!isLikelyAd(text)) return false
-  if (hasReplied(event.message_id)) return false
-
+/** 占限频名额并发出软提醒。文本广告和图片广告共用这一段 */
+async function sendAdNotice(event, detail = '') {
   if (!takeWarnSlot(event.group_id, event.user_id)) {
-    console.log(`[广告] ${event.group_id.slice(0, 12)}… 命中广告词，但限频中，跳过提醒`)
+    console.log(`[广告] ${event.group_id.slice(0, 12)}… 判定为广告，但限频中，跳过提醒`)
     return false
   }
 
@@ -392,12 +387,46 @@ async function warnIfAd(event, text) {
   try {
     // 用消息段拼 @：flatten 会生成 <qqbot-at-user>，dispatch 自动改走 markdown 发送
     await sendGroup(event.group_id, [segment.at(event.user_id), segment.text(` ${notice}`)])
-    console.log(`[广告] 已提醒 ${String(event.user_id).slice(0, 8)}…：${text.slice(0, 40)}`)
+    console.log(
+      `[广告] 已提醒 ${String(event.user_id).slice(0, 8)}…${detail ? `：${detail.slice(0, 40)}` : ''}`,
+    )
   } catch (error) {
     console.warn('[广告] 提醒发送失败：', error?.message ?? error)
   }
 
   return true
+}
+
+async function warnIfAd(event, text) {
+  if (!env.adGuard) return false
+  if (!event.group_id || !event.user_id) return false
+  if (env.adminOpenIds.includes(String(event.user_id))) return false
+  if (!isLikelyAd(text)) return false
+  if (hasReplied(event.message_id)) return false
+
+  return sendAdNotice(event, text)
+}
+
+/**
+ * 纯图片的广告（发张海报不说话）光看文字抓不到，这里单独判一次。
+ *
+ * 异步执行、不阻塞消息处理；判断失败按「不是广告」处理——宁可漏，别冤枉人。
+ */
+async function warnIfAdImage(event, imagePath) {
+  if (!env.adGuard) return false
+  if (!event.group_id || !event.user_id) return false
+  if (env.adminOpenIds.includes(String(event.user_id))) return false
+  if (!canCheckImageAd(event.group_id, event.user_id)) return false
+
+  try {
+    if (!(await judgeImageAd(imagePath))) return false
+  } catch (error) {
+    console.warn('[图片广告] 判断异常：', error?.message ?? error)
+    return false
+  }
+
+  if (hasReplied(event.message_id)) return false
+  return sendAdNotice(event, `图片 ${path.basename(imagePath)}`)
 }
 
 async function handleGroupAll(event) {
@@ -439,6 +468,14 @@ async function handleGroupAll(event) {
       const saved = await describeInbound(inbound, sessionKeyOf(event)).catch(() => null)
       const files = saved?.images ?? []
       rememberGroupImages(event.group_id, files)
+
+      // 纯图片的广告光看文字抓不到（发张海报一句话不说），这里单独判一次。
+      // 不 await：判图要调视觉模型，别让消息处理卡在它上面。
+      if (files.length > 0) {
+        void warnIfAdImage(event, files[0]).catch((error) =>
+          console.warn('[图片广告] 判定异常：', error?.message ?? error),
+        )
+      }
       recordGroupMessage(
         event,
         `${labelInbound(event)}${files.length > 0 ? `（已存 ${files.join(' ')}）` : ''}`,

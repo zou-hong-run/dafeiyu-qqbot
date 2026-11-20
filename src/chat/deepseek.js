@@ -1445,6 +1445,50 @@ function toImagePart(file) {
 }
 
 // 视觉自检：拿一张本地图走一遍 toImagePart + 模型调用，把真实结果暴露出来
+/**
+ * 判断一张图是不是广告（促销海报、二维码推广、扫码领券那类）。
+ *
+ * 群里的图片消息默认不进视觉通道——每条群图都喂模型太贵。
+ * 但纯图片的广告（发张海报不说话）光看文字是抓不到的，所以这里单独开一条
+ * 轻量通道：小额度、关思考、只问是不是，调用方自己限频。
+ *
+ * @returns {Promise<boolean>} 判断不出来时返回 false（宁可漏，别冤枉人）
+ */
+export async function judgeImageAd(imagePath) {
+  const part = toImagePart(imagePath)
+  if (!part) return false
+
+  try {
+    const completion = await createCompletion({
+      model: env.model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                '这张图是不是商业广告？包括：促销海报、打折信息、二维码推广、扫码领券、招募代理、' +
+                '卖课卖货、带联系方式的产品图。普通的聊天截图、表情包、生活照、新闻配图不算。\n' +
+                '只回答一个字：是 或 否。不要解释。',
+            },
+            part,
+          ],
+        },
+      ],
+      // 额度小 → resolveEffort 会自动关思考；但不给足又可能被思维链吃光
+      max_tokens: 300,
+    })
+
+    const answer = String(completion.choices?.[0]?.message?.content ?? '').trim()
+    // 只认明确的「是」，其余（否 / 空 / 含糊）一律不算
+    return /^[是√✓]/.test(answer)
+  } catch (error) {
+    console.warn('[图片广告] 判断失败，按非广告处理：', error?.message ?? error)
+    return false
+  }
+}
+
 export async function testVision(imagePath) {
   const part = toImagePart(imagePath)
   if (!part) {

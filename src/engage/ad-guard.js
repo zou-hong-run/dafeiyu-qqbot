@@ -202,8 +202,33 @@ export function takeWarnSlot(groupId, userId, now = Date.now()) {
   return true
 }
 
+// 图片广告要调视觉模型，比文本判定贵得多，所以单独收一层：
+// 同一个群一小时最多判这么多张，同一个人一天最多判一张——广告党换号才有用
+const IMAGE_AD_HOURLY_LIMIT = 8
+const IMAGE_AD_USER_COOLDOWN_MS = 24 * 60 * 60 * 1000
+
+const imageAdChecks = new Map()
+const imageAdUsers = new Map()
+
+/** 这张图值不值得送模型判一次。返回 true 表示占到了名额 */
+export function canCheckImageAd(groupId, userId, now = Date.now()) {
+  const hourAgo = now - 60 * 60 * 1000
+  const recent = (imageAdChecks.get(groupId) ?? []).filter((at) => at > hourAgo)
+  imageAdChecks.set(groupId, recent)
+  if (recent.length >= IMAGE_AD_HOURLY_LIMIT) return false
+
+  const last = imageAdUsers.get(userId) ?? 0
+  if (now - last < IMAGE_AD_USER_COOLDOWN_MS) return false
+
+  recent.push(now)
+  imageAdUsers.set(userId, now)
+  return true
+}
+
 /** 测试用：清掉限频状态 */
 export function resetAdGuard() {
   userWarnedAt.clear()
   groupWarns.clear()
+  imageAdChecks.clear()
+  imageAdUsers.clear()
 }
