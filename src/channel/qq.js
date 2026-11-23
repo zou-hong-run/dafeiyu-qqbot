@@ -537,7 +537,19 @@ function toMessageElements(attachments) {
 
 export function toLegacyEvent(msg) {
   if (!msg || (msg.kind !== 'group' && msg.kind !== 'c2c')) return null
-  if (msg.senderIsBot) return null
+
+  // 机器人消息：以前一律丢，结果群里那条「@🐽 终于等到你…」新人欢迎语
+  // 是机器人账号发的，我也跟着丢了，看不出群里来过人。
+  //
+  // 但不能全放行——机器人自己发的消息如果被平台回灌成入站，会自问自答。
+  // 所以按 openid 只拦「我自己」：拿不到自己的 openid 时退回旧的保守策略（全丢），
+  // 宁可漏，也不能循环。
+  const senderIsBot = Boolean(msg.senderIsBot)
+  if (senderIsBot) {
+    const selfId = String(cachedSelfId ?? '')
+    const senderId = String(msg.senderId ?? '')
+    if (!selfId || !senderId || senderId === selfId) return null
+  }
 
   const isGroup = msg.kind === 'group'
   const target = msg.replyTarget
@@ -546,7 +558,7 @@ export function toLegacyEvent(msg) {
   const inboundAttachments = collectAttachments(msg)
   if (inboundAttachments.length > 0) {
     console.log(
-      `[入站] ${isGroup ? '群' : '私聊'} 附件 ${inboundAttachments.length} 个：${inboundAttachments
+      `[入站] ${isGroup ? '群' : '私聊'}${senderIsBot ? '(机器人)' : ''} 附件 ${inboundAttachments.length} 个：${inboundAttachments
         .map((att) => att.content_type)
         .join(',')}`,
     )
@@ -569,6 +581,9 @@ export function toLegacyEvent(msg) {
     message_scene: msg.messageScene,
     msg_idx: msg.msgIdx,
     ref_msg_idx: msg.refMsgIdx,
+    // 是不是别的机器人发的（欢迎语、播报这类）。业务层据此跳过广告判定和自动接话，
+    // 免得两个机器人互相聊起来；被 @ 或被点名时仍然正常回。
+    sender_is_bot: senderIsBot,
     // 业务层 extractInbound 读的是这个数组；attachments 保留原始报文，排查用
     message: toMessageElements(inboundAttachments),
     attachments: inboundAttachments,
