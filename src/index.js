@@ -33,7 +33,7 @@ import { canCheckImageAd, isLikelyAd, pickAdReply, takeWarnSlot } from './engage
 import { acknowledgeInteraction, onInteraction, onLifecycle, onMessage, segment, selfOpenid, sendGroup, sendPrivate, sendTyping, start as startBot, stop as stopBot } from './bot.js'
 import { chunkText, clip, isStaleMessage, markQuote, pickMessageId, sendLongReply, sendMarkdownTo, sendReply, splitMarkdown } from './channel/sender.js'
 import { pendingCount, takePending } from './chat/pending.js'
-import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, speakSenderFor, videoSenderFor } from './channel/media.js'
+import { audioSenderFor, cardSenderFor, fileSenderFor, imageSenderFor, sendMediaToGroup, speakSenderFor, synthesizeSpeech, videoSenderFor } from './channel/media.js'
 import { claim, coolingDown, enqueue, hasReplied, initTrigger, markReplied, mentionsBot, recordGroupMessage, scheduleJudge, touch, worthJudging } from './channel/trigger.js'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -593,17 +593,81 @@ initTrigger({
   judge: (event) => handleMessage(event, 'judge'),
 })
 
+// 别的机器人发的「新人欢迎语」：把人捞出来，补一句欢迎 + 一条语音。
+// 只认欢迎类文本，播报/日报这类照旧只记录不吭声——两个机器人对聊会停不下来。
+const WELCOME_RE =
+  /(终于等到你|欢迎(新|加入|进群)|新人(来了|进群|入群|报个到)|加入本群|欢迎加入)/
+const welcomedAt = new Map() // `${groupId}:${openid}` → 上次欢迎时间
+const WELCOME_TTL_MS = 10 * 60 * 1000
+
+/**
+ * 从机器人欢迎语里找出被 @ 的人。
+ * QQ 的文本里内联成 <@openid>，同时兼容 mentions 数组（不同 SDK 版本字段名不一样）。
+ */
+function welcomedOpenid(event) {
+  const inline = String(event.content ?? '').match(/<@!?([0-9A-Za-z]{16,})>/)
+  if (inline) return inline[1]
+  for (const m of event.mentions ?? []) {
+    const id = m?.id ?? m?.user_id ?? m?.member_openid ?? m?.openid
+    if (id) return String(id)
+  }
+  return ''
+}
+
+async function welcomeNewcomer(event, botText) {
+  if (!WELCOME_RE.test(botText)) return
+
+  const groupId = String(event.group_id ?? '')
+  const openid = welcomedOpenid(event)
+  if (!groupId || !openid) {
+    console.log('[欢迎] 认不出被 @ 的是谁（没拿到 openid），这条跳过')
+    return
+  }
+
+  // 同一个群同一个人 10 分钟内只欢迎一次，机器人重推不会连着喊
+  const key = `${groupId}:${openid}`
+  const last = welcomedAt.get(key) ?? 0
+  if (Date.now() - last < WELCOME_TTL_MS) return
+  welcomedAt.set(key, Date.now())
+  if (welcomedAt.size > 500) {
+    for (const [k, t] of welcomedAt) if (Date.now() - t > WELCOME_TTL_MS) welcomedAt.delete(k)
+  }
+
+  // 文字先出，@ 只有 markdown 消息才认；退化成不带 @ 也不影响欢迎
+  const text = `欢迎新朋友，随便聊，有问题 @大肥鱼 就行。`
+  const sent = await sendMarkdownTo({ type: 'group', id: groupId }, `<@${openid}> ${text}`)
+  if (!sent) await sendGroup(groupId, { msg_type: 0, content: text })
+
+  // 语音放后面：合成要一两秒，慢一点也比文字迟到强
+  try {
+    const { file } = await synthesizeSpeech('欢迎新朋友，我是大肥鱼，有问题随时喊我。')
+    const keep = path.join(projectRoot, 'downloads', `welcome-${Date.now()}.mp3`)
+    fs.copyFileSync(file, keep)
+    fs.rm(file, { force: true }, () => {})
+    await sendMediaToGroup(groupId, path.basename(keep))
+    console.log(`[欢迎] 群 ${groupId.slice(0, 8)}… 已欢迎 ${openid.slice(0, 8)}…（文字+语音）`)
+  } catch (error) {
+    // 语音失败不算全失败，文字已经发出去了
+    console.warn('[欢迎] 语音没发出去：', String(error?.message ?? error).slice(0, 120))
+    console.log(`[欢迎] 群 ${groupId.slice(0, 8)}… 已欢迎 ${openid.slice(0, 8)}…（仅文字）`)
+  }
+}
+
 // 官方 SDK 只有一个 message 事件，类型靠 event.message_type 区分。
 // 这里按私聊 / 群内 @ / 普通群消息三条路分流，下游逻辑和换 SDK 之前完全一样。
 onMessage((event) => {
-  // 别的机器人发的消息（新人欢迎语、播报这类）：只进记录，不回一句。
+  // 别的机器人发的消息（新人欢迎语、播报这类）：只进记录。
   // 以前这类消息在 channel 层就被丢了，结果群里来过人我完全看不出来。
-  // 这里必须挡死「回复」，否则两个机器人会互相接话停不下来。
+  // 回复必须严格限定在「欢迎新人」这一种，否则两个机器人会互相接话停不下来。
   if (event.sender_is_bot) {
     if (event.message_type === 'group' && event.group_id) {
       const botText = (event.content ?? '').trim() || labelInbound(event) || '[附件]'
       recordGroupMessage(event, botText)
       console.log(`[入站] 群(机器人) 已记录：${botText.slice(0, 40)}`)
+      // 不 await：合成语音要一两秒，别把入站队列堵住
+      void welcomeNewcomer(event, botText).catch((error) => {
+        console.warn('[欢迎] 处理失败：', String(error?.message ?? error).slice(0, 120))
+      })
     }
     return
   }

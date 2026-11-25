@@ -195,7 +195,7 @@ function firstLineOf(error) {
 }
 
 // 依次尝试 edge-tts（音质最好，需联网）→ python edge_tts → espeak-ng + ffmpeg（离线机器音）
-async function synthesizeSpeech(text, voice = TTS_VOICE) {
+export async function synthesizeSpeech(text, voice = TTS_VOICE) {
   const tmpDir = path.join(projectRoot, 'tmp')
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   const mp3 = path.join(tmpDir, `tts-${stamp}.mp3`)
