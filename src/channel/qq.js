@@ -548,7 +548,13 @@ export function toLegacyEvent(msg) {
   if (senderIsBot) {
     const selfId = String(cachedSelfId ?? '')
     const senderId = String(msg.senderId ?? '')
-    if (!selfId || !senderId || senderId === selfId) return null
+    if (selfId && senderId && senderId === selfId) return null
+    if (!selfId) {
+      // 拿不到自己的 openid 时无法判断是不是自己发的。
+      // 以前这种时候直接 return null，结果是群里所有机器人消息（新人欢迎语）
+      // 连日志都没有一行。现在放行，靠业务层「机器人消息只记录不回复」兜住循环。
+      console.log('[qq] 自己的 openid 未知，机器人消息按放行处理（业务层不回复）')
+    }
   }
 
   const isGroup = msg.kind === 'group'
@@ -636,9 +642,16 @@ async function loadSelfOpenid() {
   try {
     const info = await bot.getSelfInfo()
     const value = info?.openid ?? info?.user_openid ?? info?.id
-    if (value) cachedSelfId = String(value)
-  } catch {
+    if (value) {
+      cachedSelfId = String(value)
+      console.log(`[qq] 自己的 openid 已缓存：${cachedSelfId.slice(0, 8)}…`)
+    } else {
+      // 拿不到就不知道哪条机器人消息是自己发的，必须留痕，否则又变成「静默丢消息」
+      console.warn(`[qq] getSelfInfo 没给 openid，返回字段：${Object.keys(info ?? {}).join(',') || '空'}`)
+    }
+  } catch (error) {
     // 没权限或接口挂了就保持空，atMe 那边还有 is_you / bot 标记兜底
+    console.warn(`[qq] 取自己 openid 失败：${error?.message ?? error}`)
   }
 }
 

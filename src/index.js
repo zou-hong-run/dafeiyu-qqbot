@@ -596,6 +596,18 @@ initTrigger({
 // 官方 SDK 只有一个 message 事件，类型靠 event.message_type 区分。
 // 这里按私聊 / 群内 @ / 普通群消息三条路分流，下游逻辑和换 SDK 之前完全一样。
 onMessage((event) => {
+  // 别的机器人发的消息（新人欢迎语、播报这类）：只进记录，不回一句。
+  // 以前这类消息在 channel 层就被丢了，结果群里来过人我完全看不出来。
+  // 这里必须挡死「回复」，否则两个机器人会互相接话停不下来。
+  if (event.sender_is_bot) {
+    if (event.message_type === 'group' && event.group_id) {
+      const botText = (event.content ?? '').trim() || labelInbound(event) || '[附件]'
+      recordGroupMessage(event, botText)
+      console.log(`[入站] 群(机器人) 已记录：${botText.slice(0, 40)}`)
+    }
+    return
+  }
+
   if (event.message_type === 'private') {
     // 平台偶尔会重推同一条，没这道去重会回两遍
     if (!claim(event.message_id, 'private')) return
